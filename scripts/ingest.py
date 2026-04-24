@@ -13,7 +13,7 @@ from app.rag.pipeline import RAGPipeline  # noqa: E402
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest local Czech-history documents into Qdrant.")
+    parser = argparse.ArgumentParser(description="Ingest local documents into the rag-avatar Qdrant collection.")
     parser.add_argument("--path", default=None, help="File or directory to ingest. Defaults to RAW_DATA_DIR.")
     parser.add_argument("--no-reset", action="store_true", help="Do not recreate the Qdrant collection.")
     args = parser.parse_args()

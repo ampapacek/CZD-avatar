@@ -4,8 +4,9 @@ This file is a practical handoff for future agents working in this repo.
 
 ## What this project is
 
-- Czech-history RAG prototype with FastAPI backend and simple static frontend.
-- Main goal: retrieve passages from local documents and answer in Czech with grounded citations.
+- `rag-avatar` RAG prototype with FastAPI backend and simple static frontend.
+- The current default collection is Czech history, but the intended direction is multiple collections and multiple system prompts for different avatars.
+- Main goal: retrieve passages from local documents and answer with grounded citations.
 - Current stack:
   - FastAPI
   - local/remote Qdrant

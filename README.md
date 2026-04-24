@@ -1,6 +1,8 @@
-# Czech History RAG MVP
+# rag-avatar
 
-A practical first version of a Czech-history RAG chatbot/avatar. It ingests local historical documents, retrieves relevant passages with Qdrant plus BM25, and generates source-grounded answers through an OpenAI-compatible API such as OpenRouter.
+A practical RAG chatbot/avatar MVP. It ingests local document collections, retrieves relevant passages with Qdrant plus BM25, and generates source-grounded answers through an OpenAI-compatible API such as OpenRouter.
+
+The current default setup is a Czech-history avatar. The code is structured so later versions can use different document collections, different metadata, and different system prompts.
 
 ## Setup
 
@@ -42,9 +44,9 @@ historical_period: raný novověk
 Document text...
 ```
 
-## Wikipedia Test Data
+## Czech Wikipedia Test Data
 
-Wikipedia is only for testing before your own document collection is ready.
+Czech Wikipedia is only for testing the current Czech-history collection before your own document collection is ready.
 
 ```bash
 python scripts/download_wikipedia.py --limit 100
@@ -181,9 +183,14 @@ logs/download-wikipedia-20260424-104900.log
 
 Console output stays shorter, while the file logs persist questions, retrieval metadata, selected model, response timing, and generated answers.
 
+## Collections And Prompts
+
+For now, `data/raw/` acts as the active collection and `app/rag/prompts.py` contains the default system prompt. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
+
 ## Notes For Future Extensions
 
 - Replace `OpenAICompatibleLLM` with an Ollama/vLLM/OpenAI-compatible local server client.
 - Add a cross-encoder reranker after hybrid retrieval.
 - Add richer metadata extraction for your real historical archive.
 - Add evaluation sets and automated citation-grounding checks.
+- Add selectable collections and system prompts for different avatars.

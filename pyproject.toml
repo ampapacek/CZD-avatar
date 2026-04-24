@@ -1,7 +1,7 @@
 [project]
-name = "czech-history-rag-avatar"
+name = "rag-avatar"
 version = "0.1.0"
-description = "FastAPI RAG MVP for Czech history documents."
+description = "FastAPI RAG avatar MVP with replaceable document collections and prompts."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115.0",

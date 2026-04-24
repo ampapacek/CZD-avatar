@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     pipeline.close()
 
 
-app = FastAPI(title="Czech History RAG MVP", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path(__file__).parent / "static"
 ufal_logo_path = Path(__file__).resolve().parents[1] / "logo_ufal_110u.png"

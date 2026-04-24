@@ -38,7 +38,7 @@ class OpenAICompatibleLLM(LLMClient):
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "http://localhost:8000",
-                "X-Title": "Czech History RAG MVP",
+                "X-Title": "rag-avatar",
             },
             json={
                 "model": resolved_model,
@@ -74,7 +74,7 @@ class OpenAICompatibleLLM(LLMClient):
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                     "HTTP-Referer": "http://localhost:8000",
-                    "X-Title": "Czech History RAG MVP",
+                    "X-Title": "rag-avatar",
                 },
                 json=payload,
             ) as response:

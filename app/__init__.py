@@ -1,2 +1,1 @@
-"""Czech-history RAG MVP application package."""
-
+"""rag-avatar application package."""
