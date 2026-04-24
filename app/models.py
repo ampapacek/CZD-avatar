@@ -1,0 +1,83 @@
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+AnswerStyle = Literal["laik", "ucitel", "historik"]
+AnswerLength = Literal["short", "medium", "long"]
+
+
+class IngestRequest(BaseModel):
+    path: str | None = Field(default=None, description="Directory with .txt, .md, and .pdf documents.")
+    reset: bool = Field(default=True, description="Recreate the Qdrant collection before ingesting.")
+
+
+class IngestResponse(BaseModel):
+    documents_loaded: int
+    chunks_indexed: int
+    collection: str
+
+
+class RetrieveRequest(BaseModel):
+    question: str
+    top_k: int | None = Field(default=None, ge=0, le=50)
+    dense_weight: float = Field(default=0.7, ge=0.0, le=1.0)
+    bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class ChatRequest(BaseModel):
+    question: str
+    style: AnswerStyle | None = None
+    length: AnswerLength | None = None
+    custom_instructions: str | None = None
+    conversation_history: list[dict[str, str]] = Field(default_factory=list)
+    top_k: int | None = Field(default=None, ge=0, le=50)
+    model: str | None = None
+    dense_weight: float = Field(default=0.7, ge=0.0, le=1.0)
+    bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class Source(BaseModel):
+    citation_id: str
+    chunk_id: str
+    title: str | None = None
+    source_path: str | None = None
+    source_path_display: str | None = None
+    page_number: int | None = None
+    url: str | None = None
+    document_url: str | None = None
+    source_url: str | None = None
+    source_name: str | None = None
+    score: float | None = None
+
+
+class RetrievedChunk(BaseModel):
+    citation_id: str
+    chunk_id: str
+    text: str
+    metadata: dict[str, Any]
+    score: float
+    dense_score: float | None = None
+    bm25_score: float | None = None
+
+
+class RetrieveResponse(BaseModel):
+    question: str
+    retrieved_chunks: list[RetrievedChunk]
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[Source]
+    retrieved_chunks: list[RetrievedChunk]
+    model: str
+    response_time_seconds: float
+
+
+class HealthResponse(BaseModel):
+    status: str
+    collection: str

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CZDEMOS4AI historicky avatar">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1a7d72"/>
+      <stop offset="0.58" stop-color="#0f5f57"/>
+      <stop offset="1" stop-color="#e8772e"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#bg)"/>
+  <path d="M21 19c4.5-2.2 8.7-2.2 13 0v23.5c-4.3-2.2-8.5-2.2-13 0V19Z" fill="none" stroke="#fff7ef" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M43 19c-4.5-2.2-8.7-2.2-13 0v23.5c4.3-2.2 8.5-2.2 13 0V19Z" fill="none" stroke="#fff7ef" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M32 19v24.5" stroke="#fff7ef" stroke-width="3.2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CZDEMOS4AI Historický avatar</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div class="brand-block">
+            <div class="brand-copy">
+              <h1>CZDEMOS4AI Historický avatar</h1>
+              <div class="brand-meta">
+                <img class="ufal-logo" src="/logo_ufal_110u.png" alt="UFAL" />
+              </div>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button id="conversationButton" class="icon-button" type="button" title="Konverzace" aria-label="Konverzace">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H17.5A2.5 2.5 0 0 1 20 6.5V13.5A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z"></path>
+                <path d="M8 9h8"></path>
+                <path d="M8 12h5"></path>
+              </svg>
+            </button>
+            <button id="historyButton" class="icon-button" type="button" title="Historie" aria-label="Historie">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                <path d="M3 4v4h4"></path>
+                <path d="M12 7.5v5l3.2 1.9"></path>
+              </svg>
+            </button>
+            <button id="helpButton" class="icon-button" type="button" title="Nápověda" aria-label="Nápověda">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
+                <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
+              </svg>
+            </button>
+            <button id="themeToggle" class="icon-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
+              <span class="icon-sun" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="4.2"></circle>
+                  <path d="M12 2.5v2.2"></path>
+                  <path d="M12 19.3v2.2"></path>
+                  <path d="M4.93 4.93l1.56 1.56"></path>
+                  <path d="M17.51 17.51l1.56 1.56"></path>
+                  <path d="M2.5 12h2.2"></path>
+                  <path d="M19.3 12h2.2"></path>
+                  <path d="M4.93 19.07l1.56-1.56"></path>
+                  <path d="M17.51 6.49l1.56-1.56"></path>
+                </svg>
+              </span>
+              <span class="icon-moon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12.8A8.9 8.9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+                </svg>
+              </span>
+            </button>
+            <button id="healthButton" class="icon-button" type="button" title="Zkontrolovat API" aria-label="Zkontrolovat API">
+              <svg class="icon-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m12 20.4-1.35-1.22C5.4 14.44 2 11.36 2 7.58 2 4.5 4.42 2 7.5 2c1.74 0 3.41.81 4.5 2.09C13.09 2.81 14.76 2 16.5 2 19.58 2 22 4.5 22 7.58c0 3.78-3.4 6.86-8.65 11.6Z"></path>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <form id="chatForm" class="composer">
+          <label class="field question-field">
+            <span>Otázka</span>
+            <textarea id="question" rows="4" required>Jaký byl význam husitských válek?</textarea>
+          </label>
+
+          <div class="controls">
+            <label class="field">
+              <span>Profil</span>
+              <select id="style">
+                <option value="laik">laik</option>
+                <option value="ucitel" selected>učitel</option>
+                <option value="historik">historik</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Délka</span>
+              <select id="length">
+                <option value="short">krátká</option>
+                <option value="medium" selected>střední</option>
+                <option value="long">dlouhá</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field inline-field retrieve-toggle">
+            <input id="retrieveOnly" type="checkbox" />
+            <span>Pouze vyhledat zdroje</span>
+          </label>
+
+          <details class="advanced">
+            <summary>Pokročilé nastavení</summary>
+            <div class="advanced-grid">
+              <label class="field">
+                <span>Model</span>
+                <select id="model"></select>
+              </label>
+              <label class="field">
+                <span>Embeddingy</span>
+                <input id="embeddingModel" type="text" readonly />
+              </label>
+              <label class="field">
+                <span>Vlastní model</span>
+                <input id="customModel" type="text" placeholder="Např. meta-llama/..." />
+              </label>
+              <label class="field">
+                <span>Top-k: <output id="topKValue">10</output></span>
+                <input id="topK" type="range" min="0" max="50" step="1" value="10" />
+              </label>
+              <label class="field">
+                <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
+                <input id="denseWeight" type="range" min="0" max="1" step="0.05" value="0.70" />
+              </label>
+              <label class="field">
+                <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
+                <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
+              </label>
+              <label class="field">
+                <span>Min. skóre</span>
+                <input id="minScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.30" />
+              </label>
+              <label class="field">
+                <span>Min. vůči nejlepšímu</span>
+                <input id="minRelativeScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.50" />
+              </label>
+            </div>
+          </details>
+
+          <label class="field">
+            <span>Vlastní instrukce</span>
+            <input id="customInstructions" type="text" placeholder="Např. Zaměř se na příčiny a důsledky." />
+          </label>
+
+          <button id="submitButton" class="primary" type="submit">Odpovědět</button>
+        </form>
+
+        <section class="answer-panel" aria-live="polite">
+          <div id="status" class="status">Připraveno.</div>
+          <div id="loadingIndicator" class="loading-indicator" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="loading-copy">
+              <span>Pracuji na odpovědi</span>
+              <span class="loading-dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+            </span>
+          </div>
+          <article id="answer" class="answer"></article>
+        </section>
+      </section>
+
+      <aside class="sources-panel">
+        <h2>Zdroje</h2>
+        <div id="sources" class="sources"></div>
+      </aside>
+    </main>
+
+    <dialog id="helpDialog" class="help-dialog">
+      <div class="help-content">
+        <div class="help-header">
+          <h2>Nápověda</h2>
+          <button id="closeHelpButton" class="icon-button help-close" type="button" aria-label="Zavřít nápovědu" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="help-body">
+          <p>Tento avatar odpovídá nad vašimi historickými dokumenty a ukazuje nalezené zdroje vpravo.</p>
+          <p>`Pouze vyhledat zdroje` vrátí jen nalezené chunky bez generování odpovědi.</p>
+          <p>V `Pokročilém nastavení` lze změnit model, počet výsledků, váhu embeddingů a BM25 i prahové skóre.</p>
+          <p>U každého zdroje lze otevřít celý úryvek a kliknout na `Dokument` nebo `Zdroj`.</p>
+          <p>Historie se zatím ukládá jen lokálně v tomto prohlížeči.</p>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="historyDialog" class="history-dialog">
+      <div class="history-shell">
+        <div class="history-dialog-header">
+          <div>
+            <h2>Historie</h2>
+            <p>Uložené dotazy, použitá nastavení a nalezené dokumenty.</p>
+            <p>Historie se zatím ukládá jen lokálně v tomto prohlížeči.</p>
+          </div>
+          <div class="history-dialog-actions">
+            <button id="deleteHistoryItemButton" type="button">Smazat položku</button>
+            <button id="clearHistoryButton" type="button">Smazat vše</button>
+            <button id="closeHistoryButton" class="icon-button help-close" type="button" aria-label="Zavřít historii" title="Zavřít">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M6 6l12 12"></path>
+                <path d="M18 6 6 18"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="history-dialog-body">
+          <aside id="historyList" class="history-list history-list-panel"></aside>
+          <section id="historyDetail" class="history-detail">
+            <p class="history-empty">Vyber položku z historie.</p>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="conversationDialog" class="conversation-dialog">
+      <div class="conversation-shell">
+        <div class="history-dialog-header">
+          <div>
+            <h2>Konverzace</h2>
+            <p>Navazující otázky nad stejným tématem se drží v jedné konverzaci.</p>
+            <p>Konverzace se zatím ukládají jen lokálně v tomto prohlížeči.</p>
+          </div>
+          <div class="history-dialog-actions">
+            <button id="newConversationButton" type="button">Nová konverzace</button>
+            <button id="deleteConversationButton" type="button">Smazat konverzaci</button>
+            <button id="closeConversationButton" class="icon-button help-close" type="button" aria-label="Zavřít konverzaci" title="Zavřít">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M6 6l12 12"></path>
+                <path d="M18 6 6 18"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="conversation-dialog-body">
+          <aside id="conversationList" class="history-list conversation-list-panel"></aside>
+          <section class="conversation-main">
+            <div id="conversationMeta" class="conversation-meta"></div>
+            <div id="conversationMessages" class="conversation-messages"></div>
+            <form id="conversationForm" class="conversation-composer">
+              <label class="field">
+                <span>Pokračování dotazu</span>
+                <textarea id="conversationQuestion" rows="3" placeholder="Zeptej se navazující otázku." required></textarea>
+              </label>
+              <div class="conversation-composer-actions">
+                <span class="conversation-note">Použijí se aktuální nastavení z hlavního formuláře.</span>
+                <button id="conversationSubmitButton" class="primary" type="submit">Odeslat</button>
+              </div>
+            </form>
+          </section>
+          <aside class="conversation-sources-panel">
+            <h3>Zdroje poslední odpovědi</h3>
+            <div id="conversationSources" class="sources conversation-sources"></div>
+          </aside>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
