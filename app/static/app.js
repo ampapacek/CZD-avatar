@@ -16,6 +16,7 @@ const minScore = document.querySelector("#minScore");
 const minRelativeScore = document.querySelector("#minRelativeScore");
 const embeddingModel = document.querySelector("#embeddingModel");
 const submitButton = document.querySelector("#submitButton");
+const randomQuestionButton = document.querySelector("#randomQuestionButton");
 const statusEl = document.querySelector("#status");
 const loadingIndicator = document.querySelector("#loadingIndicator");
 const answerEl = document.querySelector("#answer");
@@ -42,8 +43,8 @@ const closeConversationButton = document.querySelector("#closeConversationButton
 const helpButton = document.querySelector("#helpButton");
 const helpDialog = document.querySelector("#helpDialog");
 const closeHelpButton = document.querySelector("#closeHelpButton");
-const healthButton = document.querySelector("#healthButton");
 const themeToggle = document.querySelector("#themeToggle");
+const themeToggleLabel = document.querySelector("#themeToggleLabel");
 const HISTORY_STORAGE_KEY = "czdemos4ai-history";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const STYLE_LABELS = {
@@ -80,13 +81,6 @@ async function loadSettings() {
   applyTheme(localStorage.getItem("theme") || "light");
   renderHistory();
   renderConversationWorkspace();
-}
-
-async function checkHealth() {
-  const response = await fetch("/health");
-  const data = await response.json();
-  statusEl.className = "status";
-  statusEl.textContent = `API: ${data.status}, kolekce: ${data.collection}`;
 }
 
 form.addEventListener("submit", async (event) => {
@@ -157,7 +151,27 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-healthButton.addEventListener("click", checkHealth);
+randomQuestionButton.addEventListener("click", async () => {
+  randomQuestionButton.disabled = true;
+  statusEl.className = "status";
+  statusEl.textContent = "Vybírám náhodnou otázku...";
+  try {
+    const response = await fetch("/questions/random");
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");
+    }
+    question.value = data.question || "";
+    question.focus();
+    statusEl.textContent = "Náhodná otázka je vložená. Spusť odpověď tlačítkem Odpovědět.";
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = error.message;
+  } finally {
+    randomQuestionButton.disabled = false;
+  }
+});
+
 helpButton.addEventListener("click", () => {
   helpDialog.showModal();
 });
@@ -379,6 +393,9 @@ function applyTheme(theme) {
   document.body.dataset.theme = theme;
   themeToggle.title = theme === "dark" ? "Přepnout na světlý motiv" : "Přepnout na tmavý motiv";
   themeToggle.setAttribute("aria-label", themeToggle.title);
+  if (themeToggleLabel) {
+    themeToggleLabel.textContent = theme === "dark" ? "Světlý" : "Tmavý";
+  }
 }
 
 function nullableNumber(value) {

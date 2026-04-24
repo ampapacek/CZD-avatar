@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import hashlib
+import random
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -54,6 +55,7 @@ app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path(__file__).parent / "static"
 ufal_logo_path = Path(__file__).resolve().parents[1] / "logo_ufal_110u.png"
+questions_path = Path(__file__).resolve().parents[1] / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
@@ -93,6 +95,16 @@ def get_public_settings() -> dict[str, object]:
             "top_k_max": 50,
         },
     }
+
+
+@app.get("/questions/random")
+def random_question() -> dict[str, str]:
+    if not questions_path.exists():
+        raise HTTPException(status_code=404, detail="questions.txt was not found.")
+    questions = [line.strip() for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not questions:
+        raise HTTPException(status_code=404, detail="questions.txt does not contain any questions.")
+    return {"question": random.choice(questions)}
 
 
 @app.post("/ingest", response_model=IngestResponse)

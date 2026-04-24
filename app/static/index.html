@@ -13,35 +13,39 @@
         <header class="topbar">
           <div class="brand-block">
             <div class="brand-copy">
-              <h1>CZDEMOS4AI Historický avatar</h1>
+              <p class="brand-kicker">CZDEMOS4AI</p>
+              <h1>Historický avatar</h1>
               <div class="brand-meta">
                 <img class="ufal-logo" src="/logo_ufal_110u.png" alt="UFAL" />
               </div>
             </div>
           </div>
           <div class="topbar-actions">
-            <button id="conversationButton" class="icon-button" type="button" title="Konverzace" aria-label="Konverzace">
+            <button id="conversationButton" class="topbar-button" type="button" title="Konverzace: pokračujte navazujícími otázkami ve stejném vlákně." aria-label="Konverzace: pokračujte navazujícími otázkami ve stejném vlákně.">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H17.5A2.5 2.5 0 0 1 20 6.5V13.5A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z"></path>
                 <path d="M8 9h8"></path>
                 <path d="M8 12h5"></path>
               </svg>
+              <span>Konverzace</span>
             </button>
-            <button id="historyButton" class="icon-button" type="button" title="Historie" aria-label="Historie">
+            <button id="historyButton" class="topbar-button" type="button" title="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje." aria-label="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje.">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 12a9 9 0 1 0 3-6.7"></path>
                 <path d="M3 4v4h4"></path>
                 <path d="M12 7.5v5l3.2 1.9"></path>
               </svg>
+              <span>Historie</span>
             </button>
-            <button id="helpButton" class="icon-button" type="button" title="Nápověda" aria-label="Nápověda">
+            <button id="helpButton" class="topbar-button" type="button" title="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení." aria-label="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení.">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="9"></circle>
                 <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
                 <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
               </svg>
+              <span>Nápověda</span>
             </button>
-            <button id="themeToggle" class="icon-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
+            <button id="themeToggle" class="topbar-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
               <span class="icon-sun" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="4.2"></circle>
@@ -60,11 +64,7 @@
                   <path d="M21 12.8A8.9 8.9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
                 </svg>
               </span>
-            </button>
-            <button id="healthButton" class="icon-button" type="button" title="Zkontrolovat API" aria-label="Zkontrolovat API">
-              <svg class="icon-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m12 20.4-1.35-1.22C5.4 14.44 2 11.36 2 7.58 2 4.5 4.42 2 7.5 2c1.74 0 3.41.81 4.5 2.09C13.09 2.81 14.76 2 16.5 2 19.58 2 22 4.5 22 7.58c0 3.78-3.4 6.86-8.65 11.6Z"></path>
-              </svg>
+              <span id="themeToggleLabel">Motiv</span>
             </button>
           </div>
         </header>
@@ -74,6 +74,11 @@
             <span>Otázka</span>
             <textarea id="question" rows="4" required>Jaký byl význam husitských válek?</textarea>
           </label>
+          <div class="question-actions">
+            <button id="randomQuestionButton" class="secondary" type="button" title="Vybere náhodnou otázku ze souboru questions.txt a vloží ji do pole.">
+              Náhodná otázka
+            </button>
+          </div>
 
           <div class="controls">
             <label class="field">
@@ -142,7 +147,9 @@
             <input id="customInstructions" type="text" placeholder="Např. Zaměř se na příčiny a důsledky." />
           </label>
 
-          <button id="submitButton" class="primary" type="submit">Odpovědět</button>
+          <div class="form-actions">
+            <button id="submitButton" class="primary" type="submit">Odpovědět</button>
+          </div>
         </form>
 
         <section class="answer-panel" aria-live="polite">
@@ -182,9 +189,22 @@
         <div class="help-body">
           <p>Tento avatar odpovídá nad vašimi historickými dokumenty a ukazuje nalezené zdroje vpravo.</p>
           <p>`Pouze vyhledat zdroje` vrátí jen nalezené chunky bez generování odpovědi.</p>
-          <p>V `Pokročilém nastavení` lze změnit model, počet výsledků, váhu embeddingů a BM25 i prahové skóre.</p>
-          <p>U každého zdroje lze otevřít celý úryvek a kliknout na `Dokument` nebo `Zdroj`.</p>
-          <p>Historie se zatím ukládá jen lokálně v tomto prohlížeči.</p>
+          <div class="help-card">
+            <h3>Jak odpovídá</h3>
+            <p>Nejdřív vyhledá relevantní úryvky, potom z nich skládá odpověď. Citace v textu jsou poznámky pod čarou; použité zdroje se zvýrazní vpravo.</p>
+          </div>
+          <div class="help-card">
+            <h3>Režimy práce</h3>
+            <p>`Konverzace` slouží pro navazující otázky. `Historie` ukazuje uložené dotazy, odpovědi, nastavení a nalezené dokumenty.</p>
+          </div>
+          <div class="help-card">
+            <h3>Nastavení</h3>
+            <p>V `Pokročilém nastavení` lze změnit model, počet výsledků, váhu embeddingů a BM25 i prahové skóre.</p>
+          </div>
+          <div class="help-card">
+            <h3>Zdroje a soukromí</h3>
+            <p>U každého zdroje lze otevřít celý úryvek a kliknout na `Dokument` nebo `Zdroj`. Historie i konverzace se zatím ukládají jen lokálně v tomto prohlížeči.</p>
+          </div>
         </div>
       </div>
     </dialog>
