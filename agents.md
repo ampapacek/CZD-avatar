@@ -24,10 +24,17 @@ This file is a practical handoff for future agents working in this repo.
 - `app/static/` - frontend HTML/CSS/JS
 - `scripts/ingest.py` - CLI ingestion
 - `scripts/ask.py` - CLI ask
+- `scripts/batch_answers.py` - batch question/answer runner
 - `scripts/download_wikipedia.py` - test-data downloader
 - `data/raw/` - source documents
 - `data/processed/chunks.jsonl` - persisted chunk catalog for BM25/debug
 - `data/qdrant/` - local Qdrant storage
+
+## Repo hygiene
+
+- `answers_avatar*.txt` and `notes.md` are ignored scratch/output files.
+- `data/raw/` is mostly ignored, but `data/raw/agent.md` is intentionally tracked and should stay retrievable.
+- `questions.txt` is reused by the random-question endpoint, the Wikipedia downloader, and `scripts/batch_answers.py`.
 
 ## How to run
 
@@ -91,7 +98,10 @@ python scripts/ask.py "Jaký byl význam husitských válek?"
 - Dark mode
 - Help modal
 - Health icon button
+- Streaming chat responses from `/chat/stream`
+- Conversation workspace with saved threads in `localStorage`
 - Local browser history stored in `localStorage`
+- Random question button backed by `/questions/random`
 - Expandable source chunks
 - Highlighting of query terms inside source excerpts and full chunks
   - this is lexical highlighting based on the current question
@@ -175,7 +185,9 @@ Do not mix vectors from different embedding models in one collection.
 - `app/rag/retrieval.py`
 - `app/rag/documents.py`
 - `app/rag/prompts.py`
+- `app/rag/llm.py`
 - `app/rag/vector_store.py`
+- `app/static/index.html`
 - `app/static/app.js`
 - `app/static/styles.css`
 - `app/main.py`
@@ -198,7 +210,6 @@ Defined in `app/main.py`:
 ## Nice next improvements
 
 - Show the most relevant sentence window around matches, not just raw chunk previews
-- Streaming responses in the frontend
 - Better semantic explanation of why a chunk matched
 - Optional reranker after hybrid retrieval
 - More robust evaluation scripts for grounding quality
