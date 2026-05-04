@@ -12,6 +12,7 @@ from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
 from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
+from app.rag.msearch import MSearchRetriever
 from app.rag.prompts import build_messages
 from app.rag.retrieval import HybridRetriever
 from app.rag.vector_store import QdrantVectorStore
@@ -32,6 +33,7 @@ class RAGPipeline:
         self._embeddings: SentenceTransformerEmbeddings | None = None
         self._vector_store: QdrantVectorStore | None = None
         self._retriever: HybridRetriever | None = None
+        self._msearch_retriever: MSearchRetriever | None = None
         self._llm: OpenAICompatibleLLM | None = None
 
     @property
@@ -58,6 +60,12 @@ class RAGPipeline:
         if self._retriever is None:
             self._retriever = HybridRetriever(self.embeddings, self.vector_store, self.settings.chunk_catalog_path)
         return self._retriever
+
+    @property
+    def msearch_retriever(self) -> MSearchRetriever:
+        if self._msearch_retriever is None:
+            self._msearch_retriever = MSearchRetriever(self.settings)
+        return self._msearch_retriever
 
     @property
     def llm(self) -> OpenAICompatibleLLM:
@@ -94,8 +102,13 @@ class RAGPipeline:
         bm25_weight: float = 0.3,
         min_score: float | None = None,
         min_relative_score: float | None = None,
+        retrieval_backend: str | None = None,
+        msearch_collection: str | None = None,
+        msearch_mode: str | None = None,
+        msearch_min_confidence: float | None = None,
     ) -> list[dict[str, Any]]:
         resolved_top_k = self.settings.top_k if top_k is None else top_k
+        resolved_backend = retrieval_backend or self.settings.retrieval_backend
         resolved_min_score = self.settings.min_score if min_score is None else min_score
         resolved_min_relative_score = (
             self.settings.min_relative_score if min_relative_score is None else min_relative_score
@@ -107,6 +120,28 @@ class RAGPipeline:
                 resolved_top_k,
             )
             return []
+
+        if resolved_backend == "msearch":
+            chunks = self.msearch_retriever.retrieve(
+                question,
+                resolved_top_k,
+                collection_id=msearch_collection,
+                mode=msearch_mode,
+                min_confidence=msearch_min_confidence,
+            )
+            logger.info(
+                "Retrieved %s chunks from mSearch for question=%r top_k=%s collection=%s mode=%s min_confidence=%s",
+                len(chunks),
+                question,
+                resolved_top_k,
+                msearch_collection or self.settings.msearch_collection,
+                msearch_mode or self.settings.msearch_mode,
+                self.settings.msearch_min_confidence if msearch_min_confidence is None else msearch_min_confidence,
+            )
+            return chunks
+
+        if resolved_backend != "local":
+            raise RuntimeError(f"Unknown retrieval backend: {resolved_backend}")
 
         chunks = self.retriever.retrieve(
             question,
@@ -146,6 +181,10 @@ class RAGPipeline:
         style: str,
         length: str,
         custom_instructions: str | None = None,
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
+        style_prompts: dict[str, str] | None = None,
+        length_prompts: dict[str, str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         top_k: int | None = None,
         model: str | None = None,
@@ -153,6 +192,10 @@ class RAGPipeline:
         bm25_weight: float = 0.3,
         min_score: float | None = None,
         min_relative_score: float | None = None,
+        retrieval_backend: str | None = None,
+        msearch_collection: str | None = None,
+        msearch_mode: str | None = None,
+        msearch_min_confidence: float | None = None,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -163,6 +206,10 @@ class RAGPipeline:
             bm25_weight=bm25_weight,
             min_score=min_score,
             min_relative_score=min_relative_score,
+            retrieval_backend=retrieval_backend,
+            msearch_collection=msearch_collection,
+            msearch_mode=msearch_mode,
+            msearch_min_confidence=msearch_min_confidence,
         )
         messages = build_messages(
             question,
@@ -170,6 +217,10 @@ class RAGPipeline:
             style,
             length,
             custom_instructions,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+            style_prompts=style_prompts,
+            length_prompts=length_prompts,
             conversation_history=conversation_history,
         )
         answer = self.llm.generate(messages, model=resolved_model)

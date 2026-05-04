@@ -25,17 +25,8 @@ def available_lengths() -> list[str]:
     return list(LENGTH_PROMPTS)
 
 
-def build_messages(
-    question: str,
-    retrieved_chunks: list[dict[str, Any]],
-    style: str,
-    length: str,
-    custom_instructions: str | None = None,
-    conversation_history: list[dict[str, str]] | None = None,
-) -> list[dict[str, str]]:
-    context = _format_context(retrieved_chunks)
-    custom = custom_instructions.strip() if custom_instructions else "Žádné."
-    system = f"""
+def default_system_prompt_template() -> str:
+    return """
 Jsi pečlivý historický asistent pro RAG systém.
 
 Úkol:
@@ -52,14 +43,8 @@ Jsi pečlivý historický asistent pro RAG systém.
 - Nevymýšlej bibliografické údaje ani citace.
 - Nemusíš použít žádnou nalezenou pasáž, pokud není skutečně relevantní. Slabé, okrajové nebo zavádějící pasáže vynech.
 
-Styl: {STYLE_PROMPTS[style]}
-Délka: {LENGTH_PROMPTS[length]}
-Vlastní instrukce uživatele: {custom}
-
-Profil odpovědi:
-- `laik`: odpověz jednoduše a přirozeně; citace nejsou nutné ani očekávané.
-- `ucitel`: cituj relevantní zdrojové chunky přirozeně v konkrétních větách pomocí poznámek pod čarou.
-- `historik`: hlavně zdrojové chunky; každé podstatné tvrzení cituj, používej přesnější označení dokumentů/autorů/institucí, pokud jsou v metadatech dostupné.
+Styl: {style}
+Délka: {length}
 
 Forma odpovědi:
 - Piš v Markdownu.
@@ -75,13 +60,55 @@ Forma odpovědi:
 - Neuzavírej odpověď nabídkami typu "Pokud chceš..." nebo podobnými dodatky. Odpověz přímo a přirozeně.
 - Pokud přidáváš obecné znalosti mimo nalezený kontext, uveď to přirozeně. V profilu `ucitel` je můžeš použít bez nucené zvláštní značky; v profilu `historik` buď opatrný a označ nejistotu, pokud ji nelze podložit.
 """.strip()
-    user = f"""
+
+
+def default_system_prompt(style: str, length: str) -> str:
+    return _render_system_prompt_template(default_system_prompt_template(), style=style, length=length)
+
+
+def default_user_prompt_template() -> str:
+    return """
 Otázka:
 {question}
 
+Vlastní instrukce uživatele:
+{custom_instructions}
+
 Nalezený kontext:
-{context if context else "Nebyly nalezeny žádné relevantní pasáže."}
+{context}
 """.strip()
+
+
+def build_messages(
+    question: str,
+    retrieved_chunks: list[dict[str, Any]],
+    style: str,
+    length: str,
+    custom_instructions: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
+    system_prompt: str | None = None,
+    user_prompt_template: str | None = None,
+    style_prompts: dict[str, str] | None = None,
+    length_prompts: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    context = _format_context(retrieved_chunks)
+    context_for_prompt = context if context else "Nebyly nalezeny žádné relevantní pasáže."
+    custom = custom_instructions.strip() if custom_instructions else "Žádné."
+    system_template = (system_prompt or "").strip() or default_system_prompt_template()
+    system = _render_system_prompt_template(
+        system_template,
+        style=style,
+        length=length,
+        style_prompts=style_prompts,
+        length_prompts=length_prompts,
+    )
+    template = (user_prompt_template or "").strip() or default_user_prompt_template()
+    user = _render_user_prompt_template(
+        template,
+        question=question,
+        context=context_for_prompt,
+        custom_instructions=custom,
+    )
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for turn in (conversation_history or [])[-8:]:
         role = turn.get("role")
@@ -91,6 +118,37 @@ Nalezený kontext:
         messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": user})
     return messages
+
+
+def _render_system_prompt_template(
+    template: str,
+    style: str,
+    length: str,
+    style_prompts: dict[str, str] | None = None,
+    length_prompts: dict[str, str] | None = None,
+) -> str:
+    resolved_style_prompts = {**STYLE_PROMPTS, **(style_prompts or {})}
+    resolved_length_prompts = {**LENGTH_PROMPTS, **(length_prompts or {})}
+    try:
+        return template.format(
+            style=resolved_style_prompts[style],
+            length=resolved_length_prompts[length],
+            style_key=style,
+            length_key=length,
+        ).strip()
+    except (KeyError, ValueError):
+        return template.strip()
+
+
+def _render_user_prompt_template(template: str, question: str, context: str, custom_instructions: str) -> str:
+    try:
+        return template.format(
+            question=question,
+            context=context,
+            custom_instructions=custom_instructions,
+        ).strip()
+    except (KeyError, ValueError):
+        return template.strip()
 
 
 def _format_context(chunks: list[dict[str, Any]]) -> str:

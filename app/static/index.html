@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CZDEMOS4AI Historický avatar</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=msearch-9" />
   </head>
   <body>
     <main class="shell">
@@ -116,35 +116,90 @@
                 <input id="embeddingModel" type="text" readonly />
               </label>
               <label class="field">
+                <span>Vyhledávání</span>
+                <select id="retrievalBackend">
+                  <option value="msearch">mSearch</option>
+                  <option value="local">Lokální databáze</option>
+                </select>
+              </label>
+              <label class="field msearch-control">
+                <span>Kolekce</span>
+                <select id="msearchCollection"></select>
+              </label>
+              <label class="field msearch-control">
+                <span>Režim mSearch</span>
+                <select id="msearchMode">
+                  <option value="hybrid">hybrid</option>
+                  <option value="semantic">semantic</option>
+                  <option value="keyword">keyword</option>
+                </select>
+              </label>
+              <label class="field msearch-control">
+                <span>Min. confidence</span>
+                <input id="msearchMinConfidence" type="number" min="0" max="1" step="0.05" placeholder="Volitelné" />
+              </label>
+              <label class="field custom-model-field" hidden>
                 <span>Vlastní model</span>
                 <input id="customModel" type="text" placeholder="Např. meta-llama/..." />
               </label>
               <label class="field">
-                <span>Top-k: <output id="topKValue">10</output></span>
+                <span>Dokumentů: <output id="topKValue">10</output></span>
                 <input id="topK" type="range" min="0" max="50" step="1" value="10" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
                 <input id="denseWeight" type="range" min="0" max="1" step="0.05" value="0.70" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
                 <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Min. skóre</span>
                 <input id="minScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.30" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Min. vůči nejlepšímu</span>
                 <input id="minRelativeScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.50" />
               </label>
+              <details class="prompt-section">
+                <summary>Prompty</summary>
+                <div class="prompt-section-body">
+                  <div class="prompt-controls">
+                    <label class="field">
+                      <span>Uložený prompt</span>
+                      <select id="promptPreset"></select>
+                    </label>
+                    <div class="prompt-actions">
+                      <button id="savePromptButton" class="secondary" type="button">Uložit</button>
+                      <button id="resetPromptButton" class="secondary" type="button">Výchozí</button>
+                      <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
+                    </div>
+                  </div>
+                  <label class="field prompt-editor">
+                    <span>Systémový prompt ({style}, {length})</span>
+                    <textarea id="systemPrompt" rows="12"></textarea>
+                  </label>
+                  <label class="field prompt-editor">
+                    <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
+                    <textarea id="stylePromptDescription" rows="4"></textarea>
+                  </label>
+                  <label class="field prompt-editor">
+                    <span id="lengthPromptDescriptionLabel">Popis vybrané délky</span>
+                    <textarea id="lengthPromptDescription" rows="4"></textarea>
+                  </label>
+                  <label class="field prompt-editor">
+                    <span>Plný prompt</span>
+                    <textarea id="userPromptTemplate" rows="8"></textarea>
+                  </label>
+                </div>
+              </details>
             </div>
           </details>
 
           <label class="field">
             <span>Vlastní instrukce</span>
-            <input id="customInstructions" type="text" placeholder="Např. Zaměř se na příčiny a důsledky." />
+            <input id="customInstructions" type="text" placeholder="Vloží se do promptu místo {custom_instructions}." />
           </label>
 
           <div class="form-actions">
@@ -280,6 +335,6 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=msearch-9"></script>
   </body>
 </html>

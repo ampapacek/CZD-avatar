@@ -8,15 +8,34 @@ import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.models import ChatRequest, ChatResponse, HealthResponse, IngestRequest, IngestResponse, RetrieveRequest, RetrieveResponse
+from app.models import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    IngestRequest,
+    IngestResponse,
+    PromptPreset,
+    PromptPresetSaveRequest,
+    RetrieveRequest,
+    RetrieveResponse,
+)
 from app.rag.pipeline import RAGPipeline
-from app.rag.prompts import available_lengths, available_styles, build_messages
+from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
+from app.rag.prompts import (
+    LENGTH_PROMPTS,
+    STYLE_PROMPTS,
+    available_lengths,
+    available_styles,
+    build_messages,
+    default_system_prompt_template,
+    default_user_prompt_template,
+)
 
 
 MODEL_PRESETS = [
@@ -87,6 +106,8 @@ def get_public_settings() -> dict[str, object]:
         "llm_model": settings.openrouter_model,
         "model_presets": MODEL_PRESETS,
         "collection": settings.qdrant_collection,
+        "retrieval_backend": settings.retrieval_backend,
+        "retrieval_backends": ["msearch", "local"],
         "retrieval_defaults": {
             "dense_weight": 0.7,
             "bm25_weight": 0.3,
@@ -94,6 +115,20 @@ def get_public_settings() -> dict[str, object]:
             "min_relative_score": settings.min_relative_score,
             "top_k_min": 0,
             "top_k_max": 50,
+        },
+        "msearch_defaults": {
+            "collection": settings.msearch_collection,
+            "collection_presets": pipeline.msearch_retriever.collection_presets(),
+            "mode": settings.msearch_mode,
+            "modes": ["hybrid", "semantic", "keyword"],
+            "max_results": settings.msearch_max_results,
+            "min_confidence": settings.msearch_min_confidence,
+        },
+        "prompt_defaults": {
+            "system_prompt": default_system_prompt_template(),
+            "user_prompt_template": default_user_prompt_template(),
+            "style_prompts": STYLE_PROMPTS,
+            "length_prompts": LENGTH_PROMPTS,
         },
     }
 
@@ -106,6 +141,35 @@ def random_question() -> dict[str, str]:
     if not questions:
         raise HTTPException(status_code=404, detail="Collection questions file does not contain any questions.")
     return {"question": random.choice(questions)}
+
+
+@app.get("/prompt-presets", response_model=list[PromptPreset])
+def get_prompt_presets() -> list[PromptPreset]:
+    return [PromptPreset(**preset) for preset in load_prompt_presets(settings.prompt_presets_path)]
+
+
+@app.post("/prompt-presets", response_model=PromptPreset)
+def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Prompt preset name is required.")
+    preset = save_prompt_preset(
+        settings.prompt_presets_path,
+        name=name,
+        system_prompt=request.system_prompt,
+        user_prompt_template=request.user_prompt_template,
+        style_prompts=request.style_prompts,
+        length_prompts=request.length_prompts,
+        preset_id=request.id,
+    )
+    return PromptPreset(**preset)
+
+
+@app.delete("/prompt-presets/{preset_id}", status_code=204)
+def remove_prompt_preset(preset_id: str) -> Response:
+    if not delete_prompt_preset(settings.prompt_presets_path, preset_id):
+        raise HTTPException(status_code=404, detail="Prompt preset not found.")
+    return Response(status_code=204)
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -128,6 +192,10 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             bm25_weight=request.bm25_weight,
             min_score=request.min_score,
             min_relative_score=request.min_relative_score,
+            retrieval_backend=request.retrieval_backend,
+            msearch_collection=request.msearch_collection,
+            msearch_mode=request.msearch_mode,
+            msearch_min_confidence=request.msearch_min_confidence,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -151,6 +219,10 @@ def chat(request: ChatRequest) -> ChatResponse:
             style=style,
             length=length,
             custom_instructions=request.custom_instructions,
+            system_prompt=request.system_prompt,
+            user_prompt_template=request.user_prompt_template,
+            style_prompts=request.style_prompts,
+            length_prompts=request.length_prompts,
             conversation_history=request.conversation_history,
             top_k=request.top_k,
             model=request.model,
@@ -158,6 +230,10 @@ def chat(request: ChatRequest) -> ChatResponse:
             bm25_weight=request.bm25_weight,
             min_score=request.min_score,
             min_relative_score=request.min_relative_score,
+            retrieval_backend=request.retrieval_backend,
+            msearch_collection=request.msearch_collection,
+            msearch_mode=request.msearch_mode,
+            msearch_min_confidence=request.msearch_min_confidence,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -183,6 +259,10 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 bm25_weight=request.bm25_weight,
                 min_score=request.min_score,
                 min_relative_score=request.min_relative_score,
+                retrieval_backend=request.retrieval_backend,
+                msearch_collection=request.msearch_collection,
+                msearch_mode=request.msearch_mode,
+                msearch_min_confidence=request.msearch_min_confidence,
             )
             yield _sse_event(
                 "sources",
@@ -199,6 +279,10 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 style,
                 length,
                 request.custom_instructions,
+                system_prompt=request.system_prompt,
+                user_prompt_template=request.user_prompt_template,
+                style_prompts=request.style_prompts,
+                length_prompts=request.length_prompts,
                 conversation_history=request.conversation_history,
             )
             answer_parts: list[str] = []

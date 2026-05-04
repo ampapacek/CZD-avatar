@@ -313,6 +313,58 @@ select:focus {
   margin-top: 14px;
 }
 
+.advanced-grid .is-hidden {
+  display: none;
+}
+
+.advanced-grid [hidden] {
+  display: none;
+}
+
+.prompt-section {
+  grid-column: 1 / -1;
+}
+
+.prompt-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-2);
+}
+
+.prompt-section summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.prompt-section-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.prompt-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.prompt-editor textarea {
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .inline-field {
   align-content: end;
   grid-template-columns: auto 1fr;
@@ -1111,9 +1163,18 @@ body[data-theme="dark"] .source-highlight {
 @media (max-width: 560px) {
   .controls,
   .advanced-grid,
+  .prompt-controls,
   .settings-grid,
   .help-body {
     grid-template-columns: 1fr;
+  }
+
+  .prompt-actions {
+    justify-content: stretch;
+  }
+
+  .prompt-actions button {
+    flex: 1 1 0;
   }
 
   .topbar,

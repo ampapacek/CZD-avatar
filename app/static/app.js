@@ -6,6 +6,20 @@ const customInstructions = document.querySelector("#customInstructions");
 const model = document.querySelector("#model");
 const customModel = document.querySelector("#customModel");
 const retrieveOnly = document.querySelector("#retrieveOnly");
+const retrievalBackend = document.querySelector("#retrievalBackend");
+const msearchCollection = document.querySelector("#msearchCollection");
+const msearchMode = document.querySelector("#msearchMode");
+const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
+const promptPreset = document.querySelector("#promptPreset");
+const savePromptButton = document.querySelector("#savePromptButton");
+const resetPromptButton = document.querySelector("#resetPromptButton");
+const deletePromptButton = document.querySelector("#deletePromptButton");
+const systemPrompt = document.querySelector("#systemPrompt");
+const stylePromptDescriptionLabel = document.querySelector("#stylePromptDescriptionLabel");
+const stylePromptDescription = document.querySelector("#stylePromptDescription");
+const lengthPromptDescriptionLabel = document.querySelector("#lengthPromptDescriptionLabel");
+const lengthPromptDescription = document.querySelector("#lengthPromptDescription");
+const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const topK = document.querySelector("#topK");
 const topKValue = document.querySelector("#topKValue");
 const denseWeight = document.querySelector("#denseWeight");
@@ -57,30 +71,47 @@ const LENGTH_LABELS = {
   medium: "střední",
   long: "dlouhá",
 };
+const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
 let selectedConversationId = null;
 let streamedAnswerText = "";
 let currentAnswerSources = [];
 let currentRetrievedChunks = [];
+let appSettings = {};
+let promptPresets = [];
+let currentStylePrompts = {};
+let currentLengthPrompts = {};
 
 async function loadSettings() {
   const response = await fetch("/settings");
   const settings = await response.json();
+  appSettings = settings;
   style.value = settings.default_style || "ucitel";
   length.value = settings.default_length || "medium";
   populateModels(settings.model_presets || [], settings.llm_model);
   embeddingModel.value = settings.embedding_model || "";
-  topK.value = settings.top_k ?? 10;
+  populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
+  retrievalBackend.value = settings.retrieval_backend || "msearch";
+  msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
+  msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? "";
+  topK.value = settings.msearch_defaults?.max_results ?? settings.top_k ?? 10;
+  systemPrompt.value = settings.prompt_defaults?.system_prompt || "";
+  userPromptTemplate.value = settings.prompt_defaults?.user_prompt_template || "";
+  currentStylePrompts = { ...(settings.prompt_defaults?.style_prompts || {}) };
+  currentLengthPrompts = { ...(settings.prompt_defaults?.length_prompts || {}) };
+  updatePromptDescriptionEditors();
   topKValue.value = topK.value;
   denseWeight.value = settings.retrieval_defaults?.dense_weight ?? 0.7;
   bm25Weight.value = (1 - Number(denseWeight.value)).toFixed(2);
   minScore.value = settings.retrieval_defaults?.min_score ?? 0.2;
   minRelativeScore.value = settings.retrieval_defaults?.min_relative_score ?? 0.3;
   updateWeightLabels();
+  updateRetrievalControls({ resetValues: false });
   applyTheme(localStorage.getItem("theme") || "light");
   renderHistory();
   renderConversationWorkspace();
+  await loadPromptPresets();
 }
 
 form.addEventListener("submit", async (event) => {
@@ -245,6 +276,41 @@ topK.addEventListener("input", () => {
   topKValue.value = topK.value;
 });
 
+retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
+model.addEventListener("change", updateCustomModelField);
+style.addEventListener("change", updatePromptDescriptionEditors);
+length.addEventListener("change", updatePromptDescriptionEditors);
+stylePromptDescription.addEventListener("input", () => {
+  currentStylePrompts[style.value] = stylePromptDescription.value;
+});
+lengthPromptDescription.addEventListener("input", () => {
+  currentLengthPrompts[length.value] = lengthPromptDescription.value;
+});
+promptPreset.addEventListener("change", applySelectedPromptPreset);
+savePromptButton.addEventListener("click", async () => {
+  savePromptButton.disabled = true;
+  try {
+    await saveCurrentPromptPreset();
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = error.message;
+  } finally {
+    savePromptButton.disabled = false;
+  }
+});
+resetPromptButton.addEventListener("click", resetPromptEditors);
+deletePromptButton.addEventListener("click", async () => {
+  deletePromptButton.disabled = true;
+  try {
+    await deleteSelectedPromptPreset();
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = error.message;
+  } finally {
+    deletePromptButton.disabled = promptPreset.value === "default";
+  }
+});
+
 themeToggle.addEventListener("click", () => {
   const nextTheme = document.body.dataset.theme === "dark" ? "light" : "dark";
   applyTheme(nextTheme);
@@ -257,9 +323,17 @@ function buildRequestPayload(overrides = {}) {
     style: style.value,
     length: length.value,
     custom_instructions: customInstructions.value,
+    system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
+    user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
+    style_prompts: promptMapOverride(currentStylePrompts, appSettings.prompt_defaults?.style_prompts),
+    length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
-    model: customModel.value.trim() || model.value,
+    model: selectedModelValue(),
     top_k: Number(topK.value),
+    retrieval_backend: retrievalBackend.value,
+    msearch_collection: msearchCollection.value,
+    msearch_mode: msearchMode.value,
+    msearch_min_confidence: nullableNumber(msearchMinConfidence.value),
     dense_weight: Number(denseWeight.value),
     bm25_weight: Number(bm25Weight.value),
     min_score: nullableNumber(minScore.value),
@@ -370,8 +444,197 @@ function populateModels(presets, currentModel) {
   const uniqueModels = Array.from(new Set([currentModel, ...presets].filter(Boolean)));
   model.innerHTML = uniqueModels
     .map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`)
-    .join("");
+    .join("") + `<option value="${CUSTOM_MODEL_VALUE}">Jiný model</option>`;
   model.value = currentModel;
+  updateCustomModelField();
+}
+
+function selectedModelValue() {
+  if (model.value === CUSTOM_MODEL_VALUE) {
+    return customModel.value.trim();
+  }
+  return model.value;
+}
+
+function updateCustomModelField() {
+  const customField = customModel.closest(".field");
+  const isCustom = model.value === CUSTOM_MODEL_VALUE;
+  if (customField) {
+    customField.hidden = !isCustom;
+    customField.classList.toggle("is-hidden", !isCustom);
+  }
+  if (!isCustom) {
+    customModel.value = "";
+  }
+}
+
+function updatePromptDescriptionEditors() {
+  stylePromptDescriptionLabel.textContent = `Popis profilu ${STYLE_LABELS[style.value] || style.value} místo {style}`;
+  lengthPromptDescriptionLabel.textContent = `Popis délky ${LENGTH_LABELS[length.value] || length.value} místo {length}`;
+  stylePromptDescription.value = currentStylePrompts[style.value] || "";
+  lengthPromptDescription.value = currentLengthPrompts[length.value] || "";
+}
+
+async function loadPromptPresets(selectedId = promptPreset.value || "default") {
+  try {
+    const response = await fetch("/prompt-presets");
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Prompt presets request failed");
+    }
+    promptPresets = Array.isArray(data) ? data : [];
+  } catch (error) {
+    promptPresets = [];
+    console.warn("Could not load prompt presets", error);
+  }
+  renderPromptPresets(selectedId);
+}
+
+function renderPromptPresets(selectedId = promptPreset.value || "default") {
+  promptPreset.innerHTML =
+    `<option value="default">Výchozí prompt</option>` +
+    promptPresets
+      .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+      .join("");
+  promptPreset.value = Array.from(promptPreset.options).some((option) => option.value === selectedId)
+    ? selectedId
+    : "default";
+  deletePromptButton.disabled = promptPreset.value === "default";
+}
+
+function applySelectedPromptPreset() {
+  if (promptPreset.value === "default") {
+    resetPromptEditors();
+    return;
+  }
+  const preset = promptPresets.find((item) => item.id === promptPreset.value);
+  if (!preset) {
+    renderPromptPresets("default");
+    resetPromptEditors();
+    return;
+  }
+  systemPrompt.value = preset.system_prompt || "";
+  userPromptTemplate.value = preset.user_prompt_template || "";
+  currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}), ...(preset.style_prompts || {}) };
+  currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(preset.length_prompts || {}) };
+  updatePromptDescriptionEditors();
+  deletePromptButton.disabled = false;
+}
+
+async function saveCurrentPromptPreset() {
+  const currentPreset = promptPresets.find((item) => item.id === promptPreset.value);
+  const proposedName = currentPreset?.name || "";
+  const name = window.prompt("Název promptu", proposedName);
+  if (!name || !name.trim()) {
+    return;
+  }
+  const payload = {
+    id: currentPreset?.id || null,
+    name: name.trim(),
+    system_prompt: systemPrompt.value,
+    user_prompt_template: userPromptTemplate.value,
+    style_prompts: currentStylePrompts,
+    length_prompts: currentLengthPrompts,
+  };
+  const response = await fetch("/prompt-presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.detail || "Prompt preset save failed");
+  }
+  await loadPromptPresets(data.id);
+}
+
+function resetPromptEditors() {
+  systemPrompt.value = appSettings.prompt_defaults?.system_prompt || "";
+  userPromptTemplate.value = appSettings.prompt_defaults?.user_prompt_template || "";
+  currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}) };
+  currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}) };
+  updatePromptDescriptionEditors();
+  renderPromptPresets("default");
+}
+
+async function deleteSelectedPromptPreset() {
+  if (promptPreset.value === "default") {
+    return;
+  }
+  const response = await fetch(`/prompt-presets/${encodeURIComponent(promptPreset.value)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok && response.status !== 404) {
+    const data = await safeJson(response);
+    throw new Error(data.detail || "Prompt preset delete failed");
+  }
+  resetPromptEditors();
+  await loadPromptPresets("default");
+}
+
+function populateMsearchCollections(presets, currentCollection) {
+  const fallbackPresets = [
+    {
+      label: "WP1: histoedu v2026-02",
+      collection_id: "64d6f521-5044-4b02-8658-380b639801af",
+    },
+    {
+      label: "WP2: zaplavy v2025-11",
+      collection_id: "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
+    },
+    {
+      label: "WP3: law v2026-02",
+      collection_id: "d4be44d5-689c-4bbe-a372-b959929cd511",
+    },
+    {
+      label: "WP4: v2026-03",
+      collection_id: "3429956e-8a21-4502-ad21-a41fddc5ef99",
+    },
+  ];
+  const usablePresets = presets.length ? presets : fallbackPresets;
+  msearchCollection.innerHTML = usablePresets
+    .map((preset) => {
+      const value = preset.collection_id || "";
+      const label = preset.label || preset.collection_name || value;
+      return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  msearchCollection.value = currentCollection || usablePresets[0]?.collection_id || "";
+}
+
+function updateRetrievalControls({ resetValues = false } = {}) {
+  const isMsearch = retrievalBackend.value === "msearch";
+  if (resetValues) {
+    if (isMsearch) {
+      topK.value = appSettings.msearch_defaults?.max_results ?? 10;
+      msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
+      msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
+      if (appSettings.msearch_defaults?.collection) {
+        msearchCollection.value = appSettings.msearch_defaults.collection;
+      }
+    } else {
+      topK.value = appSettings.top_k ?? 10;
+      denseWeight.value = appSettings.retrieval_defaults?.dense_weight ?? 0.7;
+      bm25Weight.value = appSettings.retrieval_defaults?.bm25_weight ?? 0.3;
+      minScore.value = appSettings.retrieval_defaults?.min_score ?? 0.2;
+      minRelativeScore.value = appSettings.retrieval_defaults?.min_relative_score ?? 0.3;
+      updateWeightLabels();
+    }
+    topKValue.value = topK.value;
+  }
+  for (const element of document.querySelectorAll(".msearch-control")) {
+    element.classList.toggle("is-hidden", !isMsearch);
+    element.hidden = !isMsearch;
+  }
+  for (const element of document.querySelectorAll(".local-control")) {
+    element.classList.toggle("is-hidden", isMsearch);
+    element.hidden = isMsearch;
+  }
+  const embeddingField = embeddingModel.closest(".field");
+  embeddingField?.classList.toggle("is-hidden", isMsearch);
+  if (embeddingField) {
+    embeddingField.hidden = isMsearch;
+  }
 }
 
 function updateWeightLabels() {
@@ -403,6 +666,27 @@ function nullableNumber(value) {
     return null;
   }
   return Number(value);
+}
+
+function promptOverride(value, defaultValue) {
+  const current = String(value || "").trim();
+  const baseline = String(defaultValue || "").trim();
+  if (!current || current === baseline) {
+    return null;
+  }
+  return current;
+}
+
+function promptMapOverride(value, defaultValue) {
+  const current = value || {};
+  const baseline = defaultValue || {};
+  const keys = Array.from(new Set([...Object.keys(current), ...Object.keys(baseline)]));
+  for (const key of keys) {
+    if ((current[key] || "") !== (baseline[key] || "")) {
+      return current;
+    }
+  }
+  return null;
 }
 
 function chunksToSources(chunks) {
@@ -1099,14 +1383,32 @@ function applyHistoryEntryToForm(entry) {
   style.value = entry.settings?.style || style.value;
   length.value = entry.settings?.length || length.value;
   customInstructions.value = entry.settings?.custom_instructions || "";
+  systemPrompt.value = entry.settings?.system_prompt || systemPrompt.value;
+  userPromptTemplate.value = entry.settings?.user_prompt_template || userPromptTemplate.value;
+  currentStylePrompts = {
+    ...(appSettings.prompt_defaults?.style_prompts || {}),
+    ...(entry.settings?.style_prompts || {}),
+  };
+  currentLengthPrompts = {
+    ...(appSettings.prompt_defaults?.length_prompts || {}),
+    ...(entry.settings?.length_prompts || {}),
+  };
+  updatePromptDescriptionEditors();
+  renderPromptPresets("default");
   const modelValue = entry.settings?.model || "";
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
     model.value = modelValue;
     customModel.value = "";
   } else {
+    model.value = CUSTOM_MODEL_VALUE;
     customModel.value = modelValue;
   }
+  updateCustomModelField();
   retrieveOnly.checked = entry.mode === "retrieve";
+  retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;
+  msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;
+  msearchMode.value = entry.settings?.msearch_mode || msearchMode.value;
+  msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? "";
   topK.value = entry.settings?.top_k ?? topK.value;
   topKValue.value = topK.value;
   denseWeight.value = entry.settings?.dense_weight ?? denseWeight.value;
@@ -1114,6 +1416,7 @@ function applyHistoryEntryToForm(entry) {
   minScore.value = entry.settings?.min_score ?? "";
   minRelativeScore.value = entry.settings?.min_relative_score ?? "";
   updateWeightLabels();
+  updateRetrievalControls({ resetValues: false });
   question.focus();
 }
 

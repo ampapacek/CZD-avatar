@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 
 AnswerStyle = Literal["laik", "ucitel", "historik"]
 AnswerLength = Literal["short", "medium", "long"]
+RetrievalBackend = Literal["msearch", "local"]
+MSearchMode = Literal["hybrid", "semantic", "keyword"]
 
 
 class IngestRequest(BaseModel):
@@ -21,6 +23,10 @@ class IngestResponse(BaseModel):
 class RetrieveRequest(BaseModel):
     question: str
     top_k: int | None = Field(default=None, ge=0, le=50)
+    retrieval_backend: RetrievalBackend | None = None
+    msearch_collection: str | None = None
+    msearch_mode: MSearchMode | None = None
+    msearch_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     dense_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -32,13 +38,40 @@ class ChatRequest(BaseModel):
     style: AnswerStyle | None = None
     length: AnswerLength | None = None
     custom_instructions: str | None = None
+    system_prompt: str | None = None
+    user_prompt_template: str | None = None
+    style_prompts: dict[str, str] | None = None
+    length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     top_k: int | None = Field(default=None, ge=0, le=50)
+    retrieval_backend: RetrievalBackend | None = None
+    msearch_collection: str | None = None
+    msearch_mode: MSearchMode | None = None
+    msearch_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     model: str | None = None
     dense_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     min_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class PromptPreset(BaseModel):
+    id: str
+    name: str
+    system_prompt: str
+    user_prompt_template: str
+    style_prompts: dict[str, str] = Field(default_factory=dict)
+    length_prompts: dict[str, str] = Field(default_factory=dict)
+    updated_at: str | None = None
+
+
+class PromptPresetSaveRequest(BaseModel):
+    id: str | None = None
+    name: str
+    system_prompt: str
+    user_prompt_template: str
+    style_prompts: dict[str, str] = Field(default_factory=dict)
+    length_prompts: dict[str, str] = Field(default_factory=dict)
 
 
 class Source(BaseModel):
