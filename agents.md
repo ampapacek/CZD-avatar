@@ -6,9 +6,10 @@ This file is a practical handoff for future agents working in this repo.
 
 - `rag-avatar` RAG prototype with FastAPI backend and simple static frontend.
 - The current default collection is Czech history, but the intended direction is multiple collections and multiple system prompts for different avatars.
-- Main goal: retrieve passages from local documents and answer with grounded citations.
+- Main goal: retrieve passages from hosted `msearch` or local documents and answer with grounded citations.
 - Current stack:
   - FastAPI
+  - hosted `msearch` retrieval
   - local/remote Qdrant
   - sentence-transformers embeddings
   - hybrid retrieval: dense + BM25
@@ -22,6 +23,7 @@ This file is a practical handoff for future agents working in this repo.
 - `app/logging_config.py` - timestamped logging into `logs/`
 - `app/rag/` - ingestion, chunking, retrieval, prompting, vector store, pipeline
 - `app/static/` - frontend HTML/CSS/JS
+- `data/prompt_presets.json` - saved prompt presets for the UI if present
 - `scripts/ingest.py` - CLI ingestion
 - `scripts/ask.py` - CLI ask
 - `scripts/batch_answers.py` - batch question/answer runner
@@ -38,6 +40,8 @@ This file is a practical handoff for future agents working in this repo.
 - `answers_avatar*.txt` and `notes.md` are ignored scratch/output files.
 - `data/raw/` is mostly ignored, but `data/raw/agent.md` is intentionally tracked and should stay retrievable.
 - `data/collections/czech_history/questions/questions.txt` is reused by the random-question endpoint, the Wikipedia downloader, and `scripts/batch_answers.py`.
+- `data/collections/.obsidian/`, `data/collections/czech_history/topics/`, `data/collections/czech_history/wiki/`, and `data/topics.txt` are now ignored local workspace/content files.
+- Git tracks this handoff file as `agents.md`; on this machine the working tree may display it as `AGENTS.md` because the filesystem is case-insensitive.
 
 ## How to run
 
@@ -50,10 +54,13 @@ uv pip install -e .
 cp .env.example .env
 ```
 
-Ingest everything under `data/raw`:
+For the default hosted `msearch` flow, set at least:
 
-```bash
-python scripts/ingest.py --path data/raw
+```env
+OPENROUTER_API_KEY=your_key_here
+RETRIEVAL_BACKEND=msearch
+MSEARCH_USERNAME=your_username
+MSEARCH_PASSWORD=your_password
 ```
 
 Run the app:
@@ -71,7 +78,14 @@ http://127.0.0.1:8000
 Quick CLI test:
 
 ```bash
-python scripts/ask.py "Jaký byl význam husitských válek?"
+uv run python scripts/ask.py "Jaký byl význam husitských válek?"
+```
+
+If local retrieval is needed instead, set `RETRIEVAL_BACKEND=local`, add documents under `data/raw/`, then ingest:
+
+```bash
+uv run python scripts/ingest.py --path data/raw
+uvicorn app.main:app --reload
 ```
 
 ## Config and a past gotcha
@@ -84,7 +98,8 @@ python scripts/ask.py "Jaký byl význam husitských válek?"
 ## Retrieval behavior
 
 - Hybrid retrieval is already implemented.
-- Default weighting is:
+- Default backend is `msearch`.
+- Local retrieval uses hybrid weighting:
   - dense embeddings: `0.7`
   - BM25: `0.3`
 - Web UI allows changing:
@@ -92,8 +107,11 @@ python scripts/ask.py "Jaký byl význam husitských válek?"
   - dense/BM25 weighting
   - minimum score
   - minimum relative score to the best chunk
+  - retrieval backend: `msearch` or `local`
+  - mSearch collection, mode, and optional confidence floor
   - retrieve-only mode
   - LLM model
+- Prompt presets can be loaded, saved, and deleted from the UI.
 - `top_k=0` intentionally disables retrieval.
 
 ## Current UX features already implemented
@@ -105,6 +123,7 @@ python scripts/ask.py "Jaký byl význam husitských válek?"
 - Conversation workspace with saved threads in `localStorage`
 - Local browser history stored in `localStorage`
 - Random question button backed by `/questions/random`
+- Editable prompt presets backed by `/prompt-presets`
 - Expandable source chunks
 - Highlighting of query terms inside source excerpts and full chunks
   - this is lexical highlighting based on the current question

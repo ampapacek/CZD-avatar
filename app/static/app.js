@@ -5,6 +5,8 @@ const length = document.querySelector("#length");
 const customInstructions = document.querySelector("#customInstructions");
 const model = document.querySelector("#model");
 const customModel = document.querySelector("#customModel");
+const llmBaseUrl = document.querySelector("#llmBaseUrl");
+const llmApiKey = document.querySelector("#llmApiKey");
 const retrieveOnly = document.querySelector("#retrieveOnly");
 const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
@@ -61,6 +63,7 @@ const themeToggle = document.querySelector("#themeToggle");
 const themeToggleLabel = document.querySelector("#themeToggleLabel");
 const HISTORY_STORAGE_KEY = "czdemos4ai-history";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
+const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
 const STYLE_LABELS = {
   laik: "laik",
   ucitel: "učitel",
@@ -91,6 +94,10 @@ async function loadSettings() {
   length.value = settings.default_length || "medium";
   populateModels(settings.model_presets || [], settings.llm_model);
   embeddingModel.value = settings.embedding_model || "";
+  const savedLlmSettings = loadLlmSettings();
+  llmBaseUrl.value = savedLlmSettings.llm_base_url || "";
+  llmBaseUrl.placeholder = settings.llm_base_url || "https://api.openai.com/v1";
+  llmApiKey.value = savedLlmSettings.llm_api_key || "";
   populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
@@ -316,6 +323,8 @@ themeToggle.addEventListener("click", () => {
   applyTheme(nextTheme);
   localStorage.setItem("theme", nextTheme);
 });
+llmBaseUrl.addEventListener("input", persistLlmSettings);
+llmApiKey.addEventListener("input", persistLlmSettings);
 
 function buildRequestPayload(overrides = {}) {
   return {
@@ -329,6 +338,8 @@ function buildRequestPayload(overrides = {}) {
     length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
     model: selectedModelValue(),
+    llm_base_url: nullableString(llmBaseUrl.value),
+    llm_api_key: nullableString(llmApiKey.value),
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -340,6 +351,28 @@ function buildRequestPayload(overrides = {}) {
     min_relative_score: nullableNumber(minRelativeScore.value),
     ...overrides,
   };
+}
+
+function loadLlmSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LLM_SETTINGS_STORAGE_KEY) || "{}");
+    return {
+      llm_base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
+      llm_api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
+    };
+  } catch {
+    return { llm_base_url: "", llm_api_key: "" };
+  }
+}
+
+function persistLlmSettings() {
+  localStorage.setItem(
+    LLM_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      llm_base_url: llmBaseUrl.value.trim(),
+      llm_api_key: llmApiKey.value,
+    }),
+  );
 }
 
 async function streamChat(payload) {
@@ -666,6 +699,11 @@ function nullableNumber(value) {
     return null;
   }
   return Number(value);
+}
+
+function nullableString(value) {
+  const trimmed = String(value || "").trim();
+  return trimmed ? trimmed : null;
 }
 
 function promptOverride(value, defaultValue) {
@@ -1254,7 +1292,7 @@ function saveHistoryEntry(entry) {
     mode: entry.mode,
     answer: entry.answer,
     sourceCount: entry.sourceCount,
-    settings: entry.settings || {},
+    settings: sanitizeHistorySettings(entry.settings || {}),
     retrieved_chunks: entry.retrieved_chunks || [],
     sources: entry.sources || [],
     model_used: entry.model_used || null,
@@ -1265,6 +1303,12 @@ function saveHistoryEntry(entry) {
   localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
   selectedHistoryId = trimmed[0]?.id ?? null;
   renderHistory();
+}
+
+function sanitizeHistorySettings(settings) {
+  const sanitized = { ...settings };
+  delete sanitized.llm_api_key;
+  return sanitized;
 }
 
 function renderHistory() {
@@ -1329,6 +1373,7 @@ function renderHistoryDetail(entry) {
         ${renderSetting("Profil", entry.settings?.style)}
         ${renderSetting("Délka", entry.settings?.length)}
         ${renderSetting("Model", entry.model_used || entry.settings?.model)}
+        ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
         ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
         ${renderSetting("Top-k", entry.settings?.top_k)}
         ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
@@ -1404,6 +1449,8 @@ function applyHistoryEntryToForm(entry) {
     customModel.value = modelValue;
   }
   updateCustomModelField();
+  llmBaseUrl.value = entry.settings?.llm_base_url || llmBaseUrl.value;
+  persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;

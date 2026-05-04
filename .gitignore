@@ -16,6 +16,11 @@ notes.md
 
 data/qdrant/
 data/processed/
+data/prompt_presets.json
 data/raw/*
 !data/raw/agent.md
 !data/raw/.gitkeep
+data/topics.txt
+data/collections/.obsidian/
+data/collections/czech_history/topics/
+data/collections/czech_history/wiki/

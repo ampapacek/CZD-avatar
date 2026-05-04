@@ -11,7 +11,7 @@ Collection-specific app assets currently live under `data/collections/czech_hist
 - topic list: `topics/topics.txt`
 - UFAL logo asset: `assets/logo_ufal_110u.png`
 
-## Setup
+## Quick Start
 
 Use Python 3.12. The system `python` command may not exist on this machine, so the examples use `uv`.
 
@@ -22,14 +22,81 @@ uv pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` and set:
+Edit `.env`.
+
+For the default hosted `msearch` flow, you typically only need:
 
 ```env
 OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+RETRIEVAL_BACKEND=msearch
+MSEARCH_USERNAME=your_username
+MSEARCH_PASSWORD=your_password
 ```
 
-## Add Documents
+`MSEARCH_BASE_URL`, `MSEARCH_COLLECTION`, `MSEARCH_MODE`, and the other mSearch defaults are already present in `.env.example`.
+
+## Run The App
+
+Start the API and frontend:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+The default experience uses hosted `msearch` retrieval, so you can run the app without ingesting local documents first.
+
+## Ask A Question
+
+From the browser, try a Czech-history question such as:
+
+- `Jaký byl význam husitských válek?`
+- `Co znamenalo Pražské jaro?`
+
+From the CLI:
+
+```bash
+uv run python scripts/ask.py "Jaký byl význam husitských válek?"
+```
+
+Optional controls:
+
+```bash
+uv run python scripts/ask.py "Co znamenala bitva na Bílé hoře pro české země?" --style historik --length long --custom-instructions "Zaměř se na příčiny a důsledky."
+```
+
+## Use A Local Database Instead
+
+If you want to use local Qdrant + BM25 retrieval instead of hosted `msearch`, do this:
+
+1. Set `RETRIEVAL_BACKEND=local` in `.env`.
+2. Put your `.txt`, `.md`, or `.pdf` files under `data/raw/`.
+3. Ingest the files into the local index.
+4. Run the app or ask questions from the CLI.
+
+Example:
+
+```env
+RETRIEVAL_BACKEND=local
+```
+
+```bash
+uv run python scripts/ingest.py --path data/raw
+uvicorn app.main:app --reload
+```
+
+The ingest step creates/updates:
+
+- local Qdrant storage in `data/qdrant/`
+- BM25/debug chunk catalog in `data/processed/chunks.jsonl`
+
+## Add Local Documents
 
 Put `.txt`, `.md`, or `.pdf` files under:
 
@@ -56,15 +123,15 @@ Document text...
 Czech Wikipedia is only for testing the current Czech-history collection before your own document collection is ready.
 
 ```bash
-python scripts/download_wikipedia.py --limit 100
+uv run python scripts/download_wikipedia.py --limit 100
 ```
 
 The script reads `data/collections/czech_history/questions/questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`.
 
-## Ingest
+## Ingest Local Documents
 
 ```bash
-python scripts/ingest.py --path data/raw
+uv run python scripts/ingest.py --path data/raw
 ```
 
 This creates/updates:
@@ -72,35 +139,16 @@ This creates/updates:
 - local Qdrant storage in `data/qdrant/`
 - BM25/debug chunk catalog in `data/processed/chunks.jsonl`
 
-## Ask From CLI
-
-```bash
-python scripts/ask.py "Jaký byl význam husitských válek?"
-```
-
-Optional controls:
-
-```bash
-python scripts/ask.py "Co znamenala bitva na Bílé hoře pro české země?" --style historik --length long --custom-instructions "Zaměř se na příčiny a důsledky."
-```
-
-## Run API And Frontend
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Open:
-
-```text
-http://127.0.0.1:8000
-```
+## API
 
 API endpoints:
 
 - `GET /health`
 - `GET /settings`
 - `GET /questions/random`
+- `GET /prompt-presets`
+- `POST /prompt-presets`
+- `DELETE /prompt-presets/{preset_id}`
 - `POST /ingest`
 - `POST /retrieve`
 - `POST /chat`
@@ -113,6 +161,7 @@ Example `/chat` body:
   "question": "Jaký byl význam husitských válek?",
   "style": "ucitel",
   "length": "medium",
+  "retrieval_backend": "msearch",
   "custom_instructions": "Focus mainly on causes and consequences."
 }
 ```
@@ -137,8 +186,12 @@ The web UI lets you tune retrieval while testing:
 - embedding vs. BM25 weighting
 - minimum combined score
 - minimum score relative to the best retrieved chunk
+- retrieval backend: `msearch` or `local`
+- mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
 - OpenRouter model preset or custom model id
+- optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
+- editable prompt presets stored in `data/prompt_presets.json`
 
 ## Configuration
 
@@ -156,17 +209,27 @@ Important `.env` variables:
 - `TOP_K`
 - `MIN_SCORE`
 - `MIN_RELATIVE_SCORE`
+- `RETRIEVAL_BACKEND`
+- `MSEARCH_BASE_URL`
+- `MSEARCH_USERNAME`
+- `MSEARCH_PASSWORD`
+- `MSEARCH_COLLECTION`
+- `MSEARCH_MAX_RESULTS`
+- `MSEARCH_MODE`
+- `MSEARCH_MIN_CONFIDENCE`
+- `MSEARCH_TIMEOUT`
 - `DEFAULT_STYLE`
 - `DEFAULT_LENGTH`
 - `RAW_DATA_DIR`
 - `CHUNK_CATALOG_PATH`
+- `PROMPT_PRESETS_PATH`
 
 ## Basic Test Run
 
 ```bash
-python scripts/download_wikipedia.py --limit 20
-python scripts/ingest.py --path data/raw
-python scripts/ask.py "Jaký byl význam husitských válek?"
+uv run python scripts/download_wikipedia.py --limit 20
+uv run python scripts/ingest.py --path data/raw
+uv run python scripts/ask.py "Jaký byl význam husitských válek?"
 uvicorn app.main:app --reload
 ```
 
@@ -198,7 +261,7 @@ Console output stays shorter, while the file logs persist questions, retrieval m
 
 ## Collections And Prompts
 
-For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the default system prompt. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
+For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the built-in default prompts. Saved prompt presets are stored in `data/prompt_presets.json`. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 
 ## Notes For Future Extensions
 

@@ -259,6 +259,32 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   font-weight: 650;
 }
 
+.field-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.api-section {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+  padding: 10px 12px;
+}
+
+.api-section summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.api-section-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 textarea,
 input,
 select {

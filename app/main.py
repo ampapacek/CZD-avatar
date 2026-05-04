@@ -104,6 +104,7 @@ def get_public_settings() -> dict[str, object]:
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
         "llm_model": settings.openrouter_model,
+        "llm_base_url": settings.openrouter_base_url,
         "model_presets": MODEL_PRESETS,
         "collection": settings.qdrant_collection,
         "retrieval_backend": settings.retrieval_backend,
@@ -226,6 +227,8 @@ def chat(request: ChatRequest) -> ChatResponse:
             conversation_history=request.conversation_history,
             top_k=request.top_k,
             model=request.model,
+            llm_api_key=request.llm_api_key,
+            llm_base_url=request.llm_base_url,
             dense_weight=request.dense_weight,
             bm25_weight=request.bm25_weight,
             min_score=request.min_score,
@@ -286,7 +289,12 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 conversation_history=request.conversation_history,
             )
             answer_parts: list[str] = []
-            for token in pipeline.llm.stream_generate(messages, model=resolved_model):
+            for token in pipeline.llm.stream_generate(
+                messages,
+                model=resolved_model,
+                api_key=request.llm_api_key,
+                base_url=request.llm_base_url,
+            ):
                 answer_parts.append(token)
                 yield _sse_event("token", {"text": token})
 

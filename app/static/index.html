@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CZDEMOS4AI Historický avatar</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=msearch-9" />
+    <link rel="stylesheet" href="/static/styles.css?v=msearch-10" />
   </head>
   <body>
     <main class="shell">
@@ -142,6 +142,20 @@
                 <span>Vlastní model</span>
                 <input id="customModel" type="text" placeholder="Např. meta-llama/..." />
               </label>
+              <details class="api-section">
+                <summary>LLM API</summary>
+                <div class="api-section-body">
+                  <label class="field">
+                    <span>Base URL</span>
+                    <input id="llmBaseUrl" type="url" placeholder="Např. https://api.openai.com/v1" />
+                  </label>
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="llmApiKey" type="password" placeholder="Volitelné přepsání serverového klíče" autocomplete="off" />
+                  </label>
+                  <p class="field-note">Ukládá se jen lokálně v tomto prohlížeči. Pokud pole necháš prázdné, použije se serverové nastavení.</p>
+                </div>
+              </details>
               <label class="field">
                 <span>Dokumentů: <output id="topKValue">10</output></span>
                 <input id="topK" type="range" min="0" max="50" step="1" value="10" />
@@ -335,6 +349,6 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js?v=msearch-9"></script>
+    <script src="/static/app.js?v=msearch-10"></script>
   </body>
 </html>
