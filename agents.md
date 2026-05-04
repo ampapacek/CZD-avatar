@@ -4,9 +4,10 @@ This file is a practical handoff for future agents working in this repo.
 
 ## What this project is
 
-- `rag-avatar` RAG prototype with FastAPI backend and simple static frontend.
-- The current default collection is Czech history. A few places are still hardcoded for the historical agent and Czech-history collection, including default prompts, random questions, UI copy, collection asset paths, and helper scripts.
-- The underlying RAG pipeline is topic-agnostic and can be used for other domains once documents, prompts, questions, assets, and retrieval settings are swapped.
+- `rag-avatar` is a RAG web app for asking questions over a document collection, streaming an answer, and inspecting the retrieved/cited sources.
+- The current default avatar is Czech history, but the intended direction is a general avatar framework, not a history-only app.
+- A few places are still hardcoded for the historical agent and Czech-history collection, including default prompts, random questions, UI copy, collection asset paths, and helper scripts.
+- The underlying RAG pipeline is topic-agnostic and should be made fully configurable across domains by moving prompts, questions, assets, mSearch collections, and UI labels into avatar/collection config.
 - Main goal: retrieve passages from hosted `msearch` or local documents and answer with grounded citations.
 - Current stack:
   - FastAPI
@@ -67,6 +68,8 @@ MSEARCH_PASSWORD=your_password
 
 Despite the `OPENROUTER_*` names, generation is generic OpenAI-compatible chat completions. Set `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL` for another hosted provider or an OpenAI-compatible local server. The frontend `LLM API` panel can also override base URL/API key for the current browser session.
 
+Future config cleanup should add generic names such as `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`, keep `OPENROUTER_*` as backward-compatible aliases for at least one release, and update docs/UI copy to stop implying that OpenRouter is required.
+
 Run the app:
 
 ```bash
@@ -103,6 +106,7 @@ uvicorn app.main:app --reload
 
 - Hybrid retrieval is already implemented.
 - Default backend is `msearch`.
+- Watch grounding quality: mSearch can return very short keyword-like snippets for some queries, so source context may need expansion or reranking before generation.
 - Local retrieval uses hybrid weighting:
   - dense embeddings: `0.7`
   - BM25: `0.3`
@@ -122,7 +126,6 @@ uvicorn app.main:app --reload
 
 - Dark mode
 - Help modal
-- Health icon button
 - Streaming chat responses from `/chat/stream`
 - Conversation workspace with saved threads in `localStorage`
 - Local browser history stored in `localStorage`
@@ -171,6 +174,7 @@ https://storage.ufal.mff.cuni.cz/lib/2e093cea-cdcd-401d-a664-d1ca05112e55/file/v
   - then searches based on `data/collections/czech_history/questions/questions.txt`
   - prints light progress logging
   - skips files already present in the target directory
+  - logs and skips Wikipedia 403/429/API failures instead of crashing
 - This is only test-data tooling. The project should not become Wikipedia-dependent.
 
 ## Logging
@@ -221,25 +225,24 @@ Do not mix vectors from different embedding models in one collection.
 - `app/static/styles.css`
 - `app/main.py`
 
-## Current model presets in the API
-
-Defined in `app/main.py`:
-
-- `openai/gpt-5.2`
-- `openai/gpt-5.4-mini`
-- `meta-llama/llama-3.3-70b-instruct`
-- `meta-llama/llama-3.1-8b-instruct`
-- `openai/gpt-4o-mini`
-- `openai/gpt-4.1-mini`
-- `anthropic/claude-3.5-haiku`
-- `google/gemini-2.0-flash-001`
-- `google/gemini-3.0-pro`
-- `mistralai/mistral-small-3.1-24b-instruct`
-
 ## Nice next improvements
 
+- Make the avatar general, not history-only:
+  - move Czech-history prompts, UI copy, questions, logo/assets, mSearch collection ids, and example questions into avatar/collection config
+  - keep the current Czech-history setup as one configured avatar
+  - make it easy to add domains such as law, floods, medicine, project docs, or internal knowledge bases without code edits
+- Rename LLM configuration:
+  - introduce `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
+  - keep `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL` as aliases during migration
+  - update app settings, docs, and UI wording so other OpenAI-compatible providers feel first-class
+- Improve conversation retrieval:
+  - rewrite follow-up questions using conversation history before retrieval
+  - retrieve against the resolved standalone query, not only the latest short user turn
+  - keep the original user wording for the final answer
+- Add batch generation:
+  - likely use backend/pipeline code directly rather than driving the browser UI
+  - support input question files, selected avatar/collection, model/provider settings, and structured output with answer, sources, timings, and errors
 - Show the most relevant sentence window around matches, not just raw chunk previews
 - Better semantic explanation of why a chunk matched
 - Optional reranker after hybrid retrieval
 - More robust evaluation scripts for grounding quality
-- Move the remaining Czech-history/historical-agent defaults into collection/avatar config files
