@@ -31,7 +31,7 @@ def chunk_documents(documents: list[Document], chunk_size: int, chunk_overlap: i
             metadata = dict(document.metadata)
             metadata["chunk_index"] = local_index
             metadata["word_count"] = len(chunk_text.split())
-            base = metadata.get("source_path") or metadata.get("title") or f"document-{doc_index}"
+            base = metadata.get("source_path_display") or metadata.get("source_path") or metadata.get("title") or f"document-{doc_index}"
             page = metadata.get("page_number")
             page_part = f"-p{page}" if page else ""
             chunk_id = f"{base}{page_part}-chunk-{local_index}"
@@ -87,4 +87,3 @@ def _overlap_from_text(text: str, overlap_words: int) -> str:
         return ""
     words = text.split()
     return " ".join(words[-overlap_words:])
-

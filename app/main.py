@@ -54,8 +54,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path(__file__).parent / "static"
-ufal_logo_path = Path(__file__).resolve().parents[1] / "logo_ufal_110u.png"
-questions_path = Path(__file__).resolve().parents[1] / "questions.txt"
+collection_dir = Path(__file__).resolve().parents[1] / "data" / "collections" / "czech_history"
+ufal_logo_path = collection_dir / "assets" / "logo_ufal_110u.png"
+questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
@@ -100,10 +101,10 @@ def get_public_settings() -> dict[str, object]:
 @app.get("/questions/random")
 def random_question() -> dict[str, str]:
     if not questions_path.exists():
-        raise HTTPException(status_code=404, detail="questions.txt was not found.")
+        raise HTTPException(status_code=404, detail="Collection questions file was not found.")
     questions = [line.strip() for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not questions:
-        raise HTTPException(status_code=404, detail="questions.txt does not contain any questions.")
+        raise HTTPException(status_code=404, detail="Collection questions file does not contain any questions.")
     return {"question": random.choice(questions)}
 
 
@@ -262,6 +263,7 @@ def _serialize_source(chunk: dict[str, object]) -> dict[str, object]:
     return {
         "citation_id": chunk.get("citation_id", ""),
         "chunk_id": chunk.get("chunk_id", ""),
+        "source_kind": metadata.get("source_kind"),
         "title": metadata.get("title"),
         "source_path": metadata.get("source_path"),
         "source_path_display": metadata.get("source_path_display"),

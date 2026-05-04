@@ -216,6 +216,7 @@ def _source_from_chunk(record: dict[str, Any]) -> Source:
     return Source(
         citation_id=record.get("citation_id", ""),
         chunk_id=record.get("chunk_id", ""),
+        source_kind=metadata.get("source_kind"),
         title=metadata.get("title"),
         source_path=metadata.get("source_path"),
         source_path_display=metadata.get("source_path_display"),

@@ -95,7 +95,7 @@ CURATED_TOPICS = [
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download Czech Wikipedia pages for RAG testing.")
-    parser.add_argument("--questions", default="questions.txt", help="Question seed file.")
+    parser.add_argument("--questions", default="data/collections/czech_history/questions/questions.txt", help="Question seed file.")
     parser.add_argument("--output", default="data/raw/wikipedia", help="Output directory.")
     parser.add_argument("--limit", type=int, default=100, help="Approximate number of pages to save.")
     parser.add_argument("--search-per-question", type=int, default=5)

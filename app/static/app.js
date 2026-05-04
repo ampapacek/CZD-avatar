@@ -409,6 +409,7 @@ function chunksToSources(chunks) {
   return chunks.map((chunk) => ({
     citation_id: chunk.citation_id,
     chunk_id: chunk.chunk_id,
+    source_kind: chunk.metadata?.source_kind,
     title: chunk.metadata?.title,
     source_path: chunk.metadata?.source_path,
     source_path_display: chunk.metadata?.source_path_display,
@@ -1247,7 +1248,7 @@ function renderInlineMarkdown(text, citationMap = new Map(), usedCitationIds = n
   const placeholders = [];
   const placeholderToken = (index) => `@@CODEXPH${index}@@`;
   let escaped = escapeHtml(text);
-  escaped = escaped.replace(/\[\^(Z\d+)\]|\[(Z\d+)\]/g, (_, footnoteId, legacyId) => {
+  escaped = escaped.replace(/\[\^([A-Z]{1,3}\d+)\]|\[([A-Z]{1,3}\d+)\]/g, (_, footnoteId, legacyId) => {
     const citationId = footnoteId || legacyId;
     if (!citationMap.has(citationId)) {
       return footnoteId ? `[^${citationId}]` : `[${citationId}]`;
@@ -1280,7 +1281,7 @@ function normalizeCitationMarkdown(markdown, citationMap) {
   const usedCitationIds = new Set();
   const normalized = String(markdown || "")
     .replace(/\r\n?/g, "\n")
-    .replace(/^\[\^(Z\d+)\]:[^\n]*(?:\n(?!\[\^Z\d+\]:).*)*/gm, "")
+    .replace(/^\[\^([A-Z]{1,3}\d+)\]:[^\n]*(?:\n(?!\[\^[A-Z]{1,3}\d+\]:).*)*/gm, "")
     .replace(/\n{2,}(?:#+\s*)?Použité zdroje:?\s*\n(?:[^\n]*\n?)*/i, "")
     .trim();
   const orderedCitationIds = Array.from(new Set(extractCitationIds(normalized))).filter((citationId) =>
@@ -1301,7 +1302,7 @@ function buildCitationOrderMap(orderedCitationIds) {
 }
 
 function extractCitationIds(text) {
-  const matches = String(text || "").match(/\[\^(Z\d+)\]|\[(Z\d+)\]/g) || [];
+  const matches = String(text || "").match(/\[\^([A-Z]{1,3}\d+)\]|\[([A-Z]{1,3}\d+)\]/g) || [];
   const citationIds = new Set();
   for (const match of matches) {
     const citationId = match.replace(/[\[\]^]/g, "");

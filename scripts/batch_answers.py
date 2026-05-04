@@ -14,7 +14,11 @@ from app.rag.pipeline import RAGPipeline  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Answer all questions from a text file and save them to disk.")
-    parser.add_argument("--questions", default="questions.txt", help="Path to the input questions file.")
+    parser.add_argument(
+        "--questions",
+        default="data/collections/czech_history/questions/questions.txt",
+        help="Path to the input questions file.",
+    )
     parser.add_argument("--output", default="answers_avatar.txt", help="Path to the output answers file.")
     parser.add_argument("--style", default="ucitel", help="Answer style to use.")
     parser.add_argument("--length", default="medium", help="Answer length to use.")

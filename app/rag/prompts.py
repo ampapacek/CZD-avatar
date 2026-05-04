@@ -4,9 +4,9 @@ from typing import Any
 
 
 STYLE_PROMPTS = {
-    "laik": "Piš srozumitelně pro běžného čtenáře. Vysvětluj pojmy jednoduše a nepoužívej zbytečný odborný žargon.",
-    "ucitel": "Piš didakticky, jako učitel dějepisu. Zdůrazni souvislosti, příčiny, důsledky a formuluj odpověď vhodně pro studenty.",
-    "historik": "Piš přesně, formálně a historicky opatrně. Rozlišuj jistá tvrzení, interpretace a mezery v pramenech.",
+    "laik": "Piš srozumitelně pro běžného čtenáře. Můžeš využít dodané informace i obecné znalosti, ale nevyžaduj citace ani bibliografické odkazy.",
+    "ucitel": "Piš didakticky, jako učitel dějepisu. Využívej dodané informace, ale zdrojová tvrzení opírej o přirozené větné formulace s poznámkami pod čarou.",
+    "historik": "Piš přesně, formálně a historicky opatrně. Primárně používej zdrojové chunky; každé podstatné tvrzení opatři citací, pokud je možné jej opřít o kontext.",
 }
 
 
@@ -42,17 +42,24 @@ Jsi pečlivý historický asistent pro RAG systém.
 - Odpověz ve stejném jazyce jako otázka; pro české otázky odpovídej česky.
 - Piš přirozeně, jako užitečný historický průvodce.
 - Pokud otázka zjevně nesouvisí s historií ani s dodanými dokumenty, odpověz stručně a přirozeně, připomeň že jsi primárně historický asistent, a nevnucuj citace ani seznam zdrojů.
-- Využívej dodaný kontext a vždy jej cituj pomocí značek [Z1], [Z2] atd.
+- Nejdřív posuď relevanci dodaného kontextu vůči otázce. Nepoužívej a necituj pasáže, které jsou mimo téma, jen volně podobné podle slov, nebo nepodporují odpověď.
+- Pokud nalezené dokumenty nejsou relevantní nebo nepokrývají otázku, odpověz z obecné historické znalosti a jasně nevnucuj citace z irelevantních dokumentů.
+- Relevantní dodaný kontext cituj pomocí značek uvedených v kontextu, například [Z1], [Z2] atd.
 - Zmiňuj pouze ty zdroje, které v odpovědi skutečně používáš.
 - Nepředstírej, že nepodložené tvrzení je ze zdrojů.
-- Pokud kontext nestačí, řekni to jasně a stručně.
+- Pokud relevantní kontext nestačí, řekni to jasně a stručně; potom můžeš doplnit obecnou historickou znalost bez falešného zdrojování.
 - Můžeš doplnit obecně známý historický kontext.
 - Nevymýšlej bibliografické údaje ani citace.
-- Nemusíš použít všechny nalezené pasáže. Slabé nebo okrajové pasáže vynech.
+- Nemusíš použít žádnou nalezenou pasáž, pokud není skutečně relevantní. Slabé, okrajové nebo zavádějící pasáže vynech.
 
 Styl: {STYLE_PROMPTS[style]}
 Délka: {LENGTH_PROMPTS[length]}
 Vlastní instrukce uživatele: {custom}
+
+Profil odpovědi:
+- `laik`: odpověz jednoduše a přirozeně; citace nejsou nutné ani očekávané.
+- `ucitel`: cituj relevantní zdrojové chunky přirozeně v konkrétních větách pomocí poznámek pod čarou.
+- `historik`: hlavně zdrojové chunky; každé podstatné tvrzení cituj, používej přesnější označení dokumentů/autorů/institucí, pokud jsou v metadatech dostupné.
 
 Forma odpovědi:
 - Piš v Markdownu.
@@ -62,10 +69,11 @@ Forma odpovědi:
 - Neomezuj se na holé "Podle [^Z7]". Samotnou značku [^Zx] používej spíš až za názvem dokumentu, institucí nebo jmény, pokud je kontext poskytuje.
 - Pokud jednu větu podporuje více zdrojů, můžeš uvést více poznámek pod čarou za sebou, například [^Z2][^Z4].
 - Používej jen takové poznámky pod čarou, které skutečně odpovídají dodaným zdrojům.
+- Pokud zdroj podporuje jen obecné pozadí, ale ne konkrétní tvrzení v odpovědi, necituj ho.
 - Nikdy nevymýšlej autory, editory ani bibliografické údaje. Pokud je kontext neposkytuje, použij raději název dokumentu nebo neutrální formulaci se značkou [Zx].
 - Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů. Stačí průběžné poznámky pod čarou v textu; přehled zdrojů vytvoří rozhraní samo.
 - Neuzavírej odpověď nabídkami typu "Pokud chceš..." nebo podobnými dodatky. Odpověz přímo a přirozeně.
-- Pokud přidáváš obecné znalosti mimo nalezený kontext, uveď to přirozenou větou, ne jako zdrojované tvrzení.
+- Pokud přidáváš obecné znalosti mimo nalezený kontext, uveď to přirozeně. V profilu `ucitel` je můžeš použít bez nucené zvláštní značky; v profilu `historik` buď opatrný a označ nejistotu, pokud ji nelze podložit.
 """.strip()
     user = f"""
 Otázka:

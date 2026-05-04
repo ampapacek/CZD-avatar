@@ -51,7 +51,7 @@ class OpenAICompatibleLLM(LLMClient):
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             message = _extract_error_message(response)
-            raise RuntimeError(f"LLM request failed ({response.status_code}): {message}") from exc
+            raise RuntimeError(_format_http_error(response, message)) from exc
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
 
@@ -82,7 +82,7 @@ class OpenAICompatibleLLM(LLMClient):
                     response.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     message = _extract_error_message(response)
-                    raise RuntimeError(f"LLM request failed ({response.status_code}): {message}") from exc
+                    raise RuntimeError(_format_http_error(response, message)) from exc
 
                 for line in response.iter_lines():
                     if not line:
@@ -107,9 +107,19 @@ class OpenAICompatibleLLM(LLMClient):
 
 def _extract_error_message(response: httpx.Response) -> str:
     try:
+        response.read()
+    except httpx.ResponseNotRead:
+        pass
+    except Exception:
+        pass
+
+    try:
         payload = response.json()
-    except ValueError:
-        return response.text[:500] or "No response body."
+    except (ValueError, json.JSONDecodeError):
+        try:
+            return response.text[:500] or "No response body."
+        except httpx.ResponseNotRead:
+            return "No response body."
 
     error = payload.get("error")
     if isinstance(error, dict):
@@ -117,3 +127,13 @@ def _extract_error_message(response: httpx.Response) -> str:
     if error:
         return str(error)
     return str(payload)[:500]
+
+
+def _format_http_error(response: httpx.Response, message: str) -> str:
+    retry_after = response.headers.get("retry-after")
+    details = f"LLM request failed ({response.status_code}): {message}"
+    if response.status_code == 429:
+        if retry_after:
+            return f"{details}. Retry after {retry_after} seconds."
+        return f"{details}. The upstream model is rate-limiting requests."
+    return details

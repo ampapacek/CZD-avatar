@@ -44,6 +44,7 @@ class ChatRequest(BaseModel):
 class Source(BaseModel):
     citation_id: str
     chunk_id: str
+    source_kind: str | None = None
     title: str | None = None
     source_path: str | None = None
     source_path_display: str | None = None

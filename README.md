@@ -4,6 +4,13 @@ A practical RAG chatbot/avatar MVP. It ingests local document collections, retri
 
 The current default setup is a Czech-history avatar. The code is structured so later versions can use different document collections, different metadata, and different system prompts.
 
+Collection-specific app assets currently live under `data/collections/czech_history/`:
+
+- random-question seed file: `questions/questions.txt`
+- extended question set: `questions/questions_extended.txt`
+- topic list: `topics/topics.txt`
+- UFAL logo asset: `assets/logo_ufal_110u.png`
+
 ## Setup
 
 Use Python 3.12. The system `python` command may not exist on this machine, so the examples use `uv`.
@@ -52,7 +59,7 @@ Czech Wikipedia is only for testing the current Czech-history collection before 
 python scripts/download_wikipedia.py --limit 100
 ```
 
-The script reads `questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`.
+The script reads `data/collections/czech_history/questions/questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`.
 
 ## Ingest
 
@@ -93,9 +100,11 @@ API endpoints:
 
 - `GET /health`
 - `GET /settings`
+- `GET /questions/random`
 - `POST /ingest`
 - `POST /retrieve`
 - `POST /chat`
+- `POST /chat/stream`
 
 Example `/chat` body:
 
@@ -115,6 +124,8 @@ The prompt instructs the model to separate:
 - claims supported by retrieved chunks,
 - general historical knowledge,
 - uncertainty or insufficient coverage in the retrieved documents.
+
+The model should first decide whether retrieved chunks are actually relevant. It should cite only chunks that support the answer, avoid forced citations from weak matches, and may add general historical context without pretending it came from the retrieved documents.
 
 The answer cites retrieved chunks with Markdown footnotes. In the answer text these appear as simple footnote numbers, while the generated source list keeps stable source ids such as `[Z1]`, `[Z2]`, etc. The frontend displays source metadata and excerpts, highlights cited sources on the right, and lets you expand retrieved chunks.
 
@@ -147,6 +158,8 @@ Important `.env` variables:
 - `MIN_RELATIVE_SCORE`
 - `DEFAULT_STYLE`
 - `DEFAULT_LENGTH`
+- `RAW_DATA_DIR`
+- `CHUNK_CATALOG_PATH`
 
 ## Basic Test Run
 
@@ -185,7 +198,7 @@ Console output stays shorter, while the file logs persist questions, retrieval m
 
 ## Collections And Prompts
 
-For now, `data/raw/` acts as the active collection and `app/rag/prompts.py` contains the default system prompt. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
+For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the default system prompt. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 
 ## Notes For Future Extensions
 

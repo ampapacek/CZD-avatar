@@ -26,6 +26,9 @@ This file is a practical handoff for future agents working in this repo.
 - `scripts/ask.py` - CLI ask
 - `scripts/batch_answers.py` - batch question/answer runner
 - `scripts/download_wikipedia.py` - test-data downloader
+- `data/collections/czech_history/questions/questions.txt` - random-question seed and default batch/download input
+- `data/collections/czech_history/questions/questions_extended.txt` - extended local question set
+- `data/collections/czech_history/assets/logo_ufal_110u.png` - logo served by the app
 - `data/raw/` - source documents
 - `data/processed/chunks.jsonl` - persisted chunk catalog for BM25/debug
 - `data/qdrant/` - local Qdrant storage
@@ -34,7 +37,7 @@ This file is a practical handoff for future agents working in this repo.
 
 - `answers_avatar*.txt` and `notes.md` are ignored scratch/output files.
 - `data/raw/` is mostly ignored, but `data/raw/agent.md` is intentionally tracked and should stay retrievable.
-- `questions.txt` is reused by the random-question endpoint, the Wikipedia downloader, and `scripts/batch_answers.py`.
+- `data/collections/czech_history/questions/questions.txt` is reused by the random-question endpoint, the Wikipedia downloader, and `scripts/batch_answers.py`.
 
 ## How to run
 
@@ -114,6 +117,8 @@ python scripts/ask.py "Jaký byl význam husitských válek?"
   - answer naturally in the language of the question, usually Czech
   - separate sourced information from general knowledge and uncertainty
   - cite only sources actually used
+  - avoid citing weak or irrelevant retrieved chunks
+  - use general historical knowledge when retrieved context is not relevant enough, without pretending it came from sources
   - not always start with a rigid template like `Podle nalezených zdrojů...`
 - For clearly non-historical questions:
   - respond briefly and naturally
@@ -139,7 +144,7 @@ https://storage.ufal.mff.cuni.cz/lib/2e093cea-cdcd-401d-a664-d1ca05112e55/file/v
 
 - `scripts/download_wikipedia.py`:
   - uses a curated fallback topic list first
-  - then searches based on `questions.txt`
+  - then searches based on `data/collections/czech_history/questions/questions.txt`
   - prints light progress logging
   - skips files already present in the target directory
 - This is only test-data tooling. The project should not become Wikipedia-dependent.
