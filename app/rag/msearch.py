@@ -228,7 +228,14 @@ def _string(value: Any) -> str:
 
 
 def _float(value: Any) -> float:
-    return float(value) if isinstance(value, (int, float)) else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _page_number(value: Any) -> int | None:

@@ -1157,7 +1157,7 @@ async function submitConversationTurn() {
   let latestChunks = [];
   const payload = buildRequestPayload({
     question: prompt,
-    conversation_history: workingConversation.messages.map((message) => ({
+    conversation_history: conversation.messages.map((message) => ({
       role: message.role,
       content: message.content,
     })),
