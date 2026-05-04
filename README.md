@@ -1,15 +1,8 @@
 # rag-avatar
 
-A practical RAG chatbot/avatar MVP. It ingests local document collections, retrieves relevant passages with Qdrant plus BM25, and generates source-grounded answers through an OpenAI-compatible API such as OpenRouter or another compatible provider.
+`rag-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
 
 The current default setup is a Czech-history avatar. A few places are still hardcoded for the historical agent and Czech-history collection, especially default prompts, random questions, UI text, collection assets, and helper scripts. The underlying RAG pipeline is topic-agnostic, though: with different documents, retrieval settings, and prompts it can be used for other domains.
-
-Collection-specific app assets currently live under `data/collections/czech_history/`:
-
-- random-question seed file: `questions/questions.txt`
-- extended question set: `questions/questions_extended.txt`
-- topic list: `topics/topics.txt`
-- UFAL logo asset: `assets/logo_ufal_110u.png`
 
 ## Quick Start
 
@@ -274,6 +267,13 @@ Console output stays shorter, while the file logs persist questions, retrieval m
 ## Collections And Prompts
 
 For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the built-in default prompts. Saved prompt presets are stored in `data/prompt_presets.json`. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
+
+Collection-specific app assets currently live under `data/collections/czech_history/`:
+
+- random-question seed file: `questions/questions.txt`
+- extended question set: `questions/questions_extended.txt`
+- topic list: `topics/topics.txt`
+- UFAL logo asset: `assets/logo_ufal_110u.png`
 
 The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 
