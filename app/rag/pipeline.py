@@ -188,6 +188,8 @@ class RAGPipeline:
         conversation_history: list[dict[str, str]] | None = None,
         top_k: int | None = None,
         model: str | None = None,
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
         dense_weight: float = 0.7,
         bm25_weight: float = 0.3,
         min_score: float | None = None,
@@ -223,7 +225,12 @@ class RAGPipeline:
             length_prompts=length_prompts,
             conversation_history=conversation_history,
         )
-        answer = self.llm.generate(messages, model=resolved_model)
+        answer = self.llm.generate(
+            messages,
+            model=resolved_model,
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+        )
         elapsed = time.perf_counter() - started
         logger.info(
             "Generated answer question=%r style=%s length=%s custom=%r model=%s response_time=%.2fs answer=%s",

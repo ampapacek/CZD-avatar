@@ -11,10 +11,22 @@ class LLMClient:
 
     model: str
 
-    def generate(self, messages: list[dict[str, str]], model: str | None = None) -> str:
+    def generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> str:
         raise NotImplementedError
 
-    def stream_generate(self, messages: list[dict[str, str]], model: str | None = None) -> Iterator[str]:
+    def stream_generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> Iterator[str]:
         raise NotImplementedError
 
 
@@ -27,15 +39,23 @@ class OpenAICompatibleLLM(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def generate(self, messages: list[dict[str, str]], model: str | None = None) -> str:
-        if not self.api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or the environment.")
+    def generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> str:
+        resolved_api_key = api_key or self.api_key
+        resolved_base_url = (base_url or self.base_url).rstrip("/")
+        if not resolved_api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or provide an API key in the UI.")
 
         resolved_model = model or self.model
         response = httpx.post(
-            f"{self.base_url}/chat/completions",
+            f"{resolved_base_url}/chat/completions",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {resolved_api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "http://localhost:8000",
                 "X-Title": "rag-avatar",
@@ -55,9 +75,17 @@ class OpenAICompatibleLLM(LLMClient):
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
 
-    def stream_generate(self, messages: list[dict[str, str]], model: str | None = None) -> Iterator[str]:
-        if not self.api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or the environment.")
+    def stream_generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> Iterator[str]:
+        resolved_api_key = api_key or self.api_key
+        resolved_base_url = (base_url or self.base_url).rstrip("/")
+        if not resolved_api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or provide an API key in the UI.")
 
         resolved_model = model or self.model
         payload = {
@@ -69,9 +97,9 @@ class OpenAICompatibleLLM(LLMClient):
         with httpx.Client(timeout=self.timeout) as client:
             with client.stream(
                 "POST",
-                f"{self.base_url}/chat/completions",
+                f"{resolved_base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {resolved_api_key}",
                     "Content-Type": "application/json",
                     "HTTP-Referer": "http://localhost:8000",
                     "X-Title": "rag-avatar",
