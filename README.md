@@ -1,8 +1,8 @@
 # rag-avatar
 
-A practical RAG chatbot/avatar MVP. It ingests local document collections, retrieves relevant passages with Qdrant plus BM25, and generates source-grounded answers through an OpenAI-compatible API such as OpenRouter.
+A practical RAG chatbot/avatar MVP. It ingests local document collections, retrieves relevant passages with Qdrant plus BM25, and generates source-grounded answers through an OpenAI-compatible API such as OpenRouter or another compatible provider.
 
-The current default setup is a Czech-history avatar. The code is structured so later versions can use different document collections, different metadata, and different system prompts.
+The current default setup is a Czech-history avatar. A few places are still hardcoded for the historical agent and Czech-history collection, especially default prompts, random questions, UI text, collection assets, and helper scripts. The underlying RAG pipeline is topic-agnostic, though: with different documents, retrieval settings, and prompts it can be used for other domains.
 
 Collection-specific app assets currently live under `data/collections/czech_history/`:
 
@@ -35,6 +35,18 @@ MSEARCH_PASSWORD=your_password
 ```
 
 `MSEARCH_BASE_URL`, `MSEARCH_COLLECTION`, `MSEARCH_MODE`, and the other mSearch defaults are already present in `.env.example`.
+
+## LLM Providers
+
+Generation uses an OpenAI-compatible chat-completions API. OpenRouter is the default, but you can point the app at another compatible provider by setting:
+
+```env
+OPENROUTER_BASE_URL=https://your-provider.example/v1
+OPENROUTER_API_KEY=your_provider_key
+OPENROUTER_MODEL=provider/model-or-local-model-name
+```
+
+The variable names still say `OPENROUTER_*` for historical reasons; they are used as the generic LLM API key, model, and base URL. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
 
 ## Run The App
 
@@ -261,11 +273,13 @@ Console output stays shorter, while the file logs persist questions, retrieval m
 
 ## Collections And Prompts
 
-For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the built-in default prompts. Saved prompt presets are stored in `data/prompt_presets.json`. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
+For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the built-in default prompts. Saved prompt presets are stored in `data/prompt_presets.json`. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
+
+The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 
 ## Notes For Future Extensions
 
-- Replace `OpenAICompatibleLLM` with an Ollama/vLLM/OpenAI-compatible local server client.
+- Use `OPENROUTER_BASE_URL` with an Ollama/vLLM/OpenAI-compatible local server or another hosted OpenAI-compatible provider.
 - Add a cross-encoder reranker after hybrid retrieval.
 - Add richer metadata extraction for your real historical archive.
 - Add evaluation sets and automated citation-grounding checks.

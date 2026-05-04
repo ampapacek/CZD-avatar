@@ -5,7 +5,8 @@ This file is a practical handoff for future agents working in this repo.
 ## What this project is
 
 - `rag-avatar` RAG prototype with FastAPI backend and simple static frontend.
-- The current default collection is Czech history, but the intended direction is multiple collections and multiple system prompts for different avatars.
+- The current default collection is Czech history. A few places are still hardcoded for the historical agent and Czech-history collection, including default prompts, random questions, UI copy, collection asset paths, and helper scripts.
+- The underlying RAG pipeline is topic-agnostic and can be used for other domains once documents, prompts, questions, assets, and retrieval settings are swapped.
 - Main goal: retrieve passages from hosted `msearch` or local documents and answer with grounded citations.
 - Current stack:
   - FastAPI
@@ -13,7 +14,7 @@ This file is a practical handoff for future agents working in this repo.
   - local/remote Qdrant
   - sentence-transformers embeddings
   - hybrid retrieval: dense + BM25
-  - OpenRouter via OpenAI-compatible API for generation
+  - OpenRouter or another OpenAI-compatible API for generation
 
 ## Important directories
 
@@ -58,10 +59,13 @@ For the default hosted `msearch` flow, set at least:
 
 ```env
 OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
 ```
+
+Despite the `OPENROUTER_*` names, generation is generic OpenAI-compatible chat completions. Set `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL` for another hosted provider or an OpenAI-compatible local server. The frontend `LLM API` panel can also override base URL/API key for the current browser session.
 
 Run the app:
 
@@ -92,7 +96,7 @@ uvicorn app.main:app --reload
 
 - `.env` is intentionally preferred over already-exported shell env vars.
 - This was changed because an old exported `OPENROUTER_API_KEY` kept overriding the local `.env` key.
-- If OpenRouter behaves strangely, check startup logs for the key fingerprint logged by `app/main.py`.
+- If the LLM provider behaves strangely, check startup logs for the key fingerprint logged by `app/main.py`.
 - Never print the actual key.
 
 ## Retrieval behavior
@@ -110,7 +114,7 @@ uvicorn app.main:app --reload
   - retrieval backend: `msearch` or `local`
   - mSearch collection, mode, and optional confidence floor
   - retrieve-only mode
-  - LLM model
+  - LLM model and custom OpenAI-compatible LLM base URL/API key
 - Prompt presets can be loaded, saved, and deleted from the UI.
 - `top_k=0` intentionally disables retrieval.
 
@@ -132,6 +136,7 @@ uvicorn app.main:app --reload
 ## Prompting behavior
 
 - Prompt is in `app/rag/prompts.py`.
+- It is currently written as a historical assistant prompt. For non-history domains, update the prompt text and any Czech-history examples/UI labels that shape behavior.
 - The model is asked to:
   - answer naturally in the language of the question, usually Czech
   - separate sourced information from general knowledge and uncertainty
@@ -237,3 +242,4 @@ Defined in `app/main.py`:
 - Better semantic explanation of why a chunk matched
 - Optional reranker after hybrid retrieval
 - More robust evaluation scripts for grounding quality
+- Move the remaining Czech-history/historical-agent defaults into collection/avatar config files
