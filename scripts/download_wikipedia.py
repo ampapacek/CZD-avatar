@@ -125,7 +125,7 @@ def main() -> None:
 def collect_titles(questions: list[str], limit: int, search_per_question: int) -> list[str]:
     titles: list[str] = []
     seen: set[str] = set()
-    with httpx.Client(timeout=30.0, headers={"User-Agent": "czech-history-rag-mvp/0.1"}) as client:
+    with httpx.Client(timeout=30.0, headers={"User-Agent": "rag-avatar/0.1"}) as client:
         _log(f"Adding curated seed topics first ({len(CURATED_TOPICS)} topics)")
         for topic in CURATED_TOPICS:
             _add_title(titles, seen, topic)
@@ -154,7 +154,11 @@ def search_titles(client: httpx.Client, query: str, limit: int) -> list[str]:
             "utf8": 1,
         },
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Wikipedia search failed for query=%r: %s", query, exc)
+        return []
     data = response.json()
     return [item["title"] for item in data.get("query", {}).get("search", [])]
 
@@ -164,7 +168,7 @@ def download_pages(titles: list[str], output_dir: Path, target_new_files: int) -
         return 0
 
     saved = 0
-    with httpx.Client(timeout=30.0, headers={"User-Agent": "czech-history-rag-mvp/0.1"}) as client:
+    with httpx.Client(timeout=30.0, headers={"User-Agent": "rag-avatar/0.1"}) as client:
         for index, title in enumerate(titles, start=1):
             expected_path = output_dir / f"{_slugify(title)}.md"
             if expected_path.exists():
@@ -203,7 +207,11 @@ def fetch_page(client: httpx.Client, title: str) -> dict[str, str] | None:
             "utf8": 1,
         },
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Wikipedia page fetch failed for title=%r: %s", title, exc)
+        return None
     pages = response.json().get("query", {}).get("pages", {})
     for page in pages.values():
         text = (page.get("extract") or "").strip()

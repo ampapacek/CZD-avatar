@@ -57,7 +57,8 @@ def get_settings() -> Settings:
         if "MSEARCH_USERNAME" not in values and values.get("MSEARCH_USER"):
             values["MSEARCH_USERNAME"] = values["MSEARCH_USER"]
         for optional_key in ("MSEARCH_MIN_CONFIDENCE", "MSEARCH_COLLECTION"):
-            if values.get(optional_key) == "":
+            value = values.get(optional_key)
+            if isinstance(value, str) and not value.strip():
                 values.pop(optional_key)
         return Settings(**values)
     return Settings()
