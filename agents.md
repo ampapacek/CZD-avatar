@@ -8,6 +8,8 @@ This file is a practical handoff for future agents working in this repo.
 - Before writing any non-trivial code, ask detailed clarifying questions and wait for answers. Small documentation edits, mechanical fixes, and clearly requested one-line changes do not need this pause.
 - Test every non-trivial change before calling it done. Use the most relevant path: run the app and exercise it directly for UI/API behavior, run scripts for CLI behavior, or add/run automated tests when that gives better coverage.
 - When testing directly, include enough detail in the final report that the user can see what was verified and what was not.
+- Before committing, ask the user for approval. Prepare related git commits and clear commit messages, but do not commit or push without explicit user permission unless the user has already stated otherwise.
+- Split commits into related chunks instead of committing all changes at once.
 
 ## What this project is
 
