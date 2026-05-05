@@ -2,6 +2,13 @@
 
 This file is a practical handoff for future agents working in this repo.
 
+## Collaboration rules
+
+- Respond in English unless the user explicitly asks for another language.
+- Before writing any non-trivial code, ask detailed clarifying questions and wait for answers. Small documentation edits, mechanical fixes, and clearly requested one-line changes do not need this pause.
+- Test every non-trivial change before calling it done. Use the most relevant path: run the app and exercise it directly for UI/API behavior, run scripts for CLI behavior, or add/run automated tests when that gives better coverage.
+- When testing directly, include enough detail in the final report that the user can see what was verified and what was not.
+
 ## What this project is
 
 - `rag-avatar` is a RAG web app for asking questions over a document collection, streaming an answer, and inspecting the retrieved/cited sources.
