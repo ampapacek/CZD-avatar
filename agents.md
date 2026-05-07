@@ -41,7 +41,7 @@ This file is a practical handoff for future agents working in this repo.
 - `scripts/download_wikipedia.py` - test-data downloader
 - `data/collections/czech_history/questions/questions.txt` - random-question seed and default batch/download input
 - `data/collections/czech_history/questions/questions_extended.txt` - extended local question set
-- `data/collections/czech_history/assets/logo_ufal_110u.png` - logo served by the app
+- `app/static/logo_ufal_110u.png` - logo served by the app
 - `data/raw/` - source documents
 - `data/processed/chunks.jsonl` - persisted chunk catalog for BM25/debug
 - `data/qdrant/` - local Qdrant storage

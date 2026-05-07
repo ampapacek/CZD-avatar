@@ -279,7 +279,7 @@ Collection-specific app assets currently live under `data/collections/czech_hist
 - random-question seed file: `questions/questions.txt`
 - extended question set: `questions/questions_extended.txt`
 - topic list: `topics/topics.txt`
-- UFAL logo asset: `assets/logo_ufal_110u.png`
+- UFAL logo asset: `app/static/logo_ufal_110u.png`
 
 The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 

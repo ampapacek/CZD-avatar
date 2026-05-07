@@ -67,7 +67,7 @@ app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path(__file__).parent / "static"
 collection_dir = Path(__file__).resolve().parents[1] / "data" / "collections" / "czech_history"
-ufal_logo_path = collection_dir / "assets" / "logo_ufal_110u.png"
+ufal_logo_path = static_dir / "logo_ufal_110u.png"
 questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
