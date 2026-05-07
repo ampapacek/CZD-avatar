@@ -716,8 +716,9 @@ function populateMsearchCollections(presets, currentCollection) {
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
+  const isMsearch = retrievalBackend.value === "msearch";
   if (resetValues) {
-    if (retrievalBackend.value === "msearch") {
+    if (isMsearch) {
       topK.value = appSettings.msearch_defaults?.max_results ?? 10;
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
       msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
@@ -735,13 +736,13 @@ function updateRetrievalControls({ resetValues = false } = {}) {
     topKValue.value = topK.value;
   }
   for (const element of document.querySelectorAll(".msearch-control")) {
-    element.classList.remove("is-hidden");
-    element.hidden = false;
+    element.classList.toggle("is-hidden", !isMsearch);
+    element.hidden = !isMsearch;
   }
   const embeddingField = embeddingModel.closest(".field");
   if (embeddingField) {
-    embeddingField.classList.remove("is-hidden");
-    embeddingField.hidden = false;
+    embeddingField.classList.toggle("is-hidden", isMsearch);
+    embeddingField.hidden = isMsearch;
   }
 }
 
