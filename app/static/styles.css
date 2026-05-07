@@ -285,6 +285,21 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   margin-top: 12px;
 }
 
+.inline-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.inline-actions input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inline-actions button {
+  flex: 0 0 auto;
+}
+
 textarea,
 input,
 select {

@@ -25,6 +25,8 @@ from app.models import (
     PromptPresetSaveRequest,
     RetrieveRequest,
     RetrieveResponse,
+    UnlockRequest,
+    UnlockResponse,
 )
 from app.rag.pipeline import RAGPipeline
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
@@ -205,6 +207,14 @@ def random_question() -> dict[str, str]:
 @app.get("/prompt-presets", response_model=list[PromptPreset])
 def get_prompt_presets() -> list[PromptPreset]:
     return [PromptPreset(**preset) for preset in load_prompt_presets(settings.prompt_presets_path)]
+
+
+@app.post("/unlock", response_model=UnlockResponse)
+def unlock_models(request: UnlockRequest) -> UnlockResponse:
+    if not settings.llm_unlock_password:
+        return UnlockResponse(unlocked=False)
+    unlocked = hmac.compare_digest(request.password.strip(), settings.llm_unlock_password)
+    return UnlockResponse(unlocked=unlocked)
 
 
 @app.post("/prompt-presets", response_model=PromptPreset)

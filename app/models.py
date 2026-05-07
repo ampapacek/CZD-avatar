@@ -77,6 +77,14 @@ class PromptPresetSaveRequest(BaseModel):
     length_prompts: dict[str, str] = Field(default_factory=dict)
 
 
+class UnlockRequest(BaseModel):
+    password: str
+
+
+class UnlockResponse(BaseModel):
+    unlocked: bool
+
+
 class Source(BaseModel):
     citation_id: str
     chunk_id: str

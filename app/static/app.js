@@ -9,6 +9,7 @@ const customModel = document.querySelector("#customModel");
 const llmBaseUrl = document.querySelector("#llmBaseUrl");
 const llmApiKey = document.querySelector("#llmApiKey");
 const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
+const unlockModelsButton = document.querySelector("#unlockModelsButton");
 const retrieveOnly = document.querySelector("#retrieveOnly");
 const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
@@ -88,6 +89,7 @@ let appSettings = {};
 let promptPresets = [];
 let currentStylePrompts = {};
 let currentLengthPrompts = {};
+let llmModelsUnlocked = false;
 
 async function loadSettings() {
   const response = await fetch("settings");
@@ -103,6 +105,9 @@ async function loadSettings() {
   llmUnlockPassword.value = savedLlmSettings.llm_unlock_password || "";
   customModel.value = savedLlmSettings.llm_custom_model || "";
   refreshModelOptions(settings);
+  if (llmUnlockPassword.value.trim()) {
+    await verifyUnlockPassword({ silent: true });
+  }
   populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
@@ -335,7 +340,7 @@ llmBaseUrl.addEventListener("input", persistLlmSettings);
 llmApiKey.addEventListener("input", persistLlmSettings);
 customModel.addEventListener("input", persistLlmSettings);
 model.addEventListener("change", () => {
-  updateCustomModelVisibility(Boolean(llmUnlockPassword?.value.trim()));
+  updateCustomModelVisibility(llmModelsUnlocked);
   persistLlmSettings();
   if (model.value === CUSTOM_MODEL_VALUE) {
     customModel.focus();
@@ -343,8 +348,10 @@ model.addEventListener("change", () => {
 });
 llmUnlockPassword.addEventListener("input", () => {
   persistLlmSettings();
+  llmModelsUnlocked = false;
   refreshModelOptions(appSettings);
 });
+unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
 
 function buildRequestPayload(overrides = {}) {
   return {
@@ -360,7 +367,7 @@ function buildRequestPayload(overrides = {}) {
     model: selectedModelValue(),
     llm_base_url: nullableString(llmBaseUrl.value),
     llm_api_key: nullableString(llmApiKey.value),
-    llm_unlock_password: nullableString(llmUnlockPassword.value),
+    llm_unlock_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -398,6 +405,49 @@ function persistLlmSettings() {
       llm_custom_model: customModel.value.trim(),
     }),
   );
+}
+
+async function verifyUnlockPassword({ silent = false } = {}) {
+  const password = llmUnlockPassword.value.trim();
+  if (!password) {
+    llmModelsUnlocked = false;
+    refreshModelOptions(appSettings);
+    if (!silent) {
+      statusEl.className = "status error";
+      statusEl.textContent = "Zadej odemykací heslo.";
+    }
+    return false;
+  }
+  unlockModelsButton.disabled = true;
+  try {
+    const response = await fetch("unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.unlocked) {
+      throw new Error("Odemykací heslo není správné.");
+    }
+    llmModelsUnlocked = true;
+    persistLlmSettings();
+    refreshModelOptions(appSettings);
+    if (!silent) {
+      statusEl.className = "status";
+      statusEl.textContent = "Modely jsou odemčené.";
+    }
+    return true;
+  } catch (error) {
+    llmModelsUnlocked = false;
+    refreshModelOptions(appSettings);
+    if (!silent) {
+      statusEl.className = "status error";
+      statusEl.textContent = error.message;
+    }
+    return false;
+  } finally {
+    unlockModelsButton.disabled = false;
+  }
 }
 
 async function streamChat(payload) {
@@ -524,7 +574,7 @@ function selectedModelValue() {
 function refreshModelOptions(settings = appSettings) {
   const publicModels = Array.isArray(settings.llm_policy?.public_models) ? settings.llm_policy.public_models.filter(Boolean) : [];
   const allModels = Array.isArray(settings.all_model_presets) ? settings.all_model_presets.filter(Boolean) : publicModels;
-  const unlocked = Boolean(llmUnlockPassword?.value.trim());
+  const unlocked = llmModelsUnlocked;
   const allowedModels = unlocked ? allModels : publicModels;
   const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() || settings.llm_model : model.value || settings.llm_model;
   populateModels(allowedModels, currentModel, unlocked);
@@ -1506,7 +1556,7 @@ function applyHistoryEntryToForm(entry) {
   updatePromptDescriptionEditors();
   renderPromptPresets("default");
   const modelValue = entry.settings?.model || "";
-  const unlocked = Boolean(llmUnlockPassword?.value.trim());
+  const unlocked = llmModelsUnlocked;
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
     model.value = modelValue;
   } else if (unlocked && modelValue) {

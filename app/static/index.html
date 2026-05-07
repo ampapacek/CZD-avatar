@@ -156,10 +156,13 @@
                     <span>API key</span>
                     <input id="llmApiKey" type="password" placeholder="Volitelné přepsání serverového klíče" autocomplete="off" />
                   </label>
-                  <label class="field">
+                  <div class="field">
                     <span>Odemknout modely</span>
-                    <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
-                  </label>
+                    <div class="inline-actions">
+                      <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
+                      <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
+                    </div>
+                  </div>
                   <p class="field-note" id="llmPolicyNote">
                     Veřejné modely jsou jediná volba v rozbalovacím seznamu.
                   </p>
