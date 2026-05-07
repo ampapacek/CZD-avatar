@@ -87,7 +87,7 @@ let currentStylePrompts = {};
 let currentLengthPrompts = {};
 
 async function loadSettings() {
-  const response = await fetch("/settings");
+  const response = await fetch("settings");
   const settings = await response.json();
   appSettings = settings;
   style.value = settings.default_style || "ucitel";
@@ -137,7 +137,7 @@ form.addEventListener("submit", async (event) => {
     const payload = buildRequestPayload();
 
     if (retrieveOnly.checked) {
-      const response = await fetch("/retrieve", {
+      const response = await fetch("retrieve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -194,7 +194,7 @@ randomQuestionButton.addEventListener("click", async () => {
   statusEl.className = "status";
   statusEl.textContent = "Vybírám náhodnou otázku...";
   try {
-    const response = await fetch("/questions/random");
+    const response = await fetch("questions/random");
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");
@@ -391,7 +391,7 @@ async function streamChat(payload) {
 }
 
 async function streamChatWithHandlers(payload, handlers = {}) {
-  const response = await fetch("/chat/stream", {
+  const response = await fetch("chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -510,7 +510,7 @@ function updatePromptDescriptionEditors() {
 
 async function loadPromptPresets(selectedId = promptPreset.value || "default") {
   try {
-    const response = await fetch("/prompt-presets");
+    const response = await fetch("prompt-presets");
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Prompt presets request failed");
@@ -569,7 +569,7 @@ async function saveCurrentPromptPreset() {
     style_prompts: currentStylePrompts,
     length_prompts: currentLengthPrompts,
   };
-  const response = await fetch("/prompt-presets", {
+  const response = await fetch("prompt-presets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -594,7 +594,7 @@ async function deleteSelectedPromptPreset() {
   if (promptPreset.value === "default") {
     return;
   }
-  const response = await fetch(`/prompt-presets/${encodeURIComponent(promptPreset.value)}`, {
+  const response = await fetch(`prompt-presets/${encodeURIComponent(promptPreset.value)}`, {
     method: "DELETE",
   });
   if (!response.ok && response.status !== 404) {
