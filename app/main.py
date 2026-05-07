@@ -38,28 +38,21 @@ from app.rag.prompts import (
 )
 
 
-MODEL_PRESETS = [
-    "openai/gpt-5.2",
-    "openai/gpt-5.4-mini",
-    "meta-llama/llama-3.3-70b-instruct",
-    "meta-llama/llama-3.1-8b-instruct",
-    "openai/gpt-4o-mini",
-    "openai/gpt-4.1-mini",
-    "anthropic/claude-3.5-haiku",
-    "google/gemini-2.0-flash-001",
-    "google/gemini-3.0-pro",
-    "mistralai/mistral-small-3.1-24b-instruct",
-]
-
 log_path = configure_logging("api")
 logger = logging.getLogger(__name__)
 logger.info("Starting API; log file: %s", log_path)
 
 settings = get_settings()
+public_llm_models = settings.public_llm_models()
 key_fingerprint = (
     hashlib.sha256(settings.openrouter_api_key.encode()).hexdigest()[:12] if settings.openrouter_api_key else "missing"
 )
-logger.info("Loaded settings: model=%s openrouter_key_sha256=%s", settings.openrouter_model, key_fingerprint)
+logger.info(
+    "Loaded settings: model=%s openrouter_key_sha256=%s public_models=%s",
+    settings.openrouter_model,
+    key_fingerprint,
+    public_llm_models,
+)
 pipeline = RAGPipeline(settings)
 
 
@@ -77,6 +70,29 @@ collection_dir = Path(__file__).resolve().parents[1] / "data" / "collections" / 
 ufal_logo_path = collection_dir / "assets" / "logo_ufal_110u.png"
 questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def _resolve_llm_request(request: ChatRequest) -> tuple[str, str | None, str | None]:
+    resolved_model = request.model or settings.openrouter_model
+    browser_api_key = request.llm_api_key.strip() if request.llm_api_key else None
+    public_models = set(public_llm_models)
+    if resolved_model not in public_models and not browser_api_key:
+        allowed_models = ", ".join(public_llm_models) if public_llm_models else settings.openrouter_model
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Model '{resolved_model}' requires your own API key. "
+                f"Use the LLM API panel in the browser to enter one, or choose one of the public models: {allowed_models}."
+            ),
+        )
+    resolved_api_key = browser_api_key or settings.openrouter_api_key or None
+    if not resolved_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="No API key is available. Set OPENROUTER_API_KEY on the server or enter your own key in the browser.",
+        )
+    resolved_base_url = request.llm_base_url or settings.openrouter_base_url
+    return resolved_model, resolved_api_key, resolved_base_url
 
 
 @app.get("/", include_in_schema=False)
@@ -105,7 +121,11 @@ def get_public_settings() -> dict[str, object]:
         "embedding_model": settings.embedding_model,
         "llm_model": settings.openrouter_model,
         "llm_base_url": settings.openrouter_base_url,
-        "model_presets": MODEL_PRESETS,
+        "model_presets": public_llm_models,
+        "llm_policy": {
+            "public_models": public_llm_models,
+            "custom_model_requires_browser_key": True,
+        },
         "collection": settings.qdrant_collection,
         "retrieval_backend": settings.retrieval_backend,
         "retrieval_backends": ["msearch", "local"],
@@ -215,6 +235,7 @@ def chat(request: ChatRequest) -> ChatResponse:
     if length not in available_lengths():
         raise HTTPException(status_code=400, detail=f"Unknown length: {length}")
     try:
+        resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
         return pipeline.chat(
             question=request.question,
             style=style,
@@ -226,9 +247,9 @@ def chat(request: ChatRequest) -> ChatResponse:
             length_prompts=request.length_prompts,
             conversation_history=request.conversation_history,
             top_k=request.top_k,
-            model=request.model,
-            llm_api_key=request.llm_api_key,
-            llm_base_url=request.llm_base_url,
+            model=resolved_model,
+            llm_api_key=resolved_api_key,
+            llm_base_url=resolved_base_url,
             dense_weight=request.dense_weight,
             bm25_weight=request.bm25_weight,
             min_score=request.min_score,
@@ -253,8 +274,8 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     def event_stream():
         started = time.perf_counter()
-        resolved_model = request.model or settings.openrouter_model
         try:
+            resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
             retrieved = pipeline.retrieve(
                 request.question,
                 request.top_k,
@@ -292,8 +313,8 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             for token in pipeline.llm.stream_generate(
                 messages,
                 model=resolved_model,
-                api_key=request.llm_api_key,
-                base_url=request.llm_base_url,
+                api_key=resolved_api_key,
+                base_url=resolved_base_url,
             ):
                 answer_parts.append(token)
                 yield _sse_event("token", {"text": token})

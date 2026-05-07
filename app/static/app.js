@@ -16,6 +16,7 @@ const promptPreset = document.querySelector("#promptPreset");
 const savePromptButton = document.querySelector("#savePromptButton");
 const resetPromptButton = document.querySelector("#resetPromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
+const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const systemPrompt = document.querySelector("#systemPrompt");
 const stylePromptDescriptionLabel = document.querySelector("#stylePromptDescriptionLabel");
 const stylePromptDescription = document.querySelector("#stylePromptDescription");
@@ -94,6 +95,7 @@ async function loadSettings() {
   length.value = settings.default_length || "medium";
   populateModels(settings.model_presets || [], settings.llm_model);
   embeddingModel.value = settings.embedding_model || "";
+  updateLlmPolicyNote(settings.llm_policy);
   const savedLlmSettings = loadLlmSettings();
   llmBaseUrl.value = savedLlmSettings.llm_base_url || "";
   llmBaseUrl.placeholder = settings.llm_base_url || "https://api.openai.com/v1";
@@ -692,6 +694,18 @@ function applyTheme(theme) {
   if (themeToggleLabel) {
     themeToggleLabel.textContent = theme === "dark" ? "Světlý" : "Tmavý";
   }
+}
+
+function updateLlmPolicyNote(policy) {
+  if (!llmPolicyNote) {
+    return;
+  }
+  const publicModels = Array.isArray(policy?.public_models) ? policy.public_models.filter(Boolean) : [];
+  if (publicModels.length > 0) {
+    llmPolicyNote.textContent = `Bez vlastního klíče jsou povolené jen tyto modely: ${publicModels.join(", ")}. Ostatní modely fungují jen s API klíčem, který se ukládá v tomto prohlížeči.`;
+    return;
+  }
+  llmPolicyNote.textContent = "Jiný model použij jen s vlastním API klíčem, který se uloží pouze v tomto prohlížeči.";
 }
 
 function nullableNumber(value) {

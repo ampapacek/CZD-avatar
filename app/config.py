@@ -6,6 +6,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables and .env."""
 
@@ -14,6 +20,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="openai/gpt-4o-mini", alias="OPENROUTER_MODEL")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL")
+    llm_public_models: str = Field(default="", alias="LLM_PUBLIC_MODELS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")
@@ -45,6 +52,10 @@ class Settings(BaseSettings):
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
+
+    def public_llm_models(self) -> list[str]:
+        models = _split_csv(self.llm_public_models)
+        return models or [self.openrouter_model]
 
 
 @lru_cache

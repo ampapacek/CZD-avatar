@@ -21,7 +21,7 @@ For the default hosted `msearch` flow, you typically only need:
 
 ```env
 OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+OPENROUTER_MODEL=openrouter/free
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
@@ -40,6 +40,8 @@ OPENROUTER_MODEL=provider/model-or-local-model-name
 ```
 
 The variable names still say `OPENROUTER_*` for historical reasons; they are used as the generic LLM API key, model, and base URL. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
+
+If you want to limit the shared server key to only a safe or free model, set `LLM_PUBLIC_MODELS` in `.env`. The simplest option is `openrouter/free`, which routes requests to currently available free models on OpenRouter. The web UI will then allow that model without an API key, while any other model will require the user to enter their own key in the browser.
 
 ## Run The App
 
@@ -205,6 +207,7 @@ Important `.env` variables:
 - `OPENROUTER_API_KEY`
 - `OPENROUTER_MODEL`
 - `OPENROUTER_BASE_URL`
+- `LLM_PUBLIC_MODELS`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`
