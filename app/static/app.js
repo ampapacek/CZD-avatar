@@ -4,9 +4,9 @@ const style = document.querySelector("#style");
 const length = document.querySelector("#length");
 const customInstructions = document.querySelector("#customInstructions");
 const model = document.querySelector("#model");
-const customModel = document.querySelector("#customModel");
 const llmBaseUrl = document.querySelector("#llmBaseUrl");
 const llmApiKey = document.querySelector("#llmApiKey");
+const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const retrieveOnly = document.querySelector("#retrieveOnly");
 const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
@@ -75,7 +75,6 @@ const LENGTH_LABELS = {
   medium: "střední",
   long: "dlouhá",
 };
-const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
 let selectedConversationId = null;
@@ -93,13 +92,13 @@ async function loadSettings() {
   appSettings = settings;
   style.value = settings.default_style || "ucitel";
   length.value = settings.default_length || "medium";
-  populateModels(settings.model_presets || [], settings.llm_model);
   embeddingModel.value = settings.embedding_model || "";
-  updateLlmPolicyNote(settings.llm_policy);
   const savedLlmSettings = loadLlmSettings();
   llmBaseUrl.value = savedLlmSettings.llm_base_url || "";
   llmBaseUrl.placeholder = settings.llm_base_url || "https://api.openai.com/v1";
   llmApiKey.value = savedLlmSettings.llm_api_key || "";
+  llmUnlockPassword.value = savedLlmSettings.llm_unlock_password || "";
+  refreshModelOptions(settings);
   populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
@@ -286,7 +285,6 @@ topK.addEventListener("input", () => {
 });
 
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
-model.addEventListener("change", updateCustomModelField);
 style.addEventListener("change", updatePromptDescriptionEditors);
 length.addEventListener("change", updatePromptDescriptionEditors);
 stylePromptDescription.addEventListener("input", () => {
@@ -327,6 +325,10 @@ themeToggle.addEventListener("click", () => {
 });
 llmBaseUrl.addEventListener("input", persistLlmSettings);
 llmApiKey.addEventListener("input", persistLlmSettings);
+llmUnlockPassword.addEventListener("input", () => {
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+});
 
 function buildRequestPayload(overrides = {}) {
   return {
@@ -342,6 +344,7 @@ function buildRequestPayload(overrides = {}) {
     model: selectedModelValue(),
     llm_base_url: nullableString(llmBaseUrl.value),
     llm_api_key: nullableString(llmApiKey.value),
+    llm_unlock_password: nullableString(llmUnlockPassword.value),
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -361,9 +364,10 @@ function loadLlmSettings() {
     return {
       llm_base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
       llm_api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
+      llm_unlock_password: typeof raw.llm_unlock_password === "string" ? raw.llm_unlock_password : "",
     };
   } catch {
-    return { llm_base_url: "", llm_api_key: "" };
+    return { llm_base_url: "", llm_api_key: "", llm_unlock_password: "" };
   }
 }
 
@@ -373,6 +377,7 @@ function persistLlmSettings() {
     JSON.stringify({
       llm_base_url: llmBaseUrl.value.trim(),
       llm_api_key: llmApiKey.value,
+      llm_unlock_password: llmUnlockPassword.value,
     }),
   );
 }
@@ -476,31 +481,25 @@ async function safeJson(response) {
 }
 
 function populateModels(presets, currentModel) {
-  const uniqueModels = Array.from(new Set([currentModel, ...presets].filter(Boolean)));
+  const uniqueModels = Array.from(new Set(presets.filter(Boolean)));
   model.innerHTML = uniqueModels
     .map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`)
-    .join("") + `<option value="${CUSTOM_MODEL_VALUE}">Jiný model</option>`;
-  model.value = currentModel;
-  updateCustomModelField();
+    .join("");
+  const selectedModel = uniqueModels.includes(currentModel) ? currentModel : uniqueModels[0] || currentModel;
+  model.value = selectedModel || "";
 }
 
 function selectedModelValue() {
-  if (model.value === CUSTOM_MODEL_VALUE) {
-    return customModel.value.trim();
-  }
   return model.value;
 }
 
-function updateCustomModelField() {
-  const customField = customModel.closest(".field");
-  const isCustom = model.value === CUSTOM_MODEL_VALUE;
-  if (customField) {
-    customField.hidden = !isCustom;
-    customField.classList.toggle("is-hidden", !isCustom);
-  }
-  if (!isCustom) {
-    customModel.value = "";
-  }
+function refreshModelOptions(settings = appSettings) {
+  const publicModels = Array.isArray(settings.llm_policy?.public_models) ? settings.llm_policy.public_models.filter(Boolean) : [];
+  const allModels = Array.isArray(settings.all_model_presets) ? settings.all_model_presets.filter(Boolean) : publicModels;
+  const unlocked = Boolean(llmUnlockPassword?.value.trim());
+  const allowedModels = unlocked ? allModels : publicModels;
+  populateModels(allowedModels, model.value || settings.llm_model);
+  updateLlmPolicyNote(settings.llm_policy, unlocked);
 }
 
 function updatePromptDescriptionEditors() {
@@ -696,16 +695,20 @@ function applyTheme(theme) {
   }
 }
 
-function updateLlmPolicyNote(policy) {
+function updateLlmPolicyNote(policy, unlocked = false) {
   if (!llmPolicyNote) {
     return;
   }
   const publicModels = Array.isArray(policy?.public_models) ? policy.public_models.filter(Boolean) : [];
-  if (publicModels.length > 0) {
-    llmPolicyNote.textContent = `Bez vlastního klíče jsou povolené jen tyto modely: ${publicModels.join(", ")}. Ostatní modely fungují jen s API klíčem, který se ukládá v tomto prohlížeči.`;
+  if (unlocked) {
+    llmPolicyNote.textContent = "Odemčeno: v rozbalovacím seznamu jsou všechny dostupné modely.";
     return;
   }
-  llmPolicyNote.textContent = "Jiný model použij jen s vlastním API klíčem, který se uloží pouze v tomto prohlížeči.";
+  if (publicModels.length > 0) {
+    llmPolicyNote.textContent = `Bez odemykacího hesla jsou povolené jen tyto modely: ${publicModels.join(", ")}.`;
+    return;
+  }
+  llmPolicyNote.textContent = "Dostupné jsou jen veřejné modely nastavené na serveru.";
 }
 
 function nullableNumber(value) {
@@ -1322,6 +1325,7 @@ function saveHistoryEntry(entry) {
 function sanitizeHistorySettings(settings) {
   const sanitized = { ...settings };
   delete sanitized.llm_api_key;
+  delete sanitized.llm_unlock_password;
   return sanitized;
 }
 
@@ -1457,12 +1461,9 @@ function applyHistoryEntryToForm(entry) {
   const modelValue = entry.settings?.model || "";
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
     model.value = modelValue;
-    customModel.value = "";
-  } else {
-    model.value = CUSTOM_MODEL_VALUE;
-    customModel.value = modelValue;
+  } else if (model.options.length > 0) {
+    model.value = model.options[0].value;
   }
-  updateCustomModelField();
   llmBaseUrl.value = entry.settings?.llm_base_url || llmBaseUrl.value;
   persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";

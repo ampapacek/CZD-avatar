@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import hashlib
+import hmac
 import random
 import time
 from pathlib import Path
@@ -44,14 +45,41 @@ logger.info("Starting API; log file: %s", log_path)
 
 settings = get_settings()
 public_llm_models = settings.public_llm_models()
+ALL_MODEL_PRESETS = [
+    "openrouter/free",
+    "openai/gpt-5.2",
+    "openai/gpt-5.4-mini",
+    "meta-llama/llama-3.3-70b-instruct",
+    "meta-llama/llama-3.1-8b-instruct",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4.1-mini",
+    "anthropic/claude-3.5-haiku",
+    "google/gemini-2.0-flash-001",
+    "google/gemini-3.0-pro",
+    "mistralai/mistral-small-3.1-24b-instruct",
+]
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+all_llm_models = _dedupe_preserve_order([*public_llm_models, *ALL_MODEL_PRESETS, settings.llm_model])
 key_fingerprint = (
     hashlib.sha256(settings.llm_api_key.encode()).hexdigest()[:12] if settings.llm_api_key else "missing"
 )
 logger.info(
-    "Loaded settings: model=%s llm_key_sha256=%s public_models=%s",
+    "Loaded settings: model=%s llm_key_sha256=%s public_models=%s unlock_password=%s",
     settings.llm_model,
     key_fingerprint,
     public_llm_models,
+    "set" if settings.llm_unlock_password else "missing",
 )
 pipeline = RAGPipeline(settings)
 
@@ -75,14 +103,19 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str | None, str | None]:
     resolved_model = request.model or settings.llm_model
     browser_api_key = request.llm_api_key.strip() if request.llm_api_key else None
+    browser_unlock_password = request.llm_unlock_password.strip() if request.llm_unlock_password else ""
+    unlock_enabled = bool(settings.llm_unlock_password) and hmac.compare_digest(
+        browser_unlock_password,
+        settings.llm_unlock_password,
+    )
     public_models = set(public_llm_models)
-    if resolved_model not in public_models and not browser_api_key:
+    if resolved_model not in public_models and not unlock_enabled and not browser_api_key:
         allowed_models = ", ".join(public_llm_models) if public_llm_models else settings.llm_model
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Model '{resolved_model}' requires your own API key. "
-                f"Use the LLM API panel in the browser to enter one, or choose one of the public models: {allowed_models}."
+                f"Use the LLM API panel in the browser to enter one, unlock all models with the shared password, or choose one of the public models: {allowed_models}."
             ),
         )
     resolved_api_key = browser_api_key or settings.llm_api_key or None
@@ -122,9 +155,12 @@ def get_public_settings() -> dict[str, object]:
         "llm_model": settings.llm_model,
         "llm_base_url": settings.llm_base_url,
         "model_presets": public_llm_models,
+        "all_model_presets": all_llm_models,
         "llm_policy": {
             "public_models": public_llm_models,
+            "all_models": all_llm_models,
             "custom_model_requires_browser_key": True,
+            "unlock_password_enabled": bool(settings.llm_unlock_password),
         },
         "collection": settings.qdrant_collection,
         "retrieval_backend": settings.retrieval_backend,

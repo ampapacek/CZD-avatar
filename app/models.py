@@ -43,6 +43,7 @@ class ChatRequest(BaseModel):
     style_prompts: dict[str, str] | None = None
     length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
+    llm_unlock_password: str | None = None
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     msearch_collection: str | None = None

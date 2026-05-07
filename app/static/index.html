@@ -138,10 +138,6 @@
                 <span>Min. confidence</span>
                 <input id="msearchMinConfidence" type="number" min="0" max="1" step="0.05" placeholder="Volitelné" />
               </label>
-              <label class="field custom-model-field" hidden>
-                <span>Vlastní model</span>
-                <input id="customModel" type="text" placeholder="Např. meta-llama/..." />
-              </label>
               <details class="api-section">
                 <summary>LLM API</summary>
                 <div class="api-section-body">
@@ -153,10 +149,14 @@
                     <span>API key</span>
                     <input id="llmApiKey" type="password" placeholder="Volitelné přepsání serverového klíče" autocomplete="off" />
                   </label>
+                  <label class="field">
+                    <span>Odemknout modely</span>
+                    <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
+                  </label>
                   <p class="field-note" id="llmPolicyNote">
-                    Veřejné modely běží na serveru. Jiný model použij jen s vlastním API klíčem, který se uloží pouze v tomto prohlížeči.
+                    Veřejné modely jsou jediná volba v rozbalovacím seznamu.
                   </p>
-                  <p class="field-note">Ukládá se jen lokálně v tomto prohlížeči. Pokud pole necháš prázdné, použije se serverové nastavení.</p>
+                  <p class="field-note">API klíč i odemykací heslo se ukládají jen lokálně v tomto prohlížeči. Pokud pole necháš prázdné, použije se serverové nastavení.</p>
                 </div>
               </details>
               <label class="field">

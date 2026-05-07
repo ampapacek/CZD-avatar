@@ -43,6 +43,8 @@ The variable names are now generic `LLM_*`. `OPENROUTER_*` is still accepted as 
 
 If you want to limit the shared server key to only a safe or free model, set `LLM_PUBLIC_MODELS` in `.env`. The simplest option is `openrouter/free`, which routes requests to currently available free models on OpenRouter. The web UI will then allow that model without an API key, while any other model will require the user to enter their own key in the browser.
 
+If you also set `LLM_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models in `LLM_PUBLIC_MODELS` appear in the selector.
+
 ## Run The App
 
 Start the API and frontend:
@@ -211,6 +213,7 @@ Important `.env` variables:
 - `OPENROUTER_MODEL` as a backward-compatible alias
 - `OPENROUTER_BASE_URL` as a backward-compatible alias
 - `LLM_PUBLIC_MODELS`
+- `LLM_UNLOCK_PASSWORD`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`

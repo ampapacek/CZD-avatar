@@ -79,6 +79,8 @@ Despite the legacy alias names, generation is generic OpenAI-compatible chat com
 
 Future config cleanup should keep the `LLM_*` names as the primary interface, retain `OPENROUTER_*` as backward-compatible aliases for at least one release, and continue updating docs/UI copy to avoid implying that OpenRouter is required.
 
+If a shared override is needed, `LLM_UNLOCK_PASSWORD` can unlock the full preset list in the browser while keeping the public-only default for everyone else.
+
 Run the app:
 
 ```bash

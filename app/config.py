@@ -27,6 +27,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLM_BASE_URL", "OPENROUTER_BASE_URL"),
     )
     llm_public_models: str = Field(default="", alias="LLM_PUBLIC_MODELS")
+    llm_unlock_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_UNLOCK_PASSWORD", "OPENROUTER_UNLOCK_PASSWORD"),
+    )
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")
