@@ -138,6 +138,9 @@
                 <span>Min. confidence</span>
                 <input id="msearchMinConfidence" type="number" min="0" max="1" step="0.05" placeholder="Volitelné" />
               </label>
+              <p class="field-note retrieval-threshold-note">
+                `Min. confidence` platí pro mSearch, `Min. skóre` a `Min. vůči nejlepšímu` se používají v aplikaci po seřazení výsledků.
+              </p>
               <details class="api-section">
                 <summary>LLM API</summary>
                 <div class="api-section-body">
@@ -163,19 +166,19 @@
                 <span>Dokumentů: <output id="topKValue">10</output></span>
                 <input id="topK" type="range" min="0" max="50" step="1" value="10" />
               </label>
-              <label class="field local-control">
+              <label class="field">
                 <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
                 <input id="denseWeight" type="range" min="0" max="1" step="0.05" value="0.70" />
               </label>
-              <label class="field local-control">
+              <label class="field">
                 <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
                 <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
               </label>
-              <label class="field local-control">
+              <label class="field">
                 <span>Min. skóre</span>
                 <input id="minScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.30" />
               </label>
-              <label class="field local-control">
+              <label class="field">
                 <span>Min. vůči nejlepšímu</span>
                 <input id="minRelativeScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.50" />
               </label>

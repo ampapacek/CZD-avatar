@@ -641,9 +641,8 @@ function populateMsearchCollections(presets, currentCollection) {
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
-  const isMsearch = retrievalBackend.value === "msearch";
   if (resetValues) {
-    if (isMsearch) {
+    if (retrievalBackend.value === "msearch") {
       topK.value = appSettings.msearch_defaults?.max_results ?? 10;
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
       msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
@@ -1403,12 +1402,13 @@ function renderHistoryDetail(entry) {
       <div class="settings-grid">
         ${renderSetting("Profil", entry.settings?.style)}
         ${renderSetting("Délka", entry.settings?.length)}
-        ${renderSetting("Model", entry.model_used || entry.settings?.model)}
+        ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
         ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
         ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
         ${renderSetting("Top-k", entry.settings?.top_k)}
         ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
         ${renderSetting("Váha BM25", entry.settings?.bm25_weight)}
+        ${renderSetting("Min. confidence mSearch", entry.settings?.msearch_min_confidence)}
         ${renderSetting("Min. skóre", entry.settings?.min_score)}
         ${renderSetting("Min. vůči nejlepšímu", entry.settings?.min_relative_score)}
         ${renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}

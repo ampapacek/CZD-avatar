@@ -170,6 +170,7 @@ def get_public_settings() -> dict[str, object]:
             "bm25_weight": 0.3,
             "min_score": settings.min_score,
             "min_relative_score": settings.min_relative_score,
+            "msearch_min_confidence": settings.msearch_min_confidence,
             "top_k_min": 0,
             "top_k_max": 50,
         },

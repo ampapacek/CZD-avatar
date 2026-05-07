@@ -128,6 +128,8 @@ class RAGPipeline:
                 collection_id=msearch_collection,
                 mode=msearch_mode,
                 min_confidence=msearch_min_confidence,
+                min_score=resolved_min_score,
+                min_relative_score=resolved_min_relative_score,
             )
             logger.info(
                 "Retrieved %s chunks from mSearch for question=%r top_k=%s collection=%s mode=%s min_confidence=%s",

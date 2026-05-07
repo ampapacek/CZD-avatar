@@ -69,6 +69,8 @@ class MSearchRetriever:
         collection_id: str | None = None,
         mode: str | None = None,
         min_confidence: float | None = None,
+        min_score: float | None = None,
+        min_relative_score: float | None = None,
     ) -> list[dict[str, Any]]:
         if top_k <= 0:
             return []
@@ -99,7 +101,8 @@ class MSearchRetriever:
             response.raise_for_status()
             data = response.json()
 
-        return _records_from_response(data, top_k)
+        records = _records_from_response(data, max(top_k * 3, top_k))
+        return _filter_by_thresholds(records, min_score, min_relative_score)[:top_k]
 
     @property
     def base_url(self) -> str:
@@ -244,3 +247,23 @@ def _page_number(value: Any) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _filter_by_thresholds(
+    records: list[dict[str, Any]],
+    min_score: float | None,
+    min_relative_score: float | None,
+) -> list[dict[str, Any]]:
+    if not records:
+        return []
+    ranked = sorted(records, key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    best_score = float(ranked[0].get("score") or 0.0)
+    filtered = ranked
+    if min_score is not None:
+        filtered = [record for record in filtered if float(record.get("score") or 0.0) >= min_score]
+    if min_relative_score is not None and best_score > 0:
+        threshold = best_score * min_relative_score
+        filtered = [record for record in filtered if float(record.get("score") or 0.0) >= threshold]
+    for index, record in enumerate(filtered, start=1):
+        record["citation_id"] = f"Z{index}"
+    return filtered
