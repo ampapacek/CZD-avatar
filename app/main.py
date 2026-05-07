@@ -346,22 +346,25 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 conversation_history=request.conversation_history,
             )
             answer_parts: list[str] = []
-            for token in pipeline.llm.stream_generate(
+            stream = pipeline.llm.stream_generate(
                 messages,
                 model=resolved_model,
                 api_key=resolved_api_key,
                 base_url=resolved_base_url,
-            ):
+            )
+            for token in stream:
                 answer_parts.append(token)
                 yield _sse_event("token", {"text": token})
 
             answer = "".join(answer_parts).strip()
             elapsed = time.perf_counter() - started
+            upstream_model = stream.upstream_model or resolved_model
             response = {
                 "answer": answer,
                 "sources": [_serialize_source(chunk) for chunk in retrieved],
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in retrieved],
                 "model": resolved_model,
+                "upstream_model": upstream_model,
                 "response_time_seconds": round(elapsed, 3),
             }
             logger.info(

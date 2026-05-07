@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from collections.abc import Iterator
 
 import httpx
+
+
+@dataclass(slots=True)
+class LLMGeneration:
+    answer: str
+    model: str | None = None
 
 
 class LLMClient:
@@ -17,7 +24,7 @@ class LLMClient:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-    ) -> str:
+    ) -> LLMGeneration:
         raise NotImplementedError
 
     def stream_generate(
@@ -45,7 +52,7 @@ class OpenAICompatibleLLM(LLMClient):
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-    ) -> str:
+    ) -> LLMGeneration:
         resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
         if not resolved_api_key:
@@ -73,7 +80,10 @@ class OpenAICompatibleLLM(LLMClient):
             message = _extract_error_message(response)
             raise RuntimeError(_format_http_error(response, message)) from exc
         data = response.json()
-        return data["choices"][0]["message"]["content"].strip()
+        return LLMGeneration(
+            answer=data["choices"][0]["message"]["content"].strip(),
+            model=str(data.get("model") or resolved_model),
+        )
 
     def stream_generate(
         self,
@@ -82,24 +92,47 @@ class OpenAICompatibleLLM(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> Iterator[str]:
-        resolved_api_key = api_key or self.api_key
-        resolved_base_url = (base_url or self.base_url).rstrip("/")
-        if not resolved_api_key:
+        return _OpenAICompatibleStream(
+            api_key=api_key or self.api_key,
+            model=model or self.model,
+            base_url=(base_url or self.base_url).rstrip("/"),
+            messages=messages,
+            timeout=self.timeout,
+        )
+
+
+class _OpenAICompatibleStream:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        messages: list[dict[str, str]],
+        timeout: float,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url
+        self.messages = messages
+        self.timeout = timeout
+        self.upstream_model: str | None = None
+
+    def __iter__(self) -> Iterator[str]:
+        if not self.api_key:
             raise RuntimeError("LLM_API_KEY is not set. Add it to .env or provide an API key in the UI.")
 
-        resolved_model = model or self.model
         payload = {
-            "model": resolved_model,
-            "messages": messages,
+            "model": self.model,
+            "messages": self.messages,
             "temperature": 0.2,
             "stream": True,
         }
         with httpx.Client(timeout=self.timeout) as client:
             with client.stream(
                 "POST",
-                f"{resolved_base_url}/chat/completions",
+                f"{self.base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {resolved_api_key}",
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                     "HTTP-Referer": "http://localhost:8000",
                     "X-Title": "rag-avatar",
@@ -124,6 +157,9 @@ class OpenAICompatibleLLM(LLMClient):
                         event = json.loads(data)
                     except ValueError:
                         continue
+                    event_model = event.get("model")
+                    if isinstance(event_model, str) and event_model.strip():
+                        self.upstream_model = event_model.strip()
                     choices = event.get("choices") or []
                     if not choices:
                         continue

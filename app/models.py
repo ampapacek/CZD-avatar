@@ -112,6 +112,7 @@ class ChatResponse(BaseModel):
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]
     model: str
+    upstream_model: str | None = None
     response_time_seconds: float
 
 

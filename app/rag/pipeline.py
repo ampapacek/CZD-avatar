@@ -225,12 +225,14 @@ class RAGPipeline:
             length_prompts=length_prompts,
             conversation_history=conversation_history,
         )
-        answer = self.llm.generate(
+        generation = self.llm.generate(
             messages,
             model=resolved_model,
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
+        answer = generation.answer
+        upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
             "Generated answer question=%r style=%s length=%s custom=%r model=%s response_time=%.2fs answer=%s",
@@ -247,6 +249,7 @@ class RAGPipeline:
             sources=[_source_from_chunk(chunk) for chunk in retrieved],
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in retrieved],
             model=resolved_model,
+            upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),
         )
 

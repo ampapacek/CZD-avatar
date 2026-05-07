@@ -165,7 +165,10 @@ form.addEventListener("submit", async (event) => {
       const data = await streamChat(payload);
       streamedAnswerText = data.answer || streamedAnswerText;
       renderAnswer(streamedAnswerText);
-      statusEl.textContent = `Hotovo za ${data.response_time_seconds}s · ${data.model}`;
+      const modelLabel = formatModelUsageLabel(data.model, data.upstream_model);
+      statusEl.textContent = modelLabel
+        ? `Hotovo za ${data.response_time_seconds}s · ${modelLabel}`
+        : `Hotovo za ${data.response_time_seconds}s`;
       currentAnswerSources = data.sources || [];
       currentRetrievedChunks = data.retrieved_chunks || [];
       renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
@@ -178,6 +181,7 @@ form.addEventListener("submit", async (event) => {
         retrieved_chunks: data.retrieved_chunks || [],
         sources: data.sources || [],
         model_used: data.model || model.value,
+        upstream_model: data.upstream_model || null,
         response_time_seconds: data.response_time_seconds,
       });
     }
@@ -657,17 +661,13 @@ function updateRetrievalControls({ resetValues = false } = {}) {
     topKValue.value = topK.value;
   }
   for (const element of document.querySelectorAll(".msearch-control")) {
-    element.classList.toggle("is-hidden", !isMsearch);
-    element.hidden = !isMsearch;
-  }
-  for (const element of document.querySelectorAll(".local-control")) {
-    element.classList.toggle("is-hidden", isMsearch);
-    element.hidden = isMsearch;
+    element.classList.remove("is-hidden");
+    element.hidden = false;
   }
   const embeddingField = embeddingModel.closest(".field");
-  embeddingField?.classList.toggle("is-hidden", isMsearch);
   if (embeddingField) {
-    embeddingField.hidden = isMsearch;
+    embeddingField.classList.remove("is-hidden");
+    embeddingField.hidden = false;
   }
 }
 
@@ -1133,7 +1133,7 @@ function renderConversationMessage(message) {
       : `<p>${escapeHtml(message.content || "")}</p>`;
   const metaParts = [];
   if (message.role === "assistant" && message.model_used) {
-    metaParts.push(escapeHtml(message.model_used));
+    metaParts.push(escapeHtml(formatModelUsageLabel(message.model_used, message.upstream_model)));
   }
   if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
@@ -1200,6 +1200,7 @@ async function submitConversationTurn() {
             sources: latestSources,
             retrieved_chunks: latestChunks,
             model_used: payload.model,
+            upstream_model: null,
             response_time_seconds: null,
             createdAt: new Date().toISOString(),
           });
@@ -1231,6 +1232,7 @@ async function submitConversationTurn() {
             sources: latestSources,
             retrieved_chunks: latestChunks,
             model_used: payload.model,
+            upstream_model: null,
             response_time_seconds: null,
             createdAt: new Date().toISOString(),
           });
@@ -1248,6 +1250,7 @@ async function submitConversationTurn() {
           sources: data.sources || latestSources,
           retrieved_chunks: data.retrieved_chunks || latestChunks,
           model_used: data.model || payload.model,
+          upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
           createdAt: new Date().toISOString(),
         };
@@ -1313,6 +1316,7 @@ function saveHistoryEntry(entry) {
     retrieved_chunks: entry.retrieved_chunks || [],
     sources: entry.sources || [],
     model_used: entry.model_used || null,
+    upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
     createdAt: new Date().toISOString(),
   });
@@ -1327,6 +1331,15 @@ function sanitizeHistorySettings(settings) {
   delete sanitized.llm_api_key;
   delete sanitized.llm_unlock_password;
   return sanitized;
+}
+
+function formatModelUsageLabel(requestedModel, upstreamModel) {
+  const requested = String(requestedModel || "").trim();
+  const upstream = String(upstreamModel || "").trim();
+  if (requested && upstream && requested !== upstream) {
+    return `${requested} · ${upstream}`;
+  }
+  return requested || upstream || "";
 }
 
 function renderHistory() {
