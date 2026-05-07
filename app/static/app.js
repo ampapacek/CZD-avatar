@@ -4,6 +4,8 @@ const style = document.querySelector("#style");
 const length = document.querySelector("#length");
 const customInstructions = document.querySelector("#customInstructions");
 const model = document.querySelector("#model");
+const customModelField = document.querySelector("#customModelField");
+const customModel = document.querySelector("#customModel");
 const llmBaseUrl = document.querySelector("#llmBaseUrl");
 const llmApiKey = document.querySelector("#llmApiKey");
 const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
@@ -75,6 +77,7 @@ const LENGTH_LABELS = {
   medium: "střední",
   long: "dlouhá",
 };
+const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
 let selectedConversationId = null;
@@ -98,6 +101,7 @@ async function loadSettings() {
   llmBaseUrl.placeholder = settings.llm_base_url || "https://api.openai.com/v1";
   llmApiKey.value = savedLlmSettings.llm_api_key || "";
   llmUnlockPassword.value = savedLlmSettings.llm_unlock_password || "";
+  customModel.value = savedLlmSettings.llm_custom_model || "";
   refreshModelOptions(settings);
   populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
   retrievalBackend.value = settings.retrieval_backend || "msearch";
@@ -297,7 +301,7 @@ stylePromptDescription.addEventListener("input", () => {
 lengthPromptDescription.addEventListener("input", () => {
   currentLengthPrompts[length.value] = lengthPromptDescription.value;
 });
-promptPreset.addEventListener("change", applySelectedPromptPreset);
+  promptPreset.addEventListener("change", applySelectedPromptPreset);
 savePromptButton.addEventListener("click", async () => {
   savePromptButton.disabled = true;
   try {
@@ -329,6 +333,14 @@ themeToggle.addEventListener("click", () => {
 });
 llmBaseUrl.addEventListener("input", persistLlmSettings);
 llmApiKey.addEventListener("input", persistLlmSettings);
+customModel.addEventListener("input", persistLlmSettings);
+model.addEventListener("change", () => {
+  updateCustomModelVisibility(Boolean(llmUnlockPassword?.value.trim()));
+  persistLlmSettings();
+  if (model.value === CUSTOM_MODEL_VALUE) {
+    customModel.focus();
+  }
+});
 llmUnlockPassword.addEventListener("input", () => {
   persistLlmSettings();
   refreshModelOptions(appSettings);
@@ -369,9 +381,10 @@ function loadLlmSettings() {
       llm_base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
       llm_api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
       llm_unlock_password: typeof raw.llm_unlock_password === "string" ? raw.llm_unlock_password : "",
+      llm_custom_model: typeof raw.llm_custom_model === "string" ? raw.llm_custom_model : "",
     };
   } catch {
-    return { llm_base_url: "", llm_api_key: "", llm_unlock_password: "" };
+    return { llm_base_url: "", llm_api_key: "", llm_unlock_password: "", llm_custom_model: "" };
   }
 }
 
@@ -382,6 +395,7 @@ function persistLlmSettings() {
       llm_base_url: llmBaseUrl.value.trim(),
       llm_api_key: llmApiKey.value,
       llm_unlock_password: llmUnlockPassword.value,
+      llm_custom_model: customModel.value.trim(),
     }),
   );
 }
@@ -484,17 +498,27 @@ async function safeJson(response) {
   }
 }
 
-function populateModels(presets, currentModel) {
+function populateModels(presets, currentModel, allowCustom = false) {
   const uniqueModels = Array.from(new Set(presets.filter(Boolean)));
-  model.innerHTML = uniqueModels
-    .map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`)
-    .join("");
-  const selectedModel = uniqueModels.includes(currentModel) ? currentModel : uniqueModels[0] || currentModel;
+  const options = uniqueModels.map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`);
+  if (allowCustom) {
+    options.push(`<option value="${escapeHtml(CUSTOM_MODEL_VALUE)}">Jiný model…</option>`);
+  }
+  model.innerHTML = options.join("");
+
+  let selectedModel = currentModel;
+  if (allowCustom && ((currentModel && !uniqueModels.includes(currentModel)) || (!currentModel && customModel.value.trim()))) {
+    selectedModel = CUSTOM_MODEL_VALUE;
+    customModel.value = currentModel || customModel.value.trim();
+  } else if (!allowCustom && !uniqueModels.includes(currentModel)) {
+    selectedModel = uniqueModels[0] || currentModel;
+  }
   model.value = selectedModel || "";
+  updateCustomModelVisibility(allowCustom);
 }
 
 function selectedModelValue() {
-  return model.value;
+  return model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() : model.value;
 }
 
 function refreshModelOptions(settings = appSettings) {
@@ -502,7 +526,8 @@ function refreshModelOptions(settings = appSettings) {
   const allModels = Array.isArray(settings.all_model_presets) ? settings.all_model_presets.filter(Boolean) : publicModels;
   const unlocked = Boolean(llmUnlockPassword?.value.trim());
   const allowedModels = unlocked ? allModels : publicModels;
-  populateModels(allowedModels, model.value || settings.llm_model);
+  const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() || settings.llm_model : model.value || settings.llm_model;
+  populateModels(allowedModels, currentModel, unlocked);
   updateLlmPolicyNote(settings.llm_policy, unlocked);
 }
 
@@ -700,7 +725,7 @@ function updateLlmPolicyNote(policy, unlocked = false) {
   }
   const publicModels = Array.isArray(policy?.public_models) ? policy.public_models.filter(Boolean) : [];
   if (unlocked) {
-    llmPolicyNote.textContent = "Odemčeno: v rozbalovacím seznamu jsou všechny dostupné modely.";
+    llmPolicyNote.textContent = "Odemčeno: v rozbalovacím seznamu jsou všechny dostupné modely a lze zadat i jiný model.";
     return;
   }
   if (publicModels.length > 0) {
@@ -720,6 +745,15 @@ function nullableNumber(value) {
 function nullableString(value) {
   const trimmed = String(value || "").trim();
   return trimmed ? trimmed : null;
+}
+
+function updateCustomModelVisibility(unlocked) {
+  if (!customModelField) {
+    return;
+  }
+  const showCustomField = unlocked && model.value === CUSTOM_MODEL_VALUE;
+  customModelField.hidden = !showCustomField;
+  customModelField.classList.toggle("is-hidden", !showCustomField);
 }
 
 function promptOverride(value, defaultValue) {
@@ -1472,11 +1506,16 @@ function applyHistoryEntryToForm(entry) {
   updatePromptDescriptionEditors();
   renderPromptPresets("default");
   const modelValue = entry.settings?.model || "";
+  const unlocked = Boolean(llmUnlockPassword?.value.trim());
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
     model.value = modelValue;
+  } else if (unlocked && modelValue) {
+    customModel.value = modelValue;
+    model.value = CUSTOM_MODEL_VALUE;
   } else if (model.options.length > 0) {
     model.value = model.options[0].value;
   }
+  updateCustomModelVisibility(unlocked);
   llmBaseUrl.value = entry.settings?.llm_base_url || llmBaseUrl.value;
   persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";

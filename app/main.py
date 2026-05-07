@@ -47,12 +47,13 @@ settings = get_settings()
 public_llm_models = settings.public_llm_models()
 ALL_MODEL_PRESETS = [
     "openrouter/free",
+    "meta-llama/llama-4-scout",
+    "meta-llama/llama-4-maverick",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
     "openai/gpt-5.2",
     "openai/gpt-5.4-mini",
     "meta-llama/llama-3.3-70b-instruct",
-    "meta-llama/llama-3.1-8b-instruct",
-    "openai/gpt-4o-mini",
-    "openai/gpt-4.1-mini",
     "anthropic/claude-3.5-haiku",
     "google/gemini-2.0-flash-001",
     "google/gemini-3.0-pro",
