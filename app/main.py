@@ -45,11 +45,11 @@ logger.info("Starting API; log file: %s", log_path)
 settings = get_settings()
 public_llm_models = settings.public_llm_models()
 key_fingerprint = (
-    hashlib.sha256(settings.openrouter_api_key.encode()).hexdigest()[:12] if settings.openrouter_api_key else "missing"
+    hashlib.sha256(settings.llm_api_key.encode()).hexdigest()[:12] if settings.llm_api_key else "missing"
 )
 logger.info(
-    "Loaded settings: model=%s openrouter_key_sha256=%s public_models=%s",
-    settings.openrouter_model,
+    "Loaded settings: model=%s llm_key_sha256=%s public_models=%s",
+    settings.llm_model,
     key_fingerprint,
     public_llm_models,
 )
@@ -73,11 +73,11 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str | None, str | None]:
-    resolved_model = request.model or settings.openrouter_model
+    resolved_model = request.model or settings.llm_model
     browser_api_key = request.llm_api_key.strip() if request.llm_api_key else None
     public_models = set(public_llm_models)
     if resolved_model not in public_models and not browser_api_key:
-        allowed_models = ", ".join(public_llm_models) if public_llm_models else settings.openrouter_model
+        allowed_models = ", ".join(public_llm_models) if public_llm_models else settings.llm_model
         raise HTTPException(
             status_code=400,
             detail=(
@@ -85,13 +85,13 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str | None, str | N
                 f"Use the LLM API panel in the browser to enter one, or choose one of the public models: {allowed_models}."
             ),
         )
-    resolved_api_key = browser_api_key or settings.openrouter_api_key or None
+    resolved_api_key = browser_api_key or settings.llm_api_key or None
     if not resolved_api_key:
         raise HTTPException(
             status_code=400,
-            detail="No API key is available. Set OPENROUTER_API_KEY on the server or enter your own key in the browser.",
+            detail="No API key is available. Set LLM_API_KEY on the server or enter your own key in the browser.",
         )
-    resolved_base_url = request.llm_base_url or settings.openrouter_base_url
+    resolved_base_url = request.llm_base_url or settings.llm_base_url
     return resolved_model, resolved_api_key, resolved_base_url
 
 
@@ -119,8 +119,8 @@ def get_public_settings() -> dict[str, object]:
         "default_length": settings.default_length,
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
-        "llm_model": settings.openrouter_model,
-        "llm_base_url": settings.openrouter_base_url,
+        "llm_model": settings.llm_model,
+        "llm_base_url": settings.llm_base_url,
         "model_presets": public_llm_models,
         "llm_policy": {
             "public_models": public_llm_models,

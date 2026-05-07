@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from dotenv import dotenv_values
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,9 +17,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    openrouter_model: str = Field(default="openai/gpt-4o-mini", alias="OPENROUTER_MODEL")
-    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL")
+    llm_api_key: str = Field(default="", validation_alias=AliasChoices("LLM_API_KEY", "OPENROUTER_API_KEY"))
+    llm_model: str = Field(
+        default="openai/gpt-4o-mini",
+        validation_alias=AliasChoices("LLM_MODEL", "OPENROUTER_MODEL"),
+    )
+    llm_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        validation_alias=AliasChoices("LLM_BASE_URL", "OPENROUTER_BASE_URL"),
+    )
     llm_public_models: str = Field(default="", alias="LLM_PUBLIC_MODELS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
@@ -55,7 +61,7 @@ class Settings(BaseSettings):
 
     def public_llm_models(self) -> list[str]:
         models = _split_csv(self.llm_public_models)
-        return models or [self.openrouter_model]
+        return models or [self.llm_model]
 
 
 @lru_cache
@@ -65,6 +71,13 @@ def get_settings() -> Settings:
     env_path = Path(".env")
     if env_path.exists():
         values = {key: value for key, value in dotenv_values(env_path).items() if value is not None}
+        for legacy_key, modern_key in (
+            ("OPENROUTER_API_KEY", "LLM_API_KEY"),
+            ("OPENROUTER_MODEL", "LLM_MODEL"),
+            ("OPENROUTER_BASE_URL", "LLM_BASE_URL"),
+        ):
+            if modern_key not in values and legacy_key in values:
+                values[modern_key] = values[legacy_key]
         if "MSEARCH_USERNAME" not in values and values.get("MSEARCH_USER"):
             values["MSEARCH_USERNAME"] = values["MSEARCH_USER"]
         for optional_key in ("MSEARCH_MIN_CONFIDENCE", "MSEARCH_COLLECTION"):

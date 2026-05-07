@@ -20,8 +20,8 @@ Edit `.env`.
 For the default hosted `msearch` flow, you typically only need:
 
 ```env
-OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=openrouter/free
+LLM_API_KEY=your_key_here
+LLM_MODEL=openrouter/free
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
@@ -31,15 +31,15 @@ MSEARCH_PASSWORD=your_password
 
 ## LLM Providers
 
-Generation uses an OpenAI-compatible chat-completions API. OpenRouter is the default, but you can point the app at another compatible provider by setting:
+Generation uses an OpenAI-compatible chat-completions API. You can point the app at any compatible provider by setting:
 
 ```env
-OPENROUTER_BASE_URL=https://your-provider.example/v1
-OPENROUTER_API_KEY=your_provider_key
-OPENROUTER_MODEL=provider/model-or-local-model-name
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_API_KEY=your_provider_key
+LLM_MODEL=provider/model-or-local-model-name
 ```
 
-The variable names still say `OPENROUTER_*` for historical reasons; they are used as the generic LLM API key, model, and base URL. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
+The variable names are now generic `LLM_*`. `OPENROUTER_*` is still accepted as a backward-compatible alias during migration. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
 
 If you want to limit the shared server key to only a safe or free model, set `LLM_PUBLIC_MODELS` in `.env`. The simplest option is `openrouter/free`, which routes requests to currently available free models on OpenRouter. The web UI will then allow that model without an API key, while any other model will require the user to enter their own key in the browser.
 
@@ -196,7 +196,7 @@ The web UI lets you tune retrieval while testing:
 - retrieval backend: `msearch` or `local`
 - mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
-- OpenRouter model preset or custom model id
+- LLM model preset or custom model id
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
 - editable prompt presets stored in `data/prompt_presets.json`
 
@@ -204,9 +204,12 @@ The web UI lets you tune retrieval while testing:
 
 Important `.env` variables:
 
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
-- `OPENROUTER_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL`
+- `LLM_BASE_URL`
+- `OPENROUTER_API_KEY` as a backward-compatible alias
+- `OPENROUTER_MODEL` as a backward-compatible alias
+- `OPENROUTER_BASE_URL` as a backward-compatible alias
 - `LLM_PUBLIC_MODELS`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
@@ -282,7 +285,7 @@ The app can be adapted to any topic, but this is not fully configuration-driven 
 
 ## Notes For Future Extensions
 
-- Use `OPENROUTER_BASE_URL` with an Ollama/vLLM/OpenAI-compatible local server or another hosted OpenAI-compatible provider.
+- Use `LLM_BASE_URL` with an Ollama/vLLM/OpenAI-compatible local server or another hosted OpenAI-compatible provider.
 - Add a cross-encoder reranker after hybrid retrieval.
 - Add richer metadata extraction for your real historical archive.
 - Add evaluation sets and automated citation-grounding checks.

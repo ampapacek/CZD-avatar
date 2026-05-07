@@ -71,9 +71,9 @@ class RAGPipeline:
     def llm(self) -> OpenAICompatibleLLM:
         if self._llm is None:
             self._llm = OpenAICompatibleLLM(
-                api_key=self.settings.openrouter_api_key,
-                model=self.settings.openrouter_model,
-                base_url=self.settings.openrouter_base_url,
+                api_key=self.settings.llm_api_key,
+                model=self.settings.llm_model,
+                base_url=self.settings.llm_base_url,
             )
         return self._llm
 

@@ -24,7 +24,7 @@ This file is a practical handoff for future agents working in this repo.
   - local/remote Qdrant
   - sentence-transformers embeddings
   - hybrid retrieval: dense + BM25
-  - OpenRouter or another OpenAI-compatible API for generation
+  - An OpenAI-compatible API for generation, with OpenRouter as one optional provider
 
 ## Important directories
 
@@ -68,16 +68,16 @@ cp .env.example .env
 For the default hosted `msearch` flow, set at least:
 
 ```env
-OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+LLM_API_KEY=your_key_here
+LLM_MODEL=meta-llama/llama-3.3-70b-instruct
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
 ```
 
-Despite the `OPENROUTER_*` names, generation is generic OpenAI-compatible chat completions. Set `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL` for another hosted provider or an OpenAI-compatible local server. The frontend `LLM API` panel can also override base URL/API key for the current browser session.
+Despite the legacy alias names, generation is generic OpenAI-compatible chat completions. Set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` for another hosted provider or an OpenAI-compatible local server. The frontend `LLM API` panel can also override base URL/API key for the current browser session.
 
-Future config cleanup should add generic names such as `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`, keep `OPENROUTER_*` as backward-compatible aliases for at least one release, and update docs/UI copy to stop implying that OpenRouter is required.
+Future config cleanup should keep the `LLM_*` names as the primary interface, retain `OPENROUTER_*` as backward-compatible aliases for at least one release, and continue updating docs/UI copy to avoid implying that OpenRouter is required.
 
 Run the app:
 

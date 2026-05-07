@@ -31,7 +31,7 @@ class LLMClient:
 
 
 class OpenAICompatibleLLM(LLMClient):
-    """OpenAI-compatible chat completions client, used for OpenRouter by default."""
+    """OpenAI-compatible chat completions client."""
 
     def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 60.0) -> None:
         self.api_key = api_key
@@ -49,7 +49,7 @@ class OpenAICompatibleLLM(LLMClient):
         resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
         if not resolved_api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or provide an API key in the UI.")
+            raise RuntimeError("LLM_API_KEY is not set. Add it to .env or provide an API key in the UI.")
 
         resolved_model = model or self.model
         response = httpx.post(
@@ -85,7 +85,7 @@ class OpenAICompatibleLLM(LLMClient):
         resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
         if not resolved_api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to .env or provide an API key in the UI.")
+            raise RuntimeError("LLM_API_KEY is not set. Add it to .env or provide an API key in the UI.")
 
         resolved_model = model or self.model
         payload = {
