@@ -56,7 +56,7 @@ class OpenAICompatibleLLM(LLMClient):
         resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
         if not resolved_api_key:
-            raise RuntimeError("LLM_API_KEY is not set. Add it to .env or provide an API key in the UI.")
+            raise RuntimeError("No API key is set for the selected provider. Add it to .env or provide one in the UI.")
 
         resolved_model = model or self.model
         response = httpx.post(
@@ -101,6 +101,29 @@ class OpenAICompatibleLLM(LLMClient):
         )
 
 
+def validate_api_key(api_key: str, base_url: str, timeout: float = 20.0) -> None:
+    resolved_api_key = api_key.strip()
+    if not resolved_api_key:
+        raise RuntimeError("API key is empty.")
+
+    resolved_base_url = base_url.rstrip("/")
+    response = httpx.get(
+        f"{resolved_base_url}/models",
+        headers={
+            "Authorization": f"Bearer {resolved_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "rag-avatar",
+        },
+        timeout=timeout,
+    )
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        message = _extract_error_message(response)
+        raise RuntimeError(_format_http_error(response, message)) from exc
+
+
 class _OpenAICompatibleStream:
     def __init__(
         self,
@@ -119,7 +142,7 @@ class _OpenAICompatibleStream:
 
     def __iter__(self) -> Iterator[str]:
         if not self.api_key:
-            raise RuntimeError("LLM_API_KEY is not set. Add it to .env or provide an API key in the UI.")
+            raise RuntimeError("No API key is set for the selected provider. Add it to .env or provide one in the UI.")
 
         payload = {
             "model": self.model,

@@ -17,19 +17,22 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    llm_api_key: str = Field(default="", validation_alias=AliasChoices("LLM_API_KEY", "OPENROUTER_API_KEY"))
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    ai_ufal_api_key: str = Field(default="", validation_alias=AliasChoices("AI_UFAL_TOKEN", "AIUFAL_API_KEY"))
+    openrouter_api_key: str = Field(default="", validation_alias=AliasChoices("OPENROUTER_API_KEY"))
     llm_model: str = Field(
-        default="openai/gpt-4o-mini",
+        default="LLM1-A40.llama3.3:latest",
         validation_alias=AliasChoices("LLM_MODEL", "OPENROUTER_MODEL"),
     )
     llm_base_url: str = Field(
-        default="https://openrouter.ai/api/v1",
+        default="https://ai.ufal.mff.cuni.cz/api",
         validation_alias=AliasChoices("LLM_BASE_URL", "OPENROUTER_BASE_URL"),
     )
+    llm_provider: str = Field(default="aiufal", alias="LLM_PROVIDER")
     llm_public_models: str = Field(default="", alias="LLM_PUBLIC_MODELS")
-    llm_unlock_password: str = Field(
+    model_unlock_password: str = Field(
         default="",
-        validation_alias=AliasChoices("LLM_UNLOCK_PASSWORD", "OPENROUTER_UNLOCK_PASSWORD"),
+        validation_alias=AliasChoices("MODEL_UNLOCK_PASSWORD", "LLM_UNLOCK_PASSWORD", "OPENROUTER_UNLOCK_PASSWORD"),
     )
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
@@ -67,6 +70,14 @@ class Settings(BaseSettings):
         models = _split_csv(self.llm_public_models)
         return models or [self.llm_model]
 
+    def provider_api_key(self, provider_id: str | None) -> str:
+        provider = (provider_id or "").strip().lower()
+        if provider == "aiufal":
+            return self.ai_ufal_api_key or self.llm_api_key
+        if provider == "openrouter":
+            return self.openrouter_api_key or self.llm_api_key
+        return self.openrouter_api_key or self.ai_ufal_api_key or self.llm_api_key
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -76,9 +87,9 @@ def get_settings() -> Settings:
     if env_path.exists():
         values = {key: value for key, value in dotenv_values(env_path).items() if value is not None}
         for legacy_key, modern_key in (
-            ("OPENROUTER_API_KEY", "LLM_API_KEY"),
             ("OPENROUTER_MODEL", "LLM_MODEL"),
             ("OPENROUTER_BASE_URL", "LLM_BASE_URL"),
+            ("OPENROUTER_PROVIDER", "LLM_PROVIDER"),
         ):
             if modern_key not in values and legacy_key in values:
                 values[modern_key] = values[legacy_key]

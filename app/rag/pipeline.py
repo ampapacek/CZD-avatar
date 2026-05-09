@@ -12,7 +12,7 @@ from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
 from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
-from app.rag.msearch import MSearchRetriever
+from app.rag.msearch import MSearchRetriever, WP2_COLLECTION_ID
 from app.rag.prompts import build_messages
 from app.rag.retrieval import HybridRetriever
 from app.rag.vector_store import QdrantVectorStore
@@ -71,7 +71,7 @@ class RAGPipeline:
     def llm(self) -> OpenAICompatibleLLM:
         if self._llm is None:
             self._llm = OpenAICompatibleLLM(
-                api_key=self.settings.llm_api_key,
+                api_key=self.settings.provider_api_key(self.settings.llm_provider),
                 model=self.settings.llm_model,
                 base_url=self.settings.llm_base_url,
             )
@@ -103,6 +103,7 @@ class RAGPipeline:
         min_score: float | None = None,
         min_relative_score: float | None = None,
         retrieval_backend: str | None = None,
+        llm_provider: str | None = None,
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
@@ -113,6 +114,9 @@ class RAGPipeline:
         resolved_min_relative_score = (
             self.settings.min_relative_score if min_relative_score is None else min_relative_score
         )
+        effective_msearch_collection = msearch_collection or self.settings.msearch_collection
+        if resolved_backend == "msearch" and effective_msearch_collection == WP2_COLLECTION_ID and (llm_provider or "") != "aiufal":
+            raise RuntimeError("WP2 mSearch collection is only available with AIUfal.")
         if resolved_top_k <= 0:
             logger.info(
                 "Retrieved 0 chunks for question=%r top_k=%s; retrieval disabled",
@@ -125,7 +129,7 @@ class RAGPipeline:
             chunks = self.msearch_retriever.retrieve(
                 question,
                 resolved_top_k,
-                collection_id=msearch_collection,
+                collection_id=effective_msearch_collection,
                 mode=msearch_mode,
                 min_confidence=msearch_min_confidence,
                 min_score=resolved_min_score,
@@ -136,7 +140,7 @@ class RAGPipeline:
                 len(chunks),
                 question,
                 resolved_top_k,
-                msearch_collection or self.settings.msearch_collection,
+                effective_msearch_collection,
                 msearch_mode or self.settings.msearch_mode,
                 self.settings.msearch_min_confidence if msearch_min_confidence is None else msearch_min_confidence,
             )
@@ -192,6 +196,7 @@ class RAGPipeline:
         model: str | None = None,
         llm_api_key: str | None = None,
         llm_base_url: str | None = None,
+        llm_provider: str | None = None,
         dense_weight: float = 0.7,
         bm25_weight: float = 0.3,
         min_score: float | None = None,
@@ -211,6 +216,7 @@ class RAGPipeline:
             min_score=min_score,
             min_relative_score=min_relative_score,
             retrieval_backend=retrieval_backend,
+            llm_provider=llm_provider,
             msearch_collection=msearch_collection,
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,

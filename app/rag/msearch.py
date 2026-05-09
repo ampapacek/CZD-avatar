@@ -34,6 +34,8 @@ FALLBACK_COLLECTION_PRESETS = [
     },
 ]
 
+WP2_COLLECTION_ID = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09"
+
 
 class MSearchRetriever:
     """Fetch mSearch documents and normalize passages to avatar chunk records."""
