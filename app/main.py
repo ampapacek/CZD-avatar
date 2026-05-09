@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import hashlib
 import hmac
 import random
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -30,8 +30,14 @@ from app.models import (
 )
 from app.rag.pipeline import RAGPipeline
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
-from app.rag.msearch import FALLBACK_COLLECTION_PRESETS
-from app.rag.llm_providers import available_llm_providers, provider_preset, resolve_llm_provider
+from app.rag.llm_providers import (
+    available_llm_providers,
+    provider_default_model,
+    provider_api_key,
+    provider_preset,
+    provider_public_models,
+    resolve_llm_provider,
+)
 from app.rag.llm import validate_api_key
 from app.rag.prompts import (
     LENGTH_PROMPTS,
@@ -58,31 +64,23 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return result
 
 
-def _fingerprint(value: str | None) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:12] if value else "missing"
-
-
 settings = get_settings()
 provider_presets = available_llm_providers()
-default_provider = resolve_llm_provider(settings.llm_provider, settings.llm_base_url)
-default_provider_preset = provider_preset(default_provider, settings.llm_base_url)
+default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
+default_provider_preset = provider_preset(default_provider, provider_presets)
 provider_model_presets = _dedupe_preserve_order(
     [model for provider in provider_presets for model in provider["model_presets"]]
 )
-public_llm_models = settings.public_llm_models() or provider_model_presets
-default_model = settings.llm_model if settings.llm_model in provider_model_presets else default_provider_preset["default_model"]
+default_model = provider_default_model(default_provider, provider_presets)
 
 
-all_llm_models = _dedupe_preserve_order([*public_llm_models, *provider_model_presets, settings.llm_model])
+all_llm_models = _dedupe_preserve_order(provider_model_presets)
 logger.info(
-    "Loaded settings: provider=%s model=%s aiufal_key_sha256=%s openrouter_key_sha256=%s legacy_llm_key_sha256=%s public_models=%s model_unlock_password=%s",
+    "Loaded settings: provider=%s model=%s providers=%s llm_unlock_password=%s",
     default_provider,
     default_model,
-    _fingerprint(settings.ai_ufal_api_key),
-    _fingerprint(settings.openrouter_api_key),
-    _fingerprint(settings.llm_api_key),
-    public_llm_models,
-    "set" if settings.model_unlock_password else "missing",
+    [provider["id"] for provider in provider_presets],
+    "set" if settings.llm_unlock_password else "missing",
 )
 pipeline = RAGPipeline(settings)
 
@@ -100,42 +98,47 @@ static_dir = Path(__file__).parent / "static"
 collection_dir = Path(__file__).resolve().parents[1] / "data" / "collections" / "czech_history"
 ufal_logo_path = static_dir / "logo_ufal_110u.png"
 questions_path = collection_dir / "questions" / "questions.txt"
-WP2_MSEARCH_COLLECTION_ID = next(
-    (item["collection_id"] for item in FALLBACK_COLLECTION_PRESETS if str(item.get("label", "")).startswith("WP2:")),
-    "",
-)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+AI_UFAL_HOST = "ai.ufal.mff.cuni.cz"
+WP2_MSEARCH_COLLECTION = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09"
+
+
+def _is_ai_ufal_base_url(base_url: str | None) -> bool:
+    parsed = urlparse((base_url or "").strip())
+    return parsed.scheme == "https" and parsed.hostname == AI_UFAL_HOST
+
+
+def _enforce_msearch_collection_policy(msearch_collection: str | None, llm_base_url: str | None) -> None:
+    if (msearch_collection or "").strip() == WP2_MSEARCH_COLLECTION and not _is_ai_ufal_base_url(llm_base_url):
+        raise HTTPException(
+            status_code=400,
+            detail="WP2 mSearch collection is available only with the AI Ufal provider.",
+        )
 
 
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, str | None]:
-    resolved_provider = resolve_llm_provider(request.llm_provider, request.llm_base_url or settings.llm_base_url)
-    provider_config = provider_preset(resolved_provider, request.llm_base_url or settings.llm_base_url)
-    resolved_model = request.model or (
-        settings.llm_model if settings.llm_model in provider_config["model_presets"] else provider_config["default_model"]
+    resolved_provider = resolve_llm_provider(request.llm_provider, provider_presets, request.llm_base_url)
+    provider_config = provider_preset(resolved_provider, provider_presets, request.llm_base_url)
+    resolved_model = request.model or provider_config["default_model"] or (
+        provider_config["model_presets"][0] if provider_config["model_presets"] else ""
     )
     browser_api_key = request.llm_api_key.strip() if request.llm_api_key else None
+    server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url)
     browser_unlock_password = request.model_unlock_password.strip() if request.model_unlock_password else ""
-    unlock_enabled = bool(settings.model_unlock_password) and hmac.compare_digest(
+    unlock_enabled = bool(settings.llm_unlock_password) and hmac.compare_digest(
         browser_unlock_password,
-        settings.model_unlock_password,
+        settings.llm_unlock_password,
     )
-    public_models = _provider_public_models(resolved_provider, request.llm_base_url or settings.llm_base_url)
-    if resolved_model not in public_models and not unlock_enabled and not browser_api_key:
-        allowed_models = ", ".join(sorted(public_models)) if public_models else settings.llm_model
+    resolved_api_key = browser_api_key or server_api_key or None
+    public_models = provider_public_models(resolved_provider, provider_presets, request.llm_base_url)
+    if not resolved_api_key and resolved_model not in public_models and not unlock_enabled:
+        allowed_models = ", ".join(sorted(public_models)) if public_models else provider_config["default_model"]
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Model '{resolved_model}' requires your own API key. "
                 f"Use the LLM API panel in the browser to enter one, unlock all models with the shared password, or choose one of the public models: {allowed_models}."
-            ),
-        )
-    resolved_api_key = browser_api_key or settings.provider_api_key(resolved_provider) or None
-    if not resolved_api_key:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No API key is available. Set AI_UFAL_TOKEN for AIUfal or OPENROUTER_API_KEY for OpenRouter "
-                "on the server, or enter your own key in the browser."
             ),
         )
     resolved_base_url = request.llm_base_url or provider_config["base_url"]
@@ -145,20 +148,6 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
         except RuntimeError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     return resolved_provider, resolved_model, resolved_api_key, resolved_base_url
-
-
-def _provider_public_models(provider_id: str, base_url: str | None = None) -> set[str]:
-    provider_config = provider_preset(provider_id, base_url)
-    provider_models = set(provider_config.get("model_presets") or [])
-    return {model for model in public_llm_models if model in provider_models}
-
-
-def _guard_wp2_aiufal_only(provider: str, collection_id: str | None) -> None:
-    if provider != "aiufal" and collection_id and collection_id == WP2_MSEARCH_COLLECTION_ID:
-        raise HTTPException(
-            status_code=400,
-            detail="WP2 mSearch collection is only available with AIUfal.",
-        )
 
 
 @app.get("/", include_in_schema=False)
@@ -178,26 +167,28 @@ def health() -> HealthResponse:
 
 @app.get("/settings")
 def get_public_settings() -> dict[str, object]:
+    selected_provider = default_provider_preset
     return {
         "styles": available_styles(),
         "lengths": available_lengths(),
         "default_style": settings.default_style,
         "default_length": settings.default_length,
         "llm_provider": default_provider,
+        "llm_base_url": selected_provider["base_url"],
+        "llm_model": selected_provider["default_model"],
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
-        "llm_model": default_model,
-        "llm_base_url": default_provider_preset["base_url"],
         "llm_providers": provider_presets,
-        "model_presets": public_llm_models,
+        "model_presets": selected_provider["model_presets"],
         "all_model_presets": all_llm_models,
         "llm_policy": {
             "provider": default_provider,
             "providers": provider_presets,
-            "public_models": public_llm_models,
+            "public_models": selected_provider["public_models"],
+            "model_presets": selected_provider["model_presets"],
             "all_models": all_llm_models,
             "custom_model_requires_browser_key": True,
-            "unlock_password_enabled": bool(settings.model_unlock_password),
+            "unlock_password_enabled": bool(settings.llm_unlock_password),
         },
         "collection": settings.qdrant_collection,
         "retrieval_backend": settings.retrieval_backend,
@@ -245,9 +236,9 @@ def get_prompt_presets() -> list[PromptPreset]:
 
 @app.post("/unlock", response_model=UnlockResponse)
 def unlock_models(request: UnlockRequest) -> UnlockResponse:
-    if not settings.model_unlock_password:
+    if not settings.llm_unlock_password:
         return UnlockResponse(unlocked=False)
-    unlocked = hmac.compare_digest(request.password.strip(), settings.model_unlock_password)
+    unlocked = hmac.compare_digest(request.password.strip(), settings.llm_unlock_password)
     return UnlockResponse(unlocked=unlocked)
 
 
@@ -288,7 +279,10 @@ def ingest(request: IngestRequest) -> IngestResponse:
 @app.post("/retrieve", response_model=RetrieveResponse)
 def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     try:
-        _guard_wp2_aiufal_only(request.llm_provider or default_provider, request.msearch_collection or settings.msearch_collection)
+        _enforce_msearch_collection_policy(
+            request.msearch_collection or settings.msearch_collection,
+            default_provider_preset["base_url"],
+        )
         chunks = pipeline.retrieve(
             request.question,
             request.top_k,
@@ -297,7 +291,6 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             min_score=request.min_score,
             min_relative_score=request.min_relative_score,
             retrieval_backend=request.retrieval_backend,
-            llm_provider=request.llm_provider,
             msearch_collection=request.msearch_collection,
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
@@ -320,7 +313,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=f"Unknown length: {length}")
     try:
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
-        _guard_wp2_aiufal_only(resolved_provider, request.msearch_collection or settings.msearch_collection)
+        _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
         return pipeline.chat(
             question=request.question,
             style=style,
@@ -362,7 +355,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         started = time.perf_counter()
         try:
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
-            _guard_wp2_aiufal_only(resolved_provider, request.msearch_collection or settings.msearch_collection)
+            _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
             retrieved = pipeline.retrieve(
                 request.question,
                 request.top_k,

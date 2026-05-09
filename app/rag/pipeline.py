@@ -12,7 +12,8 @@ from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
 from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
-from app.rag.msearch import MSearchRetriever, WP2_COLLECTION_ID
+from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
+from app.rag.msearch import MSearchRetriever
 from app.rag.prompts import build_messages
 from app.rag.retrieval import HybridRetriever
 from app.rag.vector_store import QdrantVectorStore
@@ -70,10 +71,13 @@ class RAGPipeline:
     @property
     def llm(self) -> OpenAICompatibleLLM:
         if self._llm is None:
+            provider_presets = available_llm_providers()
+            provider_id = resolve_llm_provider(self.settings.llm_provider, provider_presets)
+            provider_config = provider_preset(provider_id, provider_presets)
             self._llm = OpenAICompatibleLLM(
-                api_key=self.settings.provider_api_key(self.settings.llm_provider),
-                model=self.settings.llm_model,
-                base_url=self.settings.llm_base_url,
+                api_key=provider_api_key(provider_id, provider_presets),
+                model=str(provider_config.get("default_model") or ""),
+                base_url=str(provider_config.get("base_url") or ""),
             )
         return self._llm
 
@@ -115,8 +119,6 @@ class RAGPipeline:
             self.settings.min_relative_score if min_relative_score is None else min_relative_score
         )
         effective_msearch_collection = msearch_collection or self.settings.msearch_collection
-        if resolved_backend == "msearch" and effective_msearch_collection == WP2_COLLECTION_ID and (llm_provider or "") != "aiufal":
-            raise RuntimeError("WP2 mSearch collection is only available with AIUfal.")
         if resolved_top_k <= 0:
             logger.info(
                 "Retrieved 0 chunks for question=%r top_k=%s; retrieval disabled",

@@ -24,7 +24,6 @@ class RetrieveRequest(BaseModel):
     question: str
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
-    llm_provider: str | None = None
     msearch_collection: str | None = None
     msearch_mode: MSearchMode | None = None
     msearch_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)

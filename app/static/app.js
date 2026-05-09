@@ -91,6 +91,31 @@ let promptPresets = [];
 let currentStylePrompts = {};
 let currentLengthPrompts = {};
 let llmModelsUnlocked = false;
+let llmSettingsState = {
+  selected_provider: "",
+  provider_settings: {},
+  model_unlock_password: "",
+};
+
+function normalizeProviderId(providerId) {
+  return String(providerId || "").trim().toLowerCase();
+}
+
+const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
+const WP2_MSEARCH_COLLECTION = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09";
+
+function isAiUfalBaseUrl(baseUrl) {
+  try {
+    const parsed = new URL(String(baseUrl || "").trim());
+    return parsed.protocol === "https:" && parsed.hostname === AI_UFAL_HOST;
+  } catch {
+    return false;
+  }
+}
+
+function currentProviderBaseUrl() {
+  return llmBaseUrl.value.trim() || selectedProviderConfig()?.base_url || "";
+}
 
 async function loadSettings() {
   const response = await fetch("settings");
@@ -99,17 +124,13 @@ async function loadSettings() {
   style.value = settings.default_style || "ucitel";
   length.value = settings.default_length || "medium";
   embeddingModel.value = settings.embedding_model || "";
-  const savedLlmSettings = loadLlmSettings();
-  const selectedProvider = savedLlmSettings.llm_provider || settings.llm_provider || "aiufal";
-  populateProviderOptions(settings.llm_providers || [], selectedProvider);
-  llmBaseUrl.value =
-    savedLlmSettings.llm_provider && savedLlmSettings.llm_provider === selectedProvider && savedLlmSettings.llm_base_url
-      ? savedLlmSettings.llm_base_url
-      : selectedProviderConfig()?.base_url || "";
-  llmBaseUrl.placeholder = selectedProviderConfig()?.base_url || settings.llm_base_url || "https://api.openai.com/v1";
-  llmApiKey.value = savedLlmSettings.llm_api_key || "";
-  llmUnlockPassword.value = savedLlmSettings.model_unlock_password || "";
-  customModel.value = savedLlmSettings.llm_custom_model || "";
+  llmSettingsState = loadLlmSettings();
+  const providers = settings.llm_providers || [];
+  const selectedProvider =
+    normalizeProviderId(llmSettingsState.selected_provider || settings.llm_provider || providers[0]?.id || "");
+  populateProviderOptions(providers, selectedProvider);
+  loadProviderValues(selectedProvider, { preferStored: true });
+  llmUnlockPassword.value = llmSettingsState.model_unlock_password || "";
   if (llmUnlockPassword.value.trim()) {
     await verifyUnlockPassword({ silent: true });
   }
@@ -150,9 +171,8 @@ form.addEventListener("submit", async (event) => {
   loadingIndicator.hidden = false;
 
   try {
-    const payload = buildRequestPayload();
-
     if (retrieveOnly.checked) {
+      const payload = buildRetrievePayload();
       const response = await fetch("retrieve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -177,6 +197,7 @@ form.addEventListener("submit", async (event) => {
         sources: chunksToSources(data.retrieved_chunks),
       });
     } else {
+      const payload = buildRequestPayload();
       const data = await chatRequest(payload, {
         onSources(sourceData) {
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
@@ -320,13 +341,6 @@ topK.addEventListener("input", () => {
 });
 
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
-llmProvider.addEventListener("change", () => {
-  llmBaseUrl.value = selectedProviderConfig()?.base_url || "";
-  persistLlmSettings();
-  refreshModelOptions(appSettings);
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], appSettings.msearch_defaults?.collection);
-  updateRetrievalControls({ resetValues: false });
-});
 style.addEventListener("change", updatePromptDescriptionEditors);
 length.addEventListener("change", updatePromptDescriptionEditors);
 stylePromptDescription.addEventListener("input", () => {
@@ -365,7 +379,19 @@ themeToggle.addEventListener("click", () => {
   applyTheme(nextTheme);
   localStorage.setItem("theme", nextTheme);
 });
-llmBaseUrl.addEventListener("input", persistLlmSettings);
+llmProvider.addEventListener("change", () => {
+  const providerId = normalizeProviderId(llmProvider.value);
+  loadProviderValues(providerId, { preferStored: true });
+  llmModelsUnlocked = false;
+  refreshModelOptions(appSettings);
+  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  updateRetrievalControls({ resetValues: false });
+  persistLlmSettings();
+});
+llmBaseUrl.addEventListener("input", () => {
+  persistLlmSettings();
+  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+});
 llmApiKey.addEventListener("input", () => {
   persistLlmSettings();
   refreshModelOptions(appSettings);
@@ -414,30 +440,71 @@ function buildRequestPayload(overrides = {}) {
   };
 }
 
+function buildRetrievePayload(overrides = {}) {
+  return {
+    question: question.value,
+    top_k: Number(topK.value),
+    retrieval_backend: retrievalBackend.value,
+    msearch_collection: msearchCollection.value,
+    msearch_mode: msearchMode.value,
+    msearch_min_confidence: nullableNumber(msearchMinConfidence.value),
+    dense_weight: Number(denseWeight.value),
+    bm25_weight: Number(bm25Weight.value),
+    min_score: nullableNumber(minScore.value),
+    min_relative_score: nullableNumber(minRelativeScore.value),
+    ...overrides,
+  };
+}
+
 function loadLlmSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(LLM_SETTINGS_STORAGE_KEY) || "{}");
+    if (raw.provider_settings && typeof raw.provider_settings === "object") {
+      return {
+        selected_provider: typeof raw.selected_provider === "string" ? normalizeProviderId(raw.selected_provider) : "",
+        provider_settings: raw.provider_settings,
+        model_unlock_password: typeof raw.model_unlock_password === "string" ? raw.model_unlock_password : "",
+      };
+    }
+    const legacyProvider = typeof raw.llm_provider === "string" ? normalizeProviderId(raw.llm_provider) : "";
+    const legacySettings = legacyProvider
+      ? {
+          [legacyProvider]: {
+            base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
+            api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
+            custom_model: typeof raw.llm_custom_model === "string" ? raw.llm_custom_model : "",
+          },
+        }
+      : {};
     return {
-      llm_provider: typeof raw.llm_provider === "string" ? raw.llm_provider : "",
-      llm_base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
-      llm_api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
+      selected_provider: legacyProvider,
+      provider_settings: legacySettings,
       model_unlock_password: typeof raw.model_unlock_password === "string" ? raw.model_unlock_password : "",
-      llm_custom_model: typeof raw.llm_custom_model === "string" ? raw.llm_custom_model : "",
     };
   } catch {
-    return { llm_provider: "", llm_base_url: "", llm_api_key: "", model_unlock_password: "", llm_custom_model: "" };
+    return { selected_provider: "", provider_settings: {}, model_unlock_password: "" };
   }
 }
 
 function persistLlmSettings() {
+  const providerId = normalizeProviderId(llmProvider.value);
+  const providerSettings = { ...(llmSettingsState.provider_settings || {}) };
+  providerSettings[providerId] = {
+    base_url: llmBaseUrl.value.trim(),
+    api_key: llmApiKey.value,
+    custom_model: customModel.value.trim(),
+  };
+  llmSettingsState = {
+    selected_provider: providerId,
+    provider_settings: providerSettings,
+    model_unlock_password: llmUnlockPassword.value,
+  };
   localStorage.setItem(
     LLM_SETTINGS_STORAGE_KEY,
     JSON.stringify({
-      llm_provider: llmProvider.value,
-      llm_base_url: llmBaseUrl.value.trim(),
-      llm_api_key: llmApiKey.value,
-      model_unlock_password: llmUnlockPassword.value,
-      llm_custom_model: customModel.value.trim(),
+      selected_provider: llmSettingsState.selected_provider,
+      provider_settings: llmSettingsState.provider_settings,
+      model_unlock_password: llmSettingsState.model_unlock_password,
     }),
   );
 }
@@ -528,7 +595,7 @@ async function fetchChat(payload) {
 
 function providerSupportsStreaming(providerId = null) {
   const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find(
-    (item) => item.id === (providerId || llmProvider.value || appSettings.llm_provider || "aiufal"),
+    (item) => item.id === normalizeProviderId(providerId || llmProvider.value || appSettings.llm_provider || ""),
   );
   return provider?.supports_streaming !== false;
 }
@@ -623,33 +690,43 @@ function populateProviderOptions(providers, currentProvider) {
   llmProvider.innerHTML = uniqueProviders
     .map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label || provider.id)}</option>`)
     .join("");
-  llmProvider.value = uniqueProviders.some((provider) => provider.id === currentProvider)
-    ? currentProvider
-    : uniqueProviders[0]?.id || "aiufal";
+  const resolvedCurrentProvider = normalizeProviderId(currentProvider);
+  llmProvider.value = uniqueProviders.some((provider) => provider.id === resolvedCurrentProvider)
+    ? resolvedCurrentProvider
+    : uniqueProviders[0]?.id || "";
 }
 
 function selectedProviderConfig(settings = appSettings) {
   const providers = Array.isArray(settings.llm_providers) ? settings.llm_providers : [];
-  const providerId = llmProvider?.value || settings.llm_provider || "aiufal";
-  return providers.find((provider) => provider.id === providerId) || providers[0] || defaultProviderPreset();
+  const providerId = normalizeProviderId(llmProvider?.value || settings.llm_provider || "");
+  return providers.find((provider) => provider.id === providerId) || providers[0] || null;
 }
 
 function providerPublicModels(provider = selectedProviderConfig(), settings = appSettings) {
+  if (!provider) {
+    return [];
+  }
   const providerModels = new Set(Array.isArray(provider?.model_presets) ? provider.model_presets.filter(Boolean) : []);
-  const publicModels = Array.isArray(settings.llm_policy?.public_models) ? settings.llm_policy.public_models.filter(Boolean) : [];
+  const publicModels = Array.isArray(provider?.public_models) ? provider.public_models.filter(Boolean) : [];
   return publicModels.filter((model) => providerModels.has(model));
 }
 
-function defaultProviderPreset() {
-  return {
-    id: "aiufal",
-    label: "AIUfal",
-    base_url: "https://ai.ufal.mff.cuni.cz/api",
-    default_model: "LLM1-A40.llama3.3:latest",
-    api_key_label: "AIUfal token",
-    supports_streaming: true,
-    model_presets: [],
-  };
+function loadProviderValues(providerId, { preferStored = false } = {}) {
+  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find((item) => item.id === providerId) || null;
+  const providerSettings = (llmSettingsState.provider_settings || {})[providerId] || {};
+  const baseUrl = preferStored && providerSettings.base_url ? providerSettings.base_url : provider?.base_url || "";
+  const apiKey = providerSettings.api_key || "";
+  const customModelValue = providerSettings.custom_model || "";
+  llmProvider.value = providerId || provider?.id || "";
+  llmBaseUrl.value = baseUrl;
+  llmApiKey.value = apiKey;
+  customModel.value = customModelValue;
+}
+
+function providerLabelForId(providerId) {
+  const normalized = normalizeProviderId(providerId);
+  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find((item) => item.id === normalized);
+  return provider?.label || normalized || "—";
 }
 
 function populateModels(presets, currentModel, allowCustom = false) {
@@ -677,20 +754,20 @@ function selectedModelValue() {
 
 function refreshModelOptions(settings = appSettings) {
   const provider = selectedProviderConfig(settings);
-  const providerModels = Array.isArray(provider.model_presets) ? provider.model_presets.filter(Boolean) : [];
+  const providerModels = Array.isArray(provider?.model_presets) ? provider.model_presets.filter(Boolean) : [];
   const publicModels = providerPublicModels(provider, settings);
   const browserApiKeyProvided = Boolean(llmApiKey.value.trim());
   const unlocked = llmModelsUnlocked || browserApiKeyProvided;
-  const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() || settings.llm_model : model.value || settings.llm_model;
+  const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() : model.value || provider?.default_model || "";
   populateModels(unlocked ? providerModels : publicModels, currentModel, unlocked);
-  const providerBaseUrl = provider.base_url || settings.llm_base_url || "";
-  if (!llmBaseUrl.value.trim() || llmBaseUrl.value.trim() === settings.llm_base_url) {
+  const providerBaseUrl = provider?.base_url || "";
+  if (!llmBaseUrl.value.trim()) {
     llmBaseUrl.value = providerBaseUrl;
   }
-  llmBaseUrl.placeholder = providerBaseUrl || settings.llm_base_url || "https://api.openai.com/v1";
+  llmBaseUrl.placeholder = providerBaseUrl || "https://api.openai.com/v1";
   llmApiKey.placeholder = browserApiKeyProvided
-    ? "Vlastní klíč přepisuje serverový klíč"
-    : provider.api_key_label || "API key";
+    ? "Vlastní klíč přepisuje uložený klíč"
+    : provider?.api_key_label || "API key";
   updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);
 }
 
@@ -817,10 +894,14 @@ function populateMsearchCollections(presets, currentCollection) {
       collection_id: "3429956e-8a21-4502-ad21-a41fddc5ef99",
     },
   ];
-  const providerId = llmProvider.value || appSettings.llm_provider || "aiufal";
+  const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
   const usablePresets = (presets.length ? presets : fallbackPresets).map((preset) => ({
     ...preset,
-    disabled: providerId !== "aiufal" && String(preset.label || preset.collection_name || "").startsWith("WP2"),
+    disabled:
+      (preset.collection_id || "") === WP2_MSEARCH_COLLECTION ||
+      String(preset.label || preset.collection_name || "").startsWith("WP2")
+        ? !aiUfalSelected
+        : false,
   }));
   msearchCollection.innerHTML = usablePresets
     .map((preset) => {
@@ -901,7 +982,7 @@ function updateLlmPolicyNote(policy, unlocked = false, browserApiKeyProvided = f
   const provider = selectedProviderConfig();
   const providerLabel = provider.label || provider.id || "vybraného poskytovatele";
   if (browserApiKeyProvided) {
-    llmPolicyNote.textContent = `Vlastní API klíč přepisuje serverový klíč pro ${providerLabel}. Při odeslání se ověří, že klíč patří k vybranému poskytovateli.`;
+    llmPolicyNote.textContent = `Vlastní API klíč přepisuje uložený klíč pro ${providerLabel}. Při odeslání se ověří, že klíč patří k vybranému poskytovateli.`;
     return;
   }
   if (unlocked) {
@@ -1617,6 +1698,7 @@ function renderHistoryDetail(entry) {
       <div class="settings-grid">
         ${renderSetting("Profil", entry.settings?.style)}
         ${renderSetting("Délka", entry.settings?.length)}
+        ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
         ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
         ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
         ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
@@ -1660,6 +1742,8 @@ function renderSetting(label, value) {
       ? STYLE_LABELS[value] || value
       : label === "Délka"
         ? LENGTH_LABELS[value] || value
+        : label === "Poskytovatel"
+          ? providerLabelForId(value)
         : value;
   return `
     <div class="setting-card">
@@ -1671,6 +1755,10 @@ function renderSetting(label, value) {
 
 function applyHistoryEntryToForm(entry) {
   question.value = entry.question || "";
+  const providerValue = normalizeProviderId(entry.settings?.llm_provider || llmProvider.value || "");
+  if (providerValue) {
+    loadProviderValues(providerValue, { preferStored: true });
+  }
   style.value = entry.settings?.style || style.value;
   length.value = entry.settings?.length || length.value;
   customInstructions.value = entry.settings?.custom_instructions || "";
@@ -1686,6 +1774,7 @@ function applyHistoryEntryToForm(entry) {
   };
   updatePromptDescriptionEditors();
   renderPromptPresets("default");
+  refreshModelOptions(appSettings);
   const modelValue = entry.settings?.model || "";
   const unlocked = llmModelsUnlocked;
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
@@ -1697,7 +1786,9 @@ function applyHistoryEntryToForm(entry) {
     model.value = model.options[0].value;
   }
   updateCustomModelVisibility(unlocked);
-  llmBaseUrl.value = entry.settings?.llm_base_url || llmBaseUrl.value;
+  if (entry.settings?.llm_base_url) {
+    llmBaseUrl.value = entry.settings.llm_base_url;
+  }
   persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;

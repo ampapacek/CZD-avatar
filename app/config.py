@@ -2,14 +2,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from dotenv import dotenv_values
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-def _split_csv(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 class Settings(BaseSettings):
@@ -17,23 +11,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
-    ai_ufal_api_key: str = Field(default="", validation_alias=AliasChoices("AI_UFAL_TOKEN", "AIUFAL_API_KEY"))
-    openrouter_api_key: str = Field(default="", validation_alias=AliasChoices("OPENROUTER_API_KEY"))
-    llm_model: str = Field(
-        default="LLM1-A40.llama3.3:latest",
-        validation_alias=AliasChoices("LLM_MODEL", "OPENROUTER_MODEL"),
-    )
-    llm_base_url: str = Field(
-        default="https://ai.ufal.mff.cuni.cz/api",
-        validation_alias=AliasChoices("LLM_BASE_URL", "OPENROUTER_BASE_URL"),
-    )
-    llm_provider: str = Field(default="aiufal", alias="LLM_PROVIDER")
-    llm_public_models: str = Field(default="", alias="LLM_PUBLIC_MODELS")
-    model_unlock_password: str = Field(
-        default="",
-        validation_alias=AliasChoices("MODEL_UNLOCK_PASSWORD", "LLM_UNLOCK_PASSWORD", "OPENROUTER_UNLOCK_PASSWORD"),
-    )
+    llm_provider: str = Field(default="", alias="LLM_PROVIDER")
+    llm_unlock_password: str = Field(default="", alias="LLM_UNLOCK_PASSWORD")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")
@@ -66,38 +45,23 @@ class Settings(BaseSettings):
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
 
-    def public_llm_models(self) -> list[str]:
-        models = _split_csv(self.llm_public_models)
-        return models or [self.llm_model]
-
-    def provider_api_key(self, provider_id: str | None) -> str:
-        provider = (provider_id or "").strip().lower()
-        if provider == "aiufal":
-            return self.ai_ufal_api_key or self.llm_api_key
-        if provider == "openrouter":
-            return self.openrouter_api_key or self.llm_api_key
-        return self.openrouter_api_key or self.ai_ufal_api_key or self.llm_api_key
-
-
 @lru_cache
-def get_settings() -> Settings:
+def load_env_values() -> dict[str, str]:
     # For this local prototype, prefer explicit .env values over exported shell
     # variables so changing .env has the effect users expect.
     env_path = Path(".env")
     if env_path.exists():
         values = {key: value for key, value in dotenv_values(env_path).items() if value is not None}
-        for legacy_key, modern_key in (
-            ("OPENROUTER_MODEL", "LLM_MODEL"),
-            ("OPENROUTER_BASE_URL", "LLM_BASE_URL"),
-            ("OPENROUTER_PROVIDER", "LLM_PROVIDER"),
-        ):
-            if modern_key not in values and legacy_key in values:
-                values[modern_key] = values[legacy_key]
         if "MSEARCH_USERNAME" not in values and values.get("MSEARCH_USER"):
             values["MSEARCH_USERNAME"] = values["MSEARCH_USER"]
         for optional_key in ("MSEARCH_MIN_CONFIDENCE", "MSEARCH_COLLECTION"):
             value = values.get(optional_key)
             if isinstance(value, str) and not value.strip():
                 values.pop(optional_key)
-        return Settings(**values)
-    return Settings()
+        return values
+    return {}
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings(**load_env_values())

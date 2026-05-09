@@ -55,18 +55,18 @@ class OpenAICompatibleLLM(LLMClient):
     ) -> LLMGeneration:
         resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
-        if not resolved_api_key:
-            raise RuntimeError("No API key is set for the selected provider. Add it to .env or provide one in the UI.")
 
         resolved_model = model or self.model
+        headers = {
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "rag-avatar",
+        }
+        if resolved_api_key:
+            headers["Authorization"] = f"Bearer {resolved_api_key}"
         response = httpx.post(
             f"{resolved_base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {resolved_api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:8000",
-                "X-Title": "rag-avatar",
-            },
+            headers=headers,
             json={
                 "model": resolved_model,
                 "messages": messages,
@@ -141,25 +141,24 @@ class _OpenAICompatibleStream:
         self.upstream_model: str | None = None
 
     def __iter__(self) -> Iterator[str]:
-        if not self.api_key:
-            raise RuntimeError("No API key is set for the selected provider. Add it to .env or provide one in the UI.")
-
         payload = {
             "model": self.model,
             "messages": self.messages,
             "temperature": 0.2,
             "stream": True,
         }
+        headers = {
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "rag-avatar",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         with httpx.Client(timeout=self.timeout) as client:
             with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:8000",
-                    "X-Title": "rag-avatar",
-                },
+                headers=headers,
                 json=payload,
             ) as response:
                 try:

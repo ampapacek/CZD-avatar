@@ -17,13 +17,26 @@ cp .env.example .env
 
 Edit `.env`.
 
-For the default hosted `msearch` flow, you typically only need:
+For the default hosted `msearch` flow, define one or more providers in `.env`. A minimal example looks like this:
 
 ```env
 LLM_PROVIDER=aiufal
-AI_UFAL_TOKEN=your_aiufal_key_here
-OPENROUTER_API_KEY=your_openrouter_key_here
-LLM_MODEL=LLM1-A40.llama3.3:latest
+LLM_PROVIDERS=aiufal,openrouter
+
+LLM_PROVIDER_AIUFAL_NAME=AI Ufal
+LLM_PROVIDER_AIUFAL_BASE_URL=https://ai.ufal.mff.cuni.cz/api
+LLM_PROVIDER_AIUFAL_API_KEY=your_ai_ufal_key
+LLM_PROVIDER_AIUFAL_DEFAULT_MODEL=LLM1-A40.llama3.3:latest
+LLM_PROVIDER_AIUFAL_PUBLIC_MODELS=LLM1-A40.llama3.3:latest
+LLM_PROVIDER_AIUFAL_DISCOVER_MODELS=true
+
+LLM_PROVIDER_OPENROUTER_NAME=OpenRouter
+LLM_PROVIDER_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+LLM_PROVIDER_OPENROUTER_API_KEY=your_openrouter_key
+LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL=openrouter/free
+LLM_PROVIDER_OPENROUTER_PUBLIC_MODELS=openrouter/free
+LLM_PROVIDER_OPENROUTER_DISCOVER_MODELS=true
+
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
@@ -33,20 +46,37 @@ MSEARCH_PASSWORD=your_password
 
 ## LLM Providers
 
-Generation uses an OpenAI-compatible chat-completions API. You can point the app at any compatible provider by setting:
+Generation uses OpenAI-compatible chat-completions APIs. You can point the app at any number of compatible providers by giving each one its own block of environment variables.
 
-```env
-LLM_BASE_URL=https://your-provider.example/v1
-AI_UFAL_TOKEN=your_aiufal_key_here
-OPENROUTER_API_KEY=your_openrouter_key_here
-LLM_MODEL=provider/model-or-local-model-name
+Each provider can define:
+
+- a display name
+- a base URL
+- an API key
+- a default model
+- a static model list, or `DISCOVER_MODELS=true` to fetch models from `MODELS_URL` or the provider’s `/models` endpoint
+- an optional public model list for browser use without an API key
+- an optional API key label for the UI
+
+If `LLM_PROVIDER` is set, that provider is selected by default in the UI. If it is empty, the first provider in `LLM_PROVIDERS` is used.
+
+If you also set `LLM_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models configured for the selected provider appear in the selector.
+
+Provider API keys go into `LLM_PROVIDER_<ID>_API_KEY`, where `<ID>` is the uppercase provider id from `LLM_PROVIDERS`. For example, `aiufal` uses `LLM_PROVIDER_AIUFAL_API_KEY`, and `openrouter` uses `LLM_PROVIDER_OPENROUTER_API_KEY`.
+
+AI Ufal exposes models at:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://ai.ufal.mff.cuni.cz/api/models | jq ".data[].id"
 ```
 
-The provider keys are split so each provider can have its own credential in `.env`. `LLM_API_KEY` is still accepted as a backward-compatible fallback during migration, and `OPENROUTER_*` is still accepted as a backward-compatible alias for the other settings. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
+OpenRouter has the same OpenAI-compatible shape and can usually list models without a key:
 
-If you want to limit the shared server key to only a safe or free model, set `LLM_PUBLIC_MODELS` in `.env`. The simplest option is `openrouter/free`, which routes requests to currently available free models on OpenRouter. The web UI will then allow that model without an API key, while any other model will require the user to enter their own key in the browser.
+```bash
+curl https://openrouter.ai/api/v1/models | jq ".data[].id"
+```
 
-If you also set `MODEL_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models in `LLM_PUBLIC_MODELS` appear in the selector.
+The app filters internal/non-chat model ids matching `rag-*` and `openwebuidocs` from configured and discovered model lists.
 
 ## Run The App
 
@@ -209,15 +239,19 @@ The web UI lets you tune retrieval while testing:
 
 Important `.env` variables:
 
-- `AI_UFAL_TOKEN`
-- `OPENROUTER_API_KEY`
-- `LLM_API_KEY` as a backward-compatible fallback
-- `LLM_MODEL`
-- `LLM_BASE_URL`
-- `OPENROUTER_MODEL` as a backward-compatible alias
-- `OPENROUTER_BASE_URL` as a backward-compatible alias
-- `LLM_PUBLIC_MODELS`
-- `MODEL_UNLOCK_PASSWORD`
+- `LLM_PROVIDER`
+- `LLM_PROVIDERS`
+- `LLM_UNLOCK_PASSWORD`
+- `LLM_PROVIDER_<ID>_NAME`
+- `LLM_PROVIDER_<ID>_BASE_URL`
+- `LLM_PROVIDER_<ID>_API_KEY`
+- `LLM_PROVIDER_<ID>_DEFAULT_MODEL`
+- `LLM_PROVIDER_<ID>_PUBLIC_MODELS`
+- `LLM_PROVIDER_<ID>_MODELS`
+- `LLM_PROVIDER_<ID>_MODELS_URL`
+- `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
+- `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
+- `LLM_PROVIDER_<ID>_API_KEY_LABEL`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`
@@ -292,8 +326,8 @@ The app can be adapted to any topic, but this is not fully configuration-driven 
 
 ## Notes For Future Extensions
 
-- Use `LLM_BASE_URL` with an Ollama/vLLM/OpenAI-compatible local server or another hosted OpenAI-compatible provider.
-- Manage context-window size more explicitly, especially for AIUfal:
+- Configure additional providers by adding another `LLM_PROVIDER_<ID>_*` block.
+- Manage context-window size more explicitly for providers with large model catalogs:
   - add a manual context-window limit in Advanced options
   - later, derive defaults from the selected model and its known maximum context length
   - for now, keep the retrieval set small, roughly Top10, and trim it to the model's context window
