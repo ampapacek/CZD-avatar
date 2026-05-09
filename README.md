@@ -293,6 +293,11 @@ The app can be adapted to any topic, but this is not fully configuration-driven 
 ## Notes For Future Extensions
 
 - Use `LLM_BASE_URL` with an Ollama/vLLM/OpenAI-compatible local server or another hosted OpenAI-compatible provider.
+- Manage context-window size more explicitly, especially for AIUfal:
+  - add a manual context-window limit in Advanced options
+  - later, derive defaults from the selected model and its known maximum context length
+  - for now, keep the retrieval set small, roughly Top10, and trim it to the model's context window
+  - ideally use the same tokenizer as the selected model when counting tokens
 - Add a cross-encoder reranker after hybrid retrieval.
 - Add richer metadata extraction for your real historical archive.
 - Add evaluation sets and automated citation-grounding checks.
