@@ -11,6 +11,15 @@ const llmBaseUrl = document.querySelector("#llmBaseUrl");
 const llmApiKey = document.querySelector("#llmApiKey");
 const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const unlockModelsButton = document.querySelector("#unlockModelsButton");
+const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPasswordButton");
+const providerApiKeyList = document.querySelector("#providerApiKeyList");
+const customProviderName = document.querySelector("#customProviderName");
+const customProviderBaseUrl = document.querySelector("#customProviderBaseUrl");
+const customProviderApiKey = document.querySelector("#customProviderApiKey");
+const saveCustomProviderApiKeyButton = document.querySelector("#saveCustomProviderApiKeyButton");
+const clearCustomProviderApiKeyButton = document.querySelector("#clearCustomProviderApiKeyButton");
+const customProviderDefaultModel = document.querySelector("#customProviderDefaultModel");
+const customProviderModels = document.querySelector("#customProviderModels");
 const retrieveOnly = document.querySelector("#retrieveOnly");
 const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
@@ -61,6 +70,9 @@ const conversationSubmitButton = document.querySelector("#conversationSubmitButt
 const newConversationButton = document.querySelector("#newConversationButton");
 const deleteConversationButton = document.querySelector("#deleteConversationButton");
 const closeConversationButton = document.querySelector("#closeConversationButton");
+const settingsButton = document.querySelector("#settingsButton");
+const settingsDialog = document.querySelector("#settingsDialog");
+const closeSettingsButton = document.querySelector("#closeSettingsButton");
 const helpButton = document.querySelector("#helpButton");
 const helpDialog = document.querySelector("#helpDialog");
 const closeHelpButton = document.querySelector("#closeHelpButton");
@@ -69,6 +81,8 @@ const themeToggleLabel = document.querySelector("#themeToggleLabel");
 const HISTORY_STORAGE_KEY = "czdemos4ai-history";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
+const CUSTOM_PROVIDER_ID = "custom";
+const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const STYLE_LABELS = {
   laik: "laik",
   ucitel: "učitel",
@@ -114,7 +128,7 @@ function isAiUfalBaseUrl(baseUrl) {
 }
 
 function currentProviderBaseUrl() {
-  return llmBaseUrl.value.trim() || selectedProviderConfig()?.base_url || "";
+  return selectedProviderBaseUrl();
 }
 
 async function loadSettings() {
@@ -125,10 +139,12 @@ async function loadSettings() {
   length.value = settings.default_length || "medium";
   embeddingModel.value = settings.embedding_model || "";
   llmSettingsState = loadLlmSettings();
-  const providers = settings.llm_providers || [];
+  const providers = getLlmProviders(settings);
   const selectedProvider =
     normalizeProviderId(llmSettingsState.selected_provider || settings.llm_provider || providers[0]?.id || "");
   populateProviderOptions(providers, selectedProvider);
+  populateCustomProviderFields();
+  renderProviderApiKeyFields();
   loadProviderValues(selectedProvider, { preferStored: true });
   llmUnlockPassword.value = llmSettingsState.model_unlock_password || "";
   if (llmUnlockPassword.value.trim()) {
@@ -279,6 +295,20 @@ helpDialog.addEventListener("click", (event) => {
   }
 });
 
+settingsButton.addEventListener("click", () => {
+  renderProviderApiKeyFields();
+  populateCustomProviderFields();
+  settingsDialog.showModal();
+});
+closeSettingsButton.addEventListener("click", () => {
+  settingsDialog.close();
+});
+settingsDialog.addEventListener("click", (event) => {
+  if (event.target === settingsDialog) {
+    settingsDialog.close();
+  }
+});
+
 historyButton.addEventListener("click", () => {
   renderHistory();
   historyDialog.showModal();
@@ -382,7 +412,6 @@ themeToggle.addEventListener("click", () => {
 llmProvider.addEventListener("change", () => {
   const providerId = normalizeProviderId(llmProvider.value);
   loadProviderValues(providerId, { preferStored: true });
-  llmModelsUnlocked = false;
   refreshModelOptions(appSettings);
   populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
   updateRetrievalControls({ resetValues: false });
@@ -396,20 +425,98 @@ llmApiKey.addEventListener("input", () => {
   persistLlmSettings();
   refreshModelOptions(appSettings);
 });
+providerApiKeyList.addEventListener("click", (event) => {
+  const toggleButton = event.target.closest("[data-toggle-secret]");
+  if (toggleButton) {
+    toggleSecretField(toggleButton);
+    return;
+  }
+  const clearButton = event.target.closest("[data-clear-provider-api-key]");
+  if (clearButton) {
+    clearProviderApiKey(clearButton.dataset.clearProviderApiKey);
+    renderProviderApiKeyFields();
+    refreshModelOptions(appSettings);
+    return;
+  }
+  const button = event.target.closest("[data-save-provider-api-key]");
+  if (!button) {
+    return;
+  }
+  const providerId = button.dataset.saveProviderApiKey;
+  const input = providerApiKeyList.querySelector(`[data-provider-api-key="${cssEscape(providerId)}"]`);
+  if (!input) {
+    return;
+  }
+  if (!input.value.trim()) {
+    clearProviderApiKey(providerId);
+    renderProviderApiKeyFields();
+    refreshModelOptions(appSettings);
+    return;
+  }
+  saveProviderApiKey(providerId, input.value);
+  input.placeholder = "Klíč je uložený v tomto prohlížeči";
+  renderProviderApiKeyFields();
+  refreshModelOptions(appSettings);
+});
 customModel.addEventListener("input", persistLlmSettings);
 model.addEventListener("change", () => {
-  updateCustomModelVisibility(llmModelsUnlocked || Boolean(llmApiKey.value.trim()));
+  updateCustomModelVisibility(customModelAllowed());
   persistLlmSettings();
   if (model.value === CUSTOM_MODEL_VALUE) {
     customModel.focus();
   }
 });
 llmUnlockPassword.addEventListener("input", () => {
-  persistLlmSettings();
   llmModelsUnlocked = false;
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+});
+customProviderName.addEventListener("input", () => {
+  persistLlmSettings();
+  populateProviderOptions(getLlmProviders(appSettings), llmProvider.value);
+});
+customProviderBaseUrl.addEventListener("input", () => {
+  persistLlmSettings();
+  loadProviderValues(llmProvider.value, { preferStored: true });
+  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+});
+saveCustomProviderApiKeyButton.addEventListener("click", () => {
+  if (!customProviderApiKey.value.trim()) {
+    clearProviderApiKey(CUSTOM_PROVIDER_ID);
+    populateCustomProviderFields();
+    refreshModelOptions(appSettings);
+    return;
+  }
+  saveProviderApiKey(CUSTOM_PROVIDER_ID, customProviderApiKey.value);
+  customProviderApiKey.placeholder = "Klíč je uložený v tomto prohlížeči";
+  refreshModelOptions(appSettings);
+});
+clearCustomProviderApiKeyButton.addEventListener("click", () => {
+  clearProviderApiKey(CUSTOM_PROVIDER_ID);
+  populateCustomProviderFields();
+  refreshModelOptions(appSettings);
+});
+customProviderDefaultModel.addEventListener("input", () => {
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+});
+customProviderModels.addEventListener("input", () => {
+  persistLlmSettings();
   refreshModelOptions(appSettings);
 });
 unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
+toggleUnlockPasswordButton.addEventListener("click", () => {
+  toggleSecretField(toggleUnlockPasswordButton);
+});
+
+document.querySelectorAll("[data-toggle-secret]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    if (event.currentTarget === toggleUnlockPasswordButton) {
+      return;
+    }
+    toggleSecretField(event.currentTarget);
+  });
+});
 
 function buildRequestPayload(overrides = {}) {
   return {
@@ -424,8 +531,8 @@ function buildRequestPayload(overrides = {}) {
     conversation_history: [],
     model: selectedModelValue(),
     llm_provider: llmProvider.value,
-    llm_base_url: nullableString(llmBaseUrl.value),
-    llm_api_key: nullableString(llmApiKey.value),
+    llm_base_url: nullableString(selectedProviderBaseUrl()),
+    llm_api_key: nullableString(selectedProviderApiKey()),
     model_unlock_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
@@ -486,14 +593,105 @@ function loadLlmSettings() {
   }
 }
 
+function customProviderSettings() {
+  return (llmSettingsState.provider_settings || {})[CUSTOM_PROVIDER_ID] || {};
+}
+
+function customProviderConfig() {
+  const settings = customProviderSettings();
+  const defaultModel = String(settings.default_model || settings.custom_model || "").trim();
+  const configuredModels = splitModelList(settings.models || "");
+  const modelPresets = Array.from(new Set([defaultModel, settings.custom_model, ...configuredModels].filter(Boolean)));
+  return {
+    id: CUSTOM_PROVIDER_ID,
+    label: String(settings.label || "").trim() || DEFAULT_CUSTOM_PROVIDER_LABEL,
+    base_url: String(settings.base_url || "").trim(),
+    default_model: defaultModel,
+    model_presets: modelPresets,
+    public_models: [],
+    supports_streaming: true,
+    api_key_label: "API key",
+  };
+}
+
+function getLlmProviders(settings = appSettings) {
+  const configuredProviders = Array.isArray(settings.llm_providers) ? settings.llm_providers : [];
+  const providers = configuredProviders.filter((provider) => provider?.id !== CUSTOM_PROVIDER_ID);
+  return [...providers, customProviderConfig()];
+}
+
+function configuredEnvProviders(settings = appSettings) {
+  return (Array.isArray(settings.llm_providers) ? settings.llm_providers : []).filter(
+    (provider) => provider?.id !== CUSTOM_PROVIDER_ID,
+  );
+}
+
+function renderProviderApiKeyFields() {
+  const providers = configuredEnvProviders(appSettings);
+  providerApiKeyList.innerHTML = providers
+    .map((provider) => {
+      const savedKey = selectedProviderApiKey(provider.id);
+      const placeholder = savedKey ? "Klíč je uložený v tomto prohlížeči" : provider.api_key_label || "API key";
+      const providerLabel = provider.label || provider.id || "vybraného poskytovatele";
+      const publicModels = providerPublicModels(provider, appSettings);
+      const policyNote =
+        publicModels.length > 0
+          ? `Bez odemykacího hesla jsou povolené modely pro ${providerLabel}: ${publicModels.join(", ")}.`
+          : `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
+      return `
+        <label class="field provider-key-row">
+          <span>${escapeHtml(provider.label || provider.id)}</span>
+          <div class="inline-actions">
+            <div class="secret-field">
+              <input type="password" data-provider-api-key="${escapeHtml(provider.id)}" value="${escapeHtml(savedKey)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" />
+              <button class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit API klíč" title="Zobrazit API klíč">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </button>
+            </div>
+            <button class="secondary" type="button" data-save-provider-api-key="${escapeHtml(provider.id)}">Uložit klíč</button>
+            <button class="secondary danger-lite" type="button" data-clear-provider-api-key="${escapeHtml(provider.id)}">Smazat klíč</button>
+          </div>
+          <span class="field-note">${escapeHtml(policyNote)}</span>
+        </label>
+      `;
+    })
+    .join("");
+}
+
+function populateCustomProviderFields() {
+  const settings = customProviderSettings();
+  customProviderName.value = String(settings.label || "").trim();
+  customProviderBaseUrl.value = String(settings.base_url || "").trim();
+  customProviderDefaultModel.value = String(settings.default_model || "").trim();
+  customProviderModels.value = String(settings.models || "").trim();
+  customProviderApiKey.value = selectedProviderApiKey(CUSTOM_PROVIDER_ID);
+  customProviderApiKey.placeholder = selectedProviderApiKey(CUSTOM_PROVIDER_ID)
+    ? "Klíč je uložený v tomto prohlížeči"
+    : "Uložit klíč pro vlastního providera";
+}
+
 function persistLlmSettings() {
   const providerId = normalizeProviderId(llmProvider.value);
   const providerSettings = { ...(llmSettingsState.provider_settings || {}) };
-  providerSettings[providerId] = {
-    base_url: llmBaseUrl.value.trim(),
-    api_key: llmApiKey.value,
-    custom_model: customModel.value.trim(),
+  const selectedSettings = { ...(providerSettings[providerId] || {}) };
+  selectedSettings.custom_model = customModel.value.trim();
+  providerSettings[providerId] = selectedSettings;
+  providerSettings[CUSTOM_PROVIDER_ID] = {
+    ...(providerSettings[CUSTOM_PROVIDER_ID] || {}),
+    label: customProviderName.value.trim(),
+    base_url: customProviderBaseUrl.value.trim(),
+    default_model: customProviderDefaultModel.value.trim(),
+    models: customProviderModels.value.trim(),
   };
+  if (providerId === CUSTOM_PROVIDER_ID) {
+    providerSettings[CUSTOM_PROVIDER_ID] = {
+      ...providerSettings[CUSTOM_PROVIDER_ID],
+      custom_model: customModel.value.trim(),
+    };
+  }
   llmSettingsState = {
     selected_provider: providerId,
     provider_settings: providerSettings,
@@ -507,6 +705,105 @@ function persistLlmSettings() {
       model_unlock_password: llmSettingsState.model_unlock_password,
     }),
   );
+}
+
+function saveProviderApiKey(providerId, apiKey) {
+  const normalizedProviderId = normalizeProviderId(providerId);
+  const nextApiKey = String(apiKey || "").trim();
+  if (!normalizedProviderId || !nextApiKey) {
+    return;
+  }
+  const providerSettings = { ...(llmSettingsState.provider_settings || {}) };
+  providerSettings[normalizedProviderId] = {
+    ...(providerSettings[normalizedProviderId] || {}),
+    api_key: nextApiKey,
+    api_key_saved: true,
+  };
+  llmSettingsState = {
+    ...llmSettingsState,
+    provider_settings: providerSettings,
+  };
+  localStorage.setItem(
+    LLM_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      selected_provider: llmSettingsState.selected_provider,
+      provider_settings: llmSettingsState.provider_settings,
+      model_unlock_password: llmSettingsState.model_unlock_password,
+    }),
+  );
+}
+
+function clearProviderApiKey(providerId) {
+  const normalizedProviderId = normalizeProviderId(providerId);
+  if (!normalizedProviderId) {
+    return;
+  }
+  const providerSettings = { ...(llmSettingsState.provider_settings || {}) };
+  providerSettings[normalizedProviderId] = {
+    ...(providerSettings[normalizedProviderId] || {}),
+  };
+  delete providerSettings[normalizedProviderId].api_key;
+  delete providerSettings[normalizedProviderId].api_key_saved;
+  llmSettingsState = {
+    ...llmSettingsState,
+    provider_settings: providerSettings,
+  };
+  localStorage.setItem(
+    LLM_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      selected_provider: llmSettingsState.selected_provider,
+      provider_settings: llmSettingsState.provider_settings,
+      model_unlock_password: llmSettingsState.model_unlock_password,
+    }),
+  );
+}
+
+function selectedProviderSettings(providerId = llmProvider.value) {
+  return (llmSettingsState.provider_settings || {})[normalizeProviderId(providerId)] || {};
+}
+
+function selectedProviderApiKey(providerId = llmProvider.value) {
+  const settings = selectedProviderSettings(providerId);
+  return settings.api_key_saved === true ? String(settings.api_key || "").trim() : "";
+}
+
+function selectedProviderBaseUrl(providerId = llmProvider.value) {
+  const normalizedProviderId = normalizeProviderId(providerId);
+  if (normalizedProviderId === CUSTOM_PROVIDER_ID) {
+    return String(customProviderSettings().base_url || "").trim();
+  }
+  return selectedProviderConfig()?.base_url || "";
+}
+
+function splitModelList(value) {
+  return String(value || "")
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function customModelAllowed(provider = selectedProviderConfig()) {
+  return Boolean(provider?.id === CUSTOM_PROVIDER_ID || llmModelsUnlocked || selectedProviderApiKey(provider?.id).trim());
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) {
+    return window.CSS.escape(String(value || ""));
+  }
+  return String(value || "").replace(/["\\]/g, "\\$&");
+}
+
+function toggleSecretField(button) {
+  const field = button.closest(".secret-field");
+  const input = field?.querySelector("input");
+  if (!input) {
+    return;
+  }
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  const label = show ? "Skrýt hodnotu" : "Zobrazit hodnotu";
+  button.setAttribute("aria-label", label);
+  button.title = label;
 }
 
 async function verifyUnlockPassword({ silent = false } = {}) {
@@ -594,7 +891,7 @@ async function fetchChat(payload) {
 }
 
 function providerSupportsStreaming(providerId = null) {
-  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find(
+  const provider = getLlmProviders(appSettings).find(
     (item) => item.id === normalizeProviderId(providerId || llmProvider.value || appSettings.llm_provider || ""),
   );
   return provider?.supports_streaming !== false;
@@ -697,7 +994,7 @@ function populateProviderOptions(providers, currentProvider) {
 }
 
 function selectedProviderConfig(settings = appSettings) {
-  const providers = Array.isArray(settings.llm_providers) ? settings.llm_providers : [];
+  const providers = getLlmProviders(settings);
   const providerId = normalizeProviderId(llmProvider?.value || settings.llm_provider || "");
   return providers.find((provider) => provider.id === providerId) || providers[0] || null;
 }
@@ -712,20 +1009,19 @@ function providerPublicModels(provider = selectedProviderConfig(), settings = ap
 }
 
 function loadProviderValues(providerId, { preferStored = false } = {}) {
-  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find((item) => item.id === providerId) || null;
+  const provider = getLlmProviders(appSettings).find((item) => item.id === providerId) || null;
   const providerSettings = (llmSettingsState.provider_settings || {})[providerId] || {};
   const baseUrl = preferStored && providerSettings.base_url ? providerSettings.base_url : provider?.base_url || "";
-  const apiKey = providerSettings.api_key || "";
   const customModelValue = providerSettings.custom_model || "";
   llmProvider.value = providerId || provider?.id || "";
   llmBaseUrl.value = baseUrl;
-  llmApiKey.value = apiKey;
+  llmApiKey.value = "";
   customModel.value = customModelValue;
 }
 
 function providerLabelForId(providerId) {
   const normalized = normalizeProviderId(providerId);
-  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find((item) => item.id === normalized);
+  const provider = getLlmProviders(appSettings).find((item) => item.id === normalized);
   return provider?.label || normalized || "—";
 }
 
@@ -733,7 +1029,7 @@ function populateModels(presets, currentModel, allowCustom = false) {
   const uniqueModels = Array.from(new Set(presets.filter(Boolean)));
   const options = uniqueModels.map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`);
   if (allowCustom) {
-    options.push(`<option value="${escapeHtml(CUSTOM_MODEL_VALUE)}">Jiný model…</option>`);
+    options.push(`<option value="${escapeHtml(CUSTOM_MODEL_VALUE)}">Jiný</option>`);
   }
   model.innerHTML = options.join("");
 
@@ -756,18 +1052,12 @@ function refreshModelOptions(settings = appSettings) {
   const provider = selectedProviderConfig(settings);
   const providerModels = Array.isArray(provider?.model_presets) ? provider.model_presets.filter(Boolean) : [];
   const publicModels = providerPublicModels(provider, settings);
-  const browserApiKeyProvided = Boolean(llmApiKey.value.trim());
-  const unlocked = llmModelsUnlocked || browserApiKeyProvided;
+  const browserApiKeyProvided = Boolean(selectedProviderApiKey(provider?.id));
+  const unlocked = customModelAllowed(provider);
   const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() : model.value || provider?.default_model || "";
   populateModels(unlocked ? providerModels : publicModels, currentModel, unlocked);
   const providerBaseUrl = provider?.base_url || "";
-  if (!llmBaseUrl.value.trim()) {
-    llmBaseUrl.value = providerBaseUrl;
-  }
-  llmBaseUrl.placeholder = providerBaseUrl || "https://api.openai.com/v1";
-  llmApiKey.placeholder = browserApiKeyProvided
-    ? "Vlastní klíč přepisuje uložený klíč"
-    : provider?.api_key_label || "API key";
+  llmBaseUrl.value = selectedProviderBaseUrl(provider?.id) || providerBaseUrl;
   updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);
 }
 
@@ -944,6 +1234,10 @@ function updateRetrievalControls({ resetValues = false } = {}) {
     element.classList.toggle("is-hidden", !isMsearch);
     element.hidden = !isMsearch;
   }
+  for (const element of document.querySelectorAll(".local-control")) {
+    element.classList.toggle("is-hidden", isMsearch);
+    element.hidden = isMsearch;
+  }
   const embeddingField = embeddingModel.closest(".field");
   if (embeddingField) {
     embeddingField.classList.toggle("is-hidden", isMsearch);
@@ -994,7 +1288,7 @@ function updateLlmPolicyNote(policy, unlocked = false, browserApiKeyProvided = f
     llmPolicyNote.textContent = `Bez odemykacího hesla jsou povolené modely pro ${providerLabel}: ${publicModels.join(", ")}.`;
     return;
   }
-  llmPolicyNote.textContent = `Dostupné jsou jen veřejné modely nastavené pro ${providerLabel}.`;
+  llmPolicyNote.textContent = `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
 }
 
 function nullableNumber(value) {
@@ -1776,7 +2070,7 @@ function applyHistoryEntryToForm(entry) {
   renderPromptPresets("default");
   refreshModelOptions(appSettings);
   const modelValue = entry.settings?.model || "";
-  const unlocked = llmModelsUnlocked;
+  const unlocked = customModelAllowed();
   if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
     model.value = modelValue;
   } else if (unlocked && modelValue) {
@@ -1786,9 +2080,6 @@ function applyHistoryEntryToForm(entry) {
     model.value = model.options[0].value;
   }
   updateCustomModelVisibility(unlocked);
-  if (entry.settings?.llm_base_url) {
-    llmBaseUrl.value = entry.settings.llm_base_url;
-  }
   persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;

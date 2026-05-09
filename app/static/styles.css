@@ -153,7 +153,7 @@ h2 {
 
 .topbar-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(70px, 88px));
+  grid-template-columns: repeat(5, minmax(70px, 88px));
   justify-content: flex-end;
   gap: 12px;
   align-items: center;
@@ -296,8 +296,48 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   min-width: 0;
 }
 
+.inline-actions .secret-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .inline-actions button {
   flex: 0 0 auto;
+}
+
+.secret-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.secret-field input {
+  padding-right: 42px;
+}
+
+.secret-toggle {
+  position: absolute;
+  right: 5px;
+  width: 32px;
+  height: 32px;
+  min-width: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.secret-toggle:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.secret-toggle svg {
+  width: 18px;
+  height: 18px;
 }
 
 textarea,
@@ -488,6 +528,14 @@ button:hover {
 .secondary:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.danger-lite {
+  color: var(--warn);
+}
+
+.danger-lite:hover {
+  border-color: var(--warn);
 }
 
 .answer-panel {
@@ -1068,7 +1116,8 @@ body[data-theme="dark"] .source-highlight {
   color: var(--warn);
 }
 
-.help-dialog {
+.help-dialog,
+.settings-dialog {
   width: min(720px, calc(100% - 32px));
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1078,13 +1127,27 @@ body[data-theme="dark"] .source-highlight {
   box-shadow: var(--shadow);
 }
 
-.help-dialog::backdrop {
+.settings-dialog {
+  width: min(1040px, calc(100% - 32px));
+  max-height: min(92vh, 980px);
+  overflow: hidden;
+}
+
+.help-dialog::backdrop,
+.settings-dialog::backdrop {
   background: rgba(13, 17, 23, 0.42);
   backdrop-filter: blur(6px);
 }
 
-.help-content {
+.help-content,
+.settings-shell {
   padding: 18px 18px 20px;
+}
+
+.settings-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(92vh, 980px);
 }
 
 .help-header {
@@ -1128,6 +1191,46 @@ body[data-theme="dark"] .source-highlight {
   font-size: 14px;
 }
 
+.settings-body {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding-right: 6px;
+  overflow: auto;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.provider-key-list {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-key-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.provider-key-row .inline-actions {
+  flex-wrap: wrap;
+}
+
 .help-close {
   width: 36px;
   height: 36px;
@@ -1161,7 +1264,7 @@ body[data-theme="dark"] .source-highlight {
   .topbar-actions {
     width: 100%;
     max-width: none;
-    grid-template-columns: repeat(4, minmax(64px, 1fr));
+    grid-template-columns: repeat(5, minmax(58px, 1fr));
     justify-content: stretch;
   }
 
@@ -1205,6 +1308,7 @@ body[data-theme="dark"] .source-highlight {
   .controls,
   .advanced-grid,
   .prompt-controls,
+  .provider-key-list,
   .settings-grid,
   .help-body {
     grid-template-columns: 1fr;

@@ -124,7 +124,10 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
         provider_config["model_presets"][0] if provider_config["model_presets"] else ""
     )
     browser_api_key = request.llm_api_key.strip() if request.llm_api_key else None
-    server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url)
+    requested_base_url = request.llm_base_url.strip().rstrip("/") if request.llm_base_url else ""
+    provider_base_url = str(provider_config.get("base_url") or "").strip().rstrip("/")
+    use_server_api_key = not requested_base_url or requested_base_url == provider_base_url
+    server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
     browser_unlock_password = request.model_unlock_password.strip() if request.model_unlock_password else ""
     unlock_enabled = bool(settings.llm_unlock_password) and hmac.compare_digest(
         browser_unlock_password,
@@ -138,7 +141,7 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
             status_code=400,
             detail=(
                 f"Model '{resolved_model}' requires your own API key. "
-                f"Use the LLM API panel in the browser to enter one, unlock all models with the shared password, or choose one of the public models: {allowed_models}."
+                f"Use Settings in the browser to enter one, unlock all models with the shared password, or choose one of the public models: {allowed_models}."
             ),
         )
     resolved_base_url = request.llm_base_url or provider_config["base_url"]

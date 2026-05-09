@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CZDEMOS4AI Historický avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=msearch-11" />
+    <link rel="stylesheet" href="static/styles.css?v=msearch-15" />
   </head>
   <body>
     <main class="shell">
@@ -44,6 +44,13 @@
                 <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
               </svg>
               <span>Nápověda</span>
+            </button>
+            <button id="settingsButton" class="topbar-button" type="button" title="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty." aria-label="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.97 4.6 1.7 1.7 0 0 0 10 3.04V3a2 2 0 0 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21a2 2 0 0 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+              </svg>
+              <span>Nastavení</span>
             </button>
             <button id="themeToggle" class="topbar-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
               <span class="icon-sun" aria-hidden="true">
@@ -149,39 +156,15 @@
               <p class="field-note retrieval-threshold-note">
                 `Min. confidence` platí pro mSearch, `Min. skóre` a `Min. vůči nejlepšímu` se používají v aplikaci po seřazení výsledků.
               </p>
-              <details class="api-section">
-                <summary>LLM API</summary>
-                <div class="api-section-body">
-                  <label class="field">
-                    <span>Base URL</span>
-                    <input id="llmBaseUrl" type="url" placeholder="Např. https://api.openai.com/v1" />
-                  </label>
-                  <label class="field">
-                    <span>API key</span>
-                    <input id="llmApiKey" type="password" placeholder="Volitelné přepsání serverového klíče" autocomplete="off" />
-                  </label>
-                  <div class="field">
-                    <span>Odemknout modely</span>
-                    <div class="inline-actions">
-                      <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
-                      <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
-                    </div>
-                  </div>
-                  <p class="field-note" id="llmPolicyNote">
-                    Veřejné modely jsou jediná volba v rozbalovacím seznamu.
-                  </p>
-                  <p class="field-note">API klíč i odemykací heslo se ukládají jen lokálně v tomto prohlížeči. Pokud pole necháš prázdné, použije se serverové nastavení.</p>
-                </div>
-              </details>
               <label class="field">
                 <span>Dokumentů: <output id="topKValue">10</output></span>
                 <input id="topK" type="range" min="0" max="50" step="1" value="10" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
                 <input id="denseWeight" type="range" min="0" max="1" step="0.05" value="0.70" />
               </label>
-              <label class="field">
+              <label class="field local-control">
                 <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
                 <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
               </label>
@@ -193,38 +176,6 @@
                 <span>Min. vůči nejlepšímu</span>
                 <input id="minRelativeScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.50" />
               </label>
-              <details class="prompt-section">
-                <summary>Prompty</summary>
-                <div class="prompt-section-body">
-                  <div class="prompt-controls">
-                    <label class="field">
-                      <span>Uložený prompt</span>
-                      <select id="promptPreset"></select>
-                    </label>
-                    <div class="prompt-actions">
-                      <button id="savePromptButton" class="secondary" type="button">Uložit</button>
-                      <button id="resetPromptButton" class="secondary" type="button">Výchozí</button>
-                      <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
-                    </div>
-                  </div>
-                  <label class="field prompt-editor">
-                    <span>Systémový prompt ({style}, {length})</span>
-                    <textarea id="systemPrompt" rows="12"></textarea>
-                  </label>
-                  <label class="field prompt-editor">
-                    <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
-                    <textarea id="stylePromptDescription" rows="4"></textarea>
-                  </label>
-                  <label class="field prompt-editor">
-                    <span id="lengthPromptDescriptionLabel">Popis vybrané délky</span>
-                    <textarea id="lengthPromptDescription" rows="4"></textarea>
-                  </label>
-                  <label class="field prompt-editor">
-                    <span>Plný prompt</span>
-                    <textarea id="userPromptTemplate" rows="8"></textarea>
-                  </label>
-                </div>
-              </details>
             </div>
           </details>
 
@@ -285,12 +236,129 @@
           </div>
           <div class="help-card">
             <h3>Nastavení</h3>
-            <p>V `Pokročilém nastavení` lze změnit model, počet výsledků, váhu embeddingů a BM25 i prahové skóre.</p>
+            <p>V `Pokročilém nastavení` lze změnit model a vyhledávání. Tlačítko `Nastavení` otevírá LLM API, klíče, vlastní provider a prompty.</p>
           </div>
           <div class="help-card">
             <h3>Zdroje a soukromí</h3>
             <p>U každého zdroje lze otevřít celý úryvek a kliknout na `Dokument` nebo `Zdroj`. Historie i konverzace se zatím ukládají jen lokálně v tomto prohlížeči.</p>
           </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="settingsDialog" class="settings-dialog">
+      <div class="settings-shell">
+        <div class="history-dialog-header">
+          <div>
+            <h2>Nastavení</h2>
+            <p>LLM API, lokální klíče, vlastní poskytovatel a prompty.</p>
+            <p>API klíče a odemykací heslo se ukládají jen v tomto prohlížeči.</p>
+          </div>
+          <button id="closeSettingsButton" class="icon-button help-close" type="button" aria-label="Zavřít nastavení" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="settings-body">
+          <section class="settings-section api-section-body">
+            <h3>API klíče providerů</h3>
+            <input id="llmBaseUrl" type="hidden" />
+            <input id="llmApiKey" type="hidden" />
+            <div id="providerApiKeyList" class="provider-key-list"></div>
+            <p class="field-note" id="llmPolicyNote">
+              Veřejné modely jsou jediná volba v rozbalovacím seznamu.
+            </p>
+            <p class="field-note">Klíč uložený v prohlížeči se použije místo klíče z `.env` pro daného providera. Klíče z `.env` se do polí nikdy nevypisují.</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>Odemknout modely</h3>
+            <div class="inline-actions">
+              <div class="secret-field">
+                <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
+                <button id="toggleUnlockPasswordButton" class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit heslo" title="Zobrazit heslo">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </button>
+              </div>
+              <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
+            </div>
+            <p class="field-note">Po odemčení bude v rozbalovacím seznamu modelů dostupná volba `Jiný model`.</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>Vlastní poskytovatel</h3>
+            <div class="settings-grid">
+              <label class="field">
+                <span>Název</span>
+                <input id="customProviderName" type="text" placeholder="Např. OpenAI" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Base URL</span>
+                <input id="customProviderBaseUrl" type="url" placeholder="Např. https://api.openai.com/v1" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>API key</span>
+                <div class="inline-actions">
+                  <div class="secret-field">
+                    <input id="customProviderApiKey" type="password" placeholder="Uložit klíč pro vlastního providera" autocomplete="off" />
+                    <button class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit API klíč" title="Zobrazit API klíč">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                  <button id="saveCustomProviderApiKeyButton" class="secondary" type="button">Uložit klíč</button>
+                  <button id="clearCustomProviderApiKeyButton" class="secondary danger-lite" type="button">Smazat klíč</button>
+                </div>
+              </label>
+              <label class="field">
+                <span>Default model</span>
+                <input id="customProviderDefaultModel" type="text" placeholder="Např. gpt-4.1-mini" autocomplete="off" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Modely</span>
+              <textarea id="customProviderModels" rows="4" placeholder="Jeden model na řádek, nebo oddělené čárkou."></textarea>
+            </label>
+            <p class="field-note">Vlastní poskytovatel se objeví v rozbalovacím seznamu `Poskytovatel` na hlavní stránce. U něj je volba `Jiný model` dostupná vždy.</p>
+          </section>
+
+          <section class="settings-section prompt-section-body">
+            <h3>Prompty</h3>
+            <div class="prompt-controls">
+              <label class="field">
+                <span>Uložený prompt</span>
+                <select id="promptPreset"></select>
+              </label>
+              <div class="prompt-actions">
+                <button id="savePromptButton" class="secondary" type="button">Uložit</button>
+                <button id="resetPromptButton" class="secondary" type="button">Výchozí</button>
+                <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
+              </div>
+            </div>
+            <label class="field prompt-editor">
+              <span>Systémový prompt ({style}, {length})</span>
+              <textarea id="systemPrompt" rows="12"></textarea>
+            </label>
+            <label class="field prompt-editor">
+              <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
+              <textarea id="stylePromptDescription" rows="4"></textarea>
+            </label>
+            <label class="field prompt-editor">
+              <span id="lengthPromptDescriptionLabel">Popis vybrané délky</span>
+              <textarea id="lengthPromptDescription" rows="4"></textarea>
+            </label>
+            <label class="field prompt-editor">
+              <span>Plný prompt</span>
+              <textarea id="userPromptTemplate" rows="8"></textarea>
+            </label>
+          </section>
         </div>
       </div>
     </dialog>
@@ -366,6 +434,6 @@
       </div>
     </dialog>
 
-    <script src="static/app.js?v=msearch-11"></script>
+    <script src="static/app.js?v=msearch-15"></script>
   </body>
 </html>
