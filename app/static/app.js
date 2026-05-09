@@ -3,6 +3,7 @@ const question = document.querySelector("#question");
 const style = document.querySelector("#style");
 const length = document.querySelector("#length");
 const customInstructions = document.querySelector("#customInstructions");
+const llmProvider = document.querySelector("#llmProvider");
 const model = document.querySelector("#model");
 const customModelField = document.querySelector("#customModelField");
 const customModel = document.querySelector("#customModel");
@@ -99,15 +100,20 @@ async function loadSettings() {
   length.value = settings.default_length || "medium";
   embeddingModel.value = settings.embedding_model || "";
   const savedLlmSettings = loadLlmSettings();
-  llmBaseUrl.value = savedLlmSettings.llm_base_url || "";
-  llmBaseUrl.placeholder = settings.llm_base_url || "https://api.openai.com/v1";
+  const selectedProvider = savedLlmSettings.llm_provider || settings.llm_provider || "aiufal";
+  populateProviderOptions(settings.llm_providers || [], selectedProvider);
+  llmBaseUrl.value =
+    savedLlmSettings.llm_provider && savedLlmSettings.llm_provider === selectedProvider && savedLlmSettings.llm_base_url
+      ? savedLlmSettings.llm_base_url
+      : selectedProviderConfig()?.base_url || "";
+  llmBaseUrl.placeholder = selectedProviderConfig()?.base_url || settings.llm_base_url || "https://api.openai.com/v1";
   llmApiKey.value = savedLlmSettings.llm_api_key || "";
-  llmUnlockPassword.value = savedLlmSettings.llm_unlock_password || "";
+  llmUnlockPassword.value = savedLlmSettings.model_unlock_password || "";
   customModel.value = savedLlmSettings.llm_custom_model || "";
-  refreshModelOptions(settings);
   if (llmUnlockPassword.value.trim()) {
     await verifyUnlockPassword({ silent: true });
   }
+  refreshModelOptions(settings);
   populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
@@ -171,15 +177,31 @@ form.addEventListener("submit", async (event) => {
         sources: chunksToSources(data.retrieved_chunks),
       });
     } else {
-      const data = await streamChat(payload);
+      const data = await chatRequest(payload, {
+        onSources(sourceData) {
+          currentRetrievedChunks = sourceData.retrieved_chunks || [];
+          currentAnswerSources = chunksToSources(currentRetrievedChunks);
+          renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+          statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
+        },
+        onToken(token) {
+          streamedAnswerText += token;
+          renderAnswer(streamedAnswerText);
+        },
+        onDone(doneData) {
+          const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
+          statusEl.textContent = modelLabel
+            ? `Hotovo za ${doneData.response_time_seconds}s · ${modelLabel}`
+            : `Hotovo za ${doneData.response_time_seconds}s`;
+          currentAnswerSources = doneData.sources || currentAnswerSources;
+          currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
+          renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+        },
+      });
       streamedAnswerText = data.answer || streamedAnswerText;
       renderAnswer(streamedAnswerText);
-      const modelLabel = formatModelUsageLabel(data.model, data.upstream_model);
-      statusEl.textContent = modelLabel
-        ? `Hotovo za ${data.response_time_seconds}s · ${modelLabel}`
-        : `Hotovo za ${data.response_time_seconds}s`;
-      currentAnswerSources = data.sources || [];
-      currentRetrievedChunks = data.retrieved_chunks || [];
+      currentAnswerSources = data.sources || currentAnswerSources;
+      currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
       renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       saveHistoryEntry({
         question: question.value,
@@ -298,6 +320,13 @@ topK.addEventListener("input", () => {
 });
 
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
+llmProvider.addEventListener("change", () => {
+  llmBaseUrl.value = selectedProviderConfig()?.base_url || "";
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], appSettings.msearch_defaults?.collection);
+  updateRetrievalControls({ resetValues: false });
+});
 style.addEventListener("change", updatePromptDescriptionEditors);
 length.addEventListener("change", updatePromptDescriptionEditors);
 stylePromptDescription.addEventListener("input", () => {
@@ -337,10 +366,13 @@ themeToggle.addEventListener("click", () => {
   localStorage.setItem("theme", nextTheme);
 });
 llmBaseUrl.addEventListener("input", persistLlmSettings);
-llmApiKey.addEventListener("input", persistLlmSettings);
+llmApiKey.addEventListener("input", () => {
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+});
 customModel.addEventListener("input", persistLlmSettings);
 model.addEventListener("change", () => {
-  updateCustomModelVisibility(llmModelsUnlocked);
+  updateCustomModelVisibility(llmModelsUnlocked || Boolean(llmApiKey.value.trim()));
   persistLlmSettings();
   if (model.value === CUSTOM_MODEL_VALUE) {
     customModel.focus();
@@ -365,9 +397,10 @@ function buildRequestPayload(overrides = {}) {
     length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
     model: selectedModelValue(),
+    llm_provider: llmProvider.value,
     llm_base_url: nullableString(llmBaseUrl.value),
     llm_api_key: nullableString(llmApiKey.value),
-    llm_unlock_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
+    model_unlock_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -385,13 +418,14 @@ function loadLlmSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(LLM_SETTINGS_STORAGE_KEY) || "{}");
     return {
+      llm_provider: typeof raw.llm_provider === "string" ? raw.llm_provider : "",
       llm_base_url: typeof raw.llm_base_url === "string" ? raw.llm_base_url : "",
       llm_api_key: typeof raw.llm_api_key === "string" ? raw.llm_api_key : "",
-      llm_unlock_password: typeof raw.llm_unlock_password === "string" ? raw.llm_unlock_password : "",
+      model_unlock_password: typeof raw.model_unlock_password === "string" ? raw.model_unlock_password : "",
       llm_custom_model: typeof raw.llm_custom_model === "string" ? raw.llm_custom_model : "",
     };
   } catch {
-    return { llm_base_url: "", llm_api_key: "", llm_unlock_password: "", llm_custom_model: "" };
+    return { llm_provider: "", llm_base_url: "", llm_api_key: "", model_unlock_password: "", llm_custom_model: "" };
   }
 }
 
@@ -399,9 +433,10 @@ function persistLlmSettings() {
   localStorage.setItem(
     LLM_SETTINGS_STORAGE_KEY,
     JSON.stringify({
+      llm_provider: llmProvider.value,
       llm_base_url: llmBaseUrl.value.trim(),
       llm_api_key: llmApiKey.value,
-      llm_unlock_password: llmUnlockPassword.value,
+      model_unlock_password: llmUnlockPassword.value,
       llm_custom_model: customModel.value.trim(),
     }),
   );
@@ -463,6 +498,39 @@ async function streamChat(payload) {
       renderAnswer(streamedAnswerText);
     },
   });
+}
+
+async function chatRequest(payload, handlers = {}) {
+  if (providerSupportsStreaming(payload.llm_provider)) {
+    return streamChatWithHandlers(payload, handlers);
+  }
+  const data = await fetchChat(payload);
+  handlers.onSources?.(data);
+  if (data.answer) {
+    handlers.onToken?.(data.answer, data);
+  }
+  handlers.onDone?.(data);
+  return data;
+}
+
+async function fetchChat(payload) {
+  const response = await fetch("chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(data.detail || "Request failed");
+  }
+  return data;
+}
+
+function providerSupportsStreaming(providerId = null) {
+  const provider = (Array.isArray(appSettings.llm_providers) ? appSettings.llm_providers : []).find(
+    (item) => item.id === (providerId || llmProvider.value || appSettings.llm_provider || "aiufal"),
+  );
+  return provider?.supports_streaming !== false;
 }
 
 async function streamChatWithHandlers(payload, handlers = {}) {
@@ -548,6 +616,42 @@ async function safeJson(response) {
   }
 }
 
+function populateProviderOptions(providers, currentProvider) {
+  const uniqueProviders = Array.isArray(providers)
+    ? providers.filter(Boolean).filter((provider, index, items) => items.findIndex((item) => item.id === provider.id) === index)
+    : [];
+  llmProvider.innerHTML = uniqueProviders
+    .map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label || provider.id)}</option>`)
+    .join("");
+  llmProvider.value = uniqueProviders.some((provider) => provider.id === currentProvider)
+    ? currentProvider
+    : uniqueProviders[0]?.id || "aiufal";
+}
+
+function selectedProviderConfig(settings = appSettings) {
+  const providers = Array.isArray(settings.llm_providers) ? settings.llm_providers : [];
+  const providerId = llmProvider?.value || settings.llm_provider || "aiufal";
+  return providers.find((provider) => provider.id === providerId) || providers[0] || defaultProviderPreset();
+}
+
+function providerPublicModels(provider = selectedProviderConfig(), settings = appSettings) {
+  const providerModels = new Set(Array.isArray(provider?.model_presets) ? provider.model_presets.filter(Boolean) : []);
+  const publicModels = Array.isArray(settings.llm_policy?.public_models) ? settings.llm_policy.public_models.filter(Boolean) : [];
+  return publicModels.filter((model) => providerModels.has(model));
+}
+
+function defaultProviderPreset() {
+  return {
+    id: "aiufal",
+    label: "AIUfal",
+    base_url: "https://ai.ufal.mff.cuni.cz/api",
+    default_model: "LLM1-A40.llama3.3:latest",
+    api_key_label: "AIUfal token",
+    supports_streaming: true,
+    model_presets: [],
+  };
+}
+
 function populateModels(presets, currentModel, allowCustom = false) {
   const uniqueModels = Array.from(new Set(presets.filter(Boolean)));
   const options = uniqueModels.map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`);
@@ -572,13 +676,22 @@ function selectedModelValue() {
 }
 
 function refreshModelOptions(settings = appSettings) {
-  const publicModels = Array.isArray(settings.llm_policy?.public_models) ? settings.llm_policy.public_models.filter(Boolean) : [];
-  const allModels = Array.isArray(settings.all_model_presets) ? settings.all_model_presets.filter(Boolean) : publicModels;
-  const unlocked = llmModelsUnlocked;
-  const allowedModels = unlocked ? allModels : publicModels;
+  const provider = selectedProviderConfig(settings);
+  const providerModels = Array.isArray(provider.model_presets) ? provider.model_presets.filter(Boolean) : [];
+  const publicModels = providerPublicModels(provider, settings);
+  const browserApiKeyProvided = Boolean(llmApiKey.value.trim());
+  const unlocked = llmModelsUnlocked || browserApiKeyProvided;
   const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() || settings.llm_model : model.value || settings.llm_model;
-  populateModels(allowedModels, currentModel, unlocked);
-  updateLlmPolicyNote(settings.llm_policy, unlocked);
+  populateModels(unlocked ? providerModels : publicModels, currentModel, unlocked);
+  const providerBaseUrl = provider.base_url || settings.llm_base_url || "";
+  if (!llmBaseUrl.value.trim() || llmBaseUrl.value.trim() === settings.llm_base_url) {
+    llmBaseUrl.value = providerBaseUrl;
+  }
+  llmBaseUrl.placeholder = providerBaseUrl || settings.llm_base_url || "https://api.openai.com/v1";
+  llmApiKey.placeholder = browserApiKeyProvided
+    ? "Vlastní klíč přepisuje serverový klíč"
+    : provider.api_key_label || "API key";
+  updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);
 }
 
 function updatePromptDescriptionEditors() {
@@ -704,15 +817,23 @@ function populateMsearchCollections(presets, currentCollection) {
       collection_id: "3429956e-8a21-4502-ad21-a41fddc5ef99",
     },
   ];
-  const usablePresets = presets.length ? presets : fallbackPresets;
+  const providerId = llmProvider.value || appSettings.llm_provider || "aiufal";
+  const usablePresets = (presets.length ? presets : fallbackPresets).map((preset) => ({
+    ...preset,
+    disabled: providerId !== "aiufal" && String(preset.label || preset.collection_name || "").startsWith("WP2"),
+  }));
   msearchCollection.innerHTML = usablePresets
     .map((preset) => {
       const value = preset.collection_id || "";
       const label = preset.label || preset.collection_name || value;
-      return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+      const disabled = preset.disabled ? " disabled" : "";
+      return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
-  msearchCollection.value = currentCollection || usablePresets[0]?.collection_id || "";
+  const options = Array.from(msearchCollection.options);
+  const enabledCurrent = options.find((option) => option.value === currentCollection && !option.disabled);
+  const firstEnabled = options.find((option) => !option.disabled);
+  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || "";
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
@@ -723,7 +844,10 @@ function updateRetrievalControls({ resetValues = false } = {}) {
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
       msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
       if (appSettings.msearch_defaults?.collection) {
-        msearchCollection.value = appSettings.msearch_defaults.collection;
+        const targetOption = Array.from(msearchCollection.options).find((option) => option.value === appSettings.msearch_defaults.collection);
+        if (targetOption && !targetOption.disabled) {
+          msearchCollection.value = targetOption.value;
+        }
       }
     } else {
       topK.value = appSettings.top_k ?? 10;
@@ -770,20 +894,26 @@ function applyTheme(theme) {
   }
 }
 
-function updateLlmPolicyNote(policy, unlocked = false) {
+function updateLlmPolicyNote(policy, unlocked = false, browserApiKeyProvided = false) {
   if (!llmPolicyNote) {
     return;
   }
-  const publicModels = Array.isArray(policy?.public_models) ? policy.public_models.filter(Boolean) : [];
+  const provider = selectedProviderConfig();
+  const providerLabel = provider.label || provider.id || "vybraného poskytovatele";
+  if (browserApiKeyProvided) {
+    llmPolicyNote.textContent = `Vlastní API klíč přepisuje serverový klíč pro ${providerLabel}. Při odeslání se ověří, že klíč patří k vybranému poskytovateli.`;
+    return;
+  }
   if (unlocked) {
-    llmPolicyNote.textContent = "Odemčeno: v rozbalovacím seznamu jsou všechny dostupné modely a lze zadat i jiný model.";
+    llmPolicyNote.textContent = `Odemčeno: v rozbalovacím seznamu jsou modely pro ${providerLabel} a lze zadat i jiný model.`;
     return;
   }
+  const publicModels = providerPublicModels(provider, appSettings);
   if (publicModels.length > 0) {
-    llmPolicyNote.textContent = `Bez odemykacího hesla jsou povolené jen tyto modely: ${publicModels.join(", ")}.`;
+    llmPolicyNote.textContent = `Bez odemykacího hesla jsou povolené modely pro ${providerLabel}: ${publicModels.join(", ")}.`;
     return;
   }
-  llmPolicyNote.textContent = "Dostupné jsou jen veřejné modely nastavené na serveru.";
+  llmPolicyNote.textContent = `Dostupné jsou jen veřejné modely nastavené pro ${providerLabel}.`;
 }
 
 function nullableNumber(value) {
@@ -1265,7 +1395,7 @@ async function submitConversationTurn() {
   });
 
   try {
-    await streamChatWithHandlers(payload, {
+    await chatRequest(payload, {
       onSources(data) {
         latestChunks = data.retrieved_chunks || [];
         latestSources = chunksToSources(latestChunks);
@@ -1413,7 +1543,7 @@ function saveHistoryEntry(entry) {
 function sanitizeHistorySettings(settings) {
   const sanitized = { ...settings };
   delete sanitized.llm_api_key;
-  delete sanitized.llm_unlock_password;
+  delete sanitized.model_unlock_password;
   return sanitized;
 }
 

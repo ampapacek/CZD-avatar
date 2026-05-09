@@ -20,8 +20,10 @@ Edit `.env`.
 For the default hosted `msearch` flow, you typically only need:
 
 ```env
-LLM_API_KEY=your_key_here
-LLM_MODEL=openrouter/free
+LLM_PROVIDER=aiufal
+AI_UFAL_TOKEN=your_aiufal_key_here
+OPENROUTER_API_KEY=your_openrouter_key_here
+LLM_MODEL=LLM1-A40.llama3.3:latest
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
 MSEARCH_PASSWORD=your_password
@@ -35,15 +37,16 @@ Generation uses an OpenAI-compatible chat-completions API. You can point the app
 
 ```env
 LLM_BASE_URL=https://your-provider.example/v1
-LLM_API_KEY=your_provider_key
+AI_UFAL_TOKEN=your_aiufal_key_here
+OPENROUTER_API_KEY=your_openrouter_key_here
 LLM_MODEL=provider/model-or-local-model-name
 ```
 
-The variable names are now generic `LLM_*`. `OPENROUTER_*` is still accepted as a backward-compatible alias during migration. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
+The provider keys are split so each provider can have its own credential in `.env`. `LLM_API_KEY` is still accepted as a backward-compatible fallback during migration, and `OPENROUTER_*` is still accepted as a backward-compatible alias for the other settings. In the web UI, the `LLM API` panel can also override the base URL and API key for the current browser session, and the model selector supports a custom model id.
 
 If you want to limit the shared server key to only a safe or free model, set `LLM_PUBLIC_MODELS` in `.env`. The simplest option is `openrouter/free`, which routes requests to currently available free models on OpenRouter. The web UI will then allow that model without an API key, while any other model will require the user to enter their own key in the browser.
 
-If you also set `LLM_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models in `LLM_PUBLIC_MODELS` appear in the selector.
+If you also set `MODEL_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models in `LLM_PUBLIC_MODELS` appear in the selector.
 
 ## Run The App
 
@@ -206,14 +209,15 @@ The web UI lets you tune retrieval while testing:
 
 Important `.env` variables:
 
-- `LLM_API_KEY`
+- `AI_UFAL_TOKEN`
+- `OPENROUTER_API_KEY`
+- `LLM_API_KEY` as a backward-compatible fallback
 - `LLM_MODEL`
 - `LLM_BASE_URL`
-- `OPENROUTER_API_KEY` as a backward-compatible alias
 - `OPENROUTER_MODEL` as a backward-compatible alias
 - `OPENROUTER_BASE_URL` as a backward-compatible alias
 - `LLM_PUBLIC_MODELS`
-- `LLM_UNLOCK_PASSWORD`
+- `MODEL_UNLOCK_PASSWORD`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`
