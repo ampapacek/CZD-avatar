@@ -64,14 +64,14 @@ class OpenAICompatibleLLM(LLMClient):
         }
         if resolved_api_key:
             headers["Authorization"] = f"Bearer {resolved_api_key}"
+        payload = _chat_payload(
+            model=resolved_model,
+            messages=messages,
+        )
         response = httpx.post(
             f"{resolved_base_url}/chat/completions",
             headers=headers,
-            json={
-                "model": resolved_model,
-                "messages": messages,
-                "temperature": 0.2,
-            },
+            json=payload,
             timeout=self.timeout,
         )
         try:
@@ -141,12 +141,11 @@ class _OpenAICompatibleStream:
         self.upstream_model: str | None = None
 
     def __iter__(self) -> Iterator[str]:
-        payload = {
-            "model": self.model,
-            "messages": self.messages,
-            "temperature": 0.2,
-            "stream": True,
-        }
+        payload = _chat_payload(
+            model=self.model,
+            messages=self.messages,
+            stream=True,
+        )
         headers = {
             "Content-Type": "application/json",
             "HTTP-Referer": "http://localhost:8000",
@@ -213,6 +212,33 @@ def _extract_error_message(response: httpx.Response) -> str:
     if error:
         return str(error)
     return str(payload)[:500]
+
+
+def _chat_payload(
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+    stream: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "model": model,
+        "messages": messages,
+    }
+    if stream:
+        payload["stream"] = True
+    if _supports_custom_temperature(model):
+        payload["temperature"] = 0.2
+    return payload
+
+
+def _supports_custom_temperature(model: str) -> bool:
+    normalized = model.lower().removeprefix("openai/").removeprefix("azure/")
+    return not (
+        normalized.startswith("gpt-5")
+        or normalized.startswith("o1")
+        or normalized.startswith("o3")
+        or normalized.startswith("o4")
+    )
 
 
 def _format_http_error(response: httpx.Response, message: str) -> str:
