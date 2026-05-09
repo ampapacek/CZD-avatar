@@ -12,6 +12,7 @@ const llmApiKey = document.querySelector("#llmApiKey");
 const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const unlockModelsButton = document.querySelector("#unlockModelsButton");
 const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPasswordButton");
+const unlockModelsStatus = document.querySelector("#unlockModelsStatus");
 const providerApiKeyList = document.querySelector("#providerApiKeyList");
 const customProviderName = document.querySelector("#customProviderName");
 const customProviderBaseUrl = document.querySelector("#customProviderBaseUrl");
@@ -468,6 +469,7 @@ model.addEventListener("change", () => {
 });
 llmUnlockPassword.addEventListener("input", () => {
   llmModelsUnlocked = false;
+  setUnlockStatus("");
   persistLlmSettings();
   refreshModelOptions(appSettings);
 });
@@ -597,6 +599,18 @@ function customProviderSettings() {
   return (llmSettingsState.provider_settings || {})[CUSTOM_PROVIDER_ID] || {};
 }
 
+function customProviderConfigured() {
+  const settings = customProviderSettings();
+  return Boolean(
+    String(settings.label || "").trim()
+      || String(settings.base_url || "").trim()
+      || String(settings.default_model || "").trim()
+      || String(settings.models || "").trim()
+      || String(settings.custom_model || "").trim()
+      || selectedProviderApiKey(CUSTOM_PROVIDER_ID),
+  );
+}
+
 function customProviderConfig() {
   const settings = customProviderSettings();
   const defaultModel = String(settings.default_model || settings.custom_model || "").trim();
@@ -617,7 +631,7 @@ function customProviderConfig() {
 function getLlmProviders(settings = appSettings) {
   const configuredProviders = Array.isArray(settings.llm_providers) ? settings.llm_providers : [];
   const providers = configuredProviders.filter((provider) => provider?.id !== CUSTOM_PROVIDER_ID);
-  return [...providers, customProviderConfig()];
+  return customProviderConfigured() ? [...providers, customProviderConfig()] : providers;
 }
 
 function configuredEnvProviders(settings = appSettings) {
@@ -812,12 +826,16 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
     if (!silent) {
+      setUnlockStatus("Zadej odemykací heslo.", "error");
       statusEl.className = "status error";
       statusEl.textContent = "Zadej odemykací heslo.";
     }
     return false;
   }
   unlockModelsButton.disabled = true;
+  if (!silent) {
+    setUnlockStatus("Ověřuji heslo...");
+  }
   try {
     const response = await fetch("unlock", {
       method: "POST",
@@ -832,6 +850,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     persistLlmSettings();
     refreshModelOptions(appSettings);
     if (!silent) {
+      setUnlockStatus("Modely jsou odemčené.", "success");
       statusEl.className = "status";
       statusEl.textContent = "Modely jsou odemčené.";
     }
@@ -840,6 +859,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
     if (!silent) {
+      setUnlockStatus(error.message, "error");
       statusEl.className = "status error";
       statusEl.textContent = error.message;
     }
@@ -847,6 +867,15 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   } finally {
     unlockModelsButton.disabled = false;
   }
+}
+
+function setUnlockStatus(message, variant = "") {
+  if (!unlockModelsStatus) {
+    return;
+  }
+  unlockModelsStatus.textContent = message;
+  unlockModelsStatus.classList.toggle("success", variant === "success");
+  unlockModelsStatus.classList.toggle("error", variant === "error");
 }
 
 async function streamChat(payload) {

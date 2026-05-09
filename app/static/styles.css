@@ -265,6 +265,19 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   line-height: 1.4;
 }
 
+.unlock-status {
+  min-height: 17px;
+  font-weight: 700;
+}
+
+.unlock-status.success {
+  color: var(--accent);
+}
+
+.unlock-status.error {
+  color: var(--warn);
+}
+
 .api-section {
   grid-column: 1 / -1;
   border: 1px solid var(--line);
