@@ -13,6 +13,13 @@ const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const unlockModelsButton = document.querySelector("#unlockModelsButton");
 const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPasswordButton");
 const unlockModelsStatus = document.querySelector("#unlockModelsStatus");
+const contextWindowTokens = document.querySelector("#contextWindowTokens");
+const outputBudgetShort = document.querySelector("#outputBudgetShort");
+const outputBudgetMedium = document.querySelector("#outputBudgetMedium");
+const outputBudgetLong = document.querySelector("#outputBudgetLong");
+const minPromptChunks = document.querySelector("#minPromptChunks");
+const tokenBudgetSafetyMargin = document.querySelector("#tokenBudgetSafetyMargin");
+const conversationSummaryTriggerTokens = document.querySelector("#conversationSummaryTriggerTokens");
 const providerApiKeyList = document.querySelector("#providerApiKeyList");
 const customProviderName = document.querySelector("#customProviderName");
 const customProviderBaseUrl = document.querySelector("#customProviderBaseUrl");
@@ -82,6 +89,7 @@ const themeToggleLabel = document.querySelector("#themeToggleLabel");
 const HISTORY_STORAGE_KEY = "czdemos4ai-history";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
+const TOKEN_BUDGET_STORAGE_KEY = "czdemos4ai-token-budget";
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const STYLE_LABELS = {
@@ -101,6 +109,10 @@ let selectedConversationId = null;
 let streamedAnswerText = "";
 let currentAnswerSources = [];
 let currentRetrievedChunks = [];
+let currentOmittedChunks = [];
+let currentBudgetWarnings = [];
+let currentTokenBudget = null;
+let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
 let currentStylePrompts = {};
@@ -148,6 +160,7 @@ async function loadSettings() {
   renderProviderApiKeyFields();
   loadProviderValues(selectedProvider, { preferStored: true });
   llmUnlockPassword.value = llmSettingsState.model_unlock_password || "";
+  populateTokenBudgetFields(settings);
   if (llmUnlockPassword.value.trim()) {
     await verifyUnlockPassword({ silent: true });
   }
@@ -183,6 +196,10 @@ form.addEventListener("submit", async (event) => {
   streamedAnswerText = "";
   currentAnswerSources = [];
   currentRetrievedChunks = [];
+  currentOmittedChunks = [];
+  currentBudgetWarnings = [];
+  currentTokenBudget = null;
+  currentConversationSummary = "";
   renderAnswer("");
   sourcesEl.innerHTML = "";
   loadingIndicator.hidden = false;
@@ -218,7 +235,11 @@ form.addEventListener("submit", async (event) => {
       const data = await chatRequest(payload, {
         onSources(sourceData) {
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
-          currentAnswerSources = chunksToSources(currentRetrievedChunks);
+          currentOmittedChunks = sourceData.omitted_chunks || [];
+          currentBudgetWarnings = sourceData.chunk_budget_warnings || [];
+          currentTokenBudget = sourceData.token_budget || null;
+          currentConversationSummary = sourceData.conversation_summary || "";
+          currentAnswerSources = sourceData.sources || chunksToSources(currentRetrievedChunks);
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
           statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
         },
@@ -233,6 +254,10 @@ form.addEventListener("submit", async (event) => {
             : `Hotovo za ${doneData.response_time_seconds}s`;
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
+          currentOmittedChunks = doneData.omitted_chunks || currentOmittedChunks;
+          currentBudgetWarnings = doneData.chunk_budget_warnings || currentBudgetWarnings;
+          currentTokenBudget = doneData.token_budget || currentTokenBudget;
+          currentConversationSummary = doneData.conversation_summary || currentConversationSummary;
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
         },
       });
@@ -240,6 +265,10 @@ form.addEventListener("submit", async (event) => {
       renderAnswer(streamedAnswerText);
       currentAnswerSources = data.sources || currentAnswerSources;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
+      currentOmittedChunks = data.omitted_chunks || currentOmittedChunks;
+      currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
+      currentTokenBudget = data.token_budget || currentTokenBudget;
+      currentConversationSummary = data.conversation_summary || currentConversationSummary;
       renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       saveHistoryEntry({
         question: question.value,
@@ -248,6 +277,10 @@ form.addEventListener("submit", async (event) => {
         sourceCount: data.retrieved_chunks?.length || 0,
         settings: payload,
         retrieved_chunks: data.retrieved_chunks || [],
+        omitted_chunks: data.omitted_chunks || [],
+        token_budget: data.token_budget || null,
+        chunk_budget_warnings: data.chunk_budget_warnings || [],
+        conversation_summary: data.conversation_summary || null,
         sources: data.sources || [],
         model_used: data.model || model.value,
         upstream_model: data.upstream_model || null,
@@ -506,6 +539,9 @@ customProviderModels.addEventListener("input", () => {
   persistLlmSettings();
   refreshModelOptions(appSettings);
 });
+[contextWindowTokens, outputBudgetShort, outputBudgetMedium, outputBudgetLong, minPromptChunks, tokenBudgetSafetyMargin, conversationSummaryTriggerTokens].forEach((input) => {
+  input.addEventListener("input", persistTokenBudgetSettings);
+});
 unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
 toggleUnlockPasswordButton.addEventListener("click", () => {
   toggleSecretField(toggleUnlockPasswordButton);
@@ -531,6 +567,7 @@ function buildRequestPayload(overrides = {}) {
     style_prompts: promptMapOverride(currentStylePrompts, appSettings.prompt_defaults?.style_prompts),
     length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
+    ...currentTokenBudgetSettings(),
     model: selectedModelValue(),
     llm_provider: llmProvider.value,
     llm_base_url: nullableString(selectedProviderBaseUrl()),
@@ -882,7 +919,11 @@ async function streamChat(payload) {
   return streamChatWithHandlers(payload, {
     onSources(data) {
       currentRetrievedChunks = data.retrieved_chunks || [];
-      currentAnswerSources = chunksToSources(currentRetrievedChunks);
+      currentOmittedChunks = data.omitted_chunks || [];
+      currentBudgetWarnings = data.chunk_budget_warnings || [];
+      currentTokenBudget = data.token_budget || null;
+      currentConversationSummary = data.conversation_summary || "";
+      currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
       renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
     },
@@ -891,6 +932,44 @@ async function streamChat(payload) {
       renderAnswer(streamedAnswerText);
     },
   });
+}
+
+function populateTokenBudgetFields(settings = appSettings) {
+  const defaults = settings.token_budget_defaults || {};
+  const stored = loadTokenBudgetSettings();
+  contextWindowTokens.value = stored.context_window_tokens ?? defaults.context_window_tokens ?? 32768;
+  outputBudgetShort.value = stored.output_token_budget_short ?? defaults.output_token_budget_short ?? 384;
+  outputBudgetMedium.value = stored.output_token_budget_medium ?? defaults.output_token_budget_medium ?? 768;
+  outputBudgetLong.value = stored.output_token_budget_long ?? defaults.output_token_budget_long ?? 1024;
+  minPromptChunks.value = stored.min_prompt_chunks ?? defaults.min_prompt_chunks ?? 3;
+  tokenBudgetSafetyMargin.value = stored.token_budget_safety_margin ?? defaults.token_budget_safety_margin ?? 0.1;
+  conversationSummaryTriggerTokens.value =
+    stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 3000;
+}
+
+function loadTokenBudgetSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TOKEN_BUDGET_STORAGE_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistTokenBudgetSettings() {
+  localStorage.setItem(TOKEN_BUDGET_STORAGE_KEY, JSON.stringify(currentTokenBudgetSettings()));
+}
+
+function currentTokenBudgetSettings() {
+  return {
+    context_window_tokens: nullableInteger(contextWindowTokens.value),
+    output_token_budget_short: nullableInteger(outputBudgetShort.value),
+    output_token_budget_medium: nullableInteger(outputBudgetMedium.value),
+    output_token_budget_long: nullableInteger(outputBudgetLong.value),
+    min_prompt_chunks: nullableInteger(minPromptChunks.value),
+    token_budget_safety_margin: nullableNumber(tokenBudgetSafetyMargin.value),
+    conversation_summary_trigger_tokens: nullableInteger(conversationSummaryTriggerTokens.value),
+  };
 }
 
 async function chatRequest(payload, handlers = {}) {
@@ -914,7 +993,7 @@ async function fetchChat(payload) {
   });
   const data = await safeJson(response);
   if (!response.ok) {
-    throw new Error(data.detail || "Request failed");
+    throw new Error(formatErrorDetail(data.detail || "Request failed"));
   }
   return data;
 }
@@ -934,7 +1013,7 @@ async function streamChatWithHandlers(payload, handlers = {}) {
   });
   if (!response.ok) {
     const data = await safeJson(response);
-    throw new Error(data.detail || "Request failed");
+    throw new Error(formatErrorDetail(data.detail || "Request failed"));
   }
   if (!response.body) {
     throw new Error("Streaming is not supported by this browser.");
@@ -963,7 +1042,7 @@ async function streamChatWithHandlers(payload, handlers = {}) {
         donePayload = event.data;
         handlers.onDone?.(donePayload);
       } else if (event.event === "error") {
-        throw new Error(event.data.detail || "Streaming failed");
+        throw new Error(formatErrorDetail(event.data.detail || "Streaming failed"));
       }
       separatorIndex = buffer.indexOf("\n\n");
     }
@@ -1327,6 +1406,23 @@ function nullableNumber(value) {
   return Number(value);
 }
 
+function formatErrorDetail(detail) {
+  if (!detail || typeof detail === "string") {
+    return detail || "Request failed";
+  }
+  if (typeof detail === "object" && detail.message) {
+    return String(detail.message);
+  }
+  return JSON.stringify(detail);
+}
+
+function nullableInteger(value) {
+  if (value === "") {
+    return null;
+  }
+  return Number.parseInt(value, 10);
+}
+
 function nullableString(value) {
   const trimmed = String(value || "").trim();
   return trimmed ? trimmed : null;
@@ -1381,6 +1477,7 @@ function chunksToSources(chunks) {
 
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
   renderSourceCards(sourcesEl, sources, chunks, question.value, extractCitationIds(answerText), "main-source");
+  renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
 }
 
 function renderAnswer(text) {
@@ -1415,9 +1512,12 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       const bm25 = typeof chunk?.bm25_score === "number" ? ` · BM25 ${chunk.bm25_score.toFixed(2)}` : "";
       const citationId = source.citation_id || "";
       const usedClass = usedCitationIds.has(citationId) ? " used-source" : "";
+      const budgetStatus = chunk?.metadata?.budget_status || "";
+      const trimmedBadge = budgetStatus === "trimmed" ? `<span class="source-badge">zkráceno pro prompt</span>` : "";
+      const originalText = chunk?.metadata?.original_text || "";
       return `
         <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
-          <strong>[${escapeHtml(citationId)}] ${title}</strong>
+          <strong>[${escapeHtml(citationId)}] ${title} ${trimmedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
           <p class="score">score ${score}${dense}${bm25}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
@@ -1425,7 +1525,15 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
             canExpand
               ? `<details class="chunk-details">
                   <summary>Zobrazit celý úryvek</summary>
-                  <p class="full-chunk">${fullChunk}</p>
+	                  <p class="full-chunk">${fullChunk}</p>
+	                </details>`
+	              : ""
+	          }
+          ${
+            originalText
+              ? `<details class="chunk-details">
+                  <summary>Původní nalezený úryvek</summary>
+                  <p class="full-chunk">${highlightText(originalText, highlightTerms)}</p>
                 </details>`
               : ""
           }
@@ -1433,6 +1541,49 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       `;
     })
     .join("");
+}
+
+function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBudget = null, conversationSummary = "") {
+  const parts = [];
+  if (warnings.length) {
+    parts.push(`
+      <div class="budget-note">
+        ${warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}
+      </div>
+    `);
+  }
+  if (tokenBudget) {
+    parts.push(`
+      <details class="budget-details">
+        <summary>Tokenový rozpočet</summary>
+        <p>Prompt bez zdrojů: ${escapeHtml(tokenBudget.estimated_non_source_tokens ?? "?")} tokenů · zdroje: ${escapeHtml(tokenBudget.estimated_source_tokens ?? "?")} · rezerva odpovědi: ${escapeHtml(tokenBudget.reserved_output_tokens ?? "?")} · window: ${escapeHtml(tokenBudget.context_window_tokens ?? "?")}</p>
+      </details>
+    `);
+  }
+  if (conversationSummary) {
+    parts.push(`
+      <details class="budget-details">
+        <summary>Komprimovaný kontext konverzace</summary>
+        <p>${escapeHtml(conversationSummary)}</p>
+      </details>
+    `);
+  }
+  if (omittedChunks.length) {
+    parts.push(`
+      <details class="budget-details">
+        <summary>Neposlané nalezené chunky (${omittedChunks.length})</summary>
+        ${omittedChunks
+          .map((chunk) => {
+            const title = chunk.metadata?.title || chunk.metadata?.source_path || "Neznámý dokument";
+            return `<p><strong>[${escapeHtml(chunk.citation_id)}] ${escapeHtml(title)}</strong><br>${escapeHtml(shortenText(chunk.text || "", 320))}</p>`;
+          })
+          .join("")}
+      </details>
+    `);
+  }
+  if (parts.length) {
+    container.insertAdjacentHTML("afterbegin", parts.join(""));
+  }
 }
 
 function updateUsedSourceHighlights(container, usedCitationIds) {
@@ -1626,10 +1777,11 @@ function createConversation() {
   const conversation = {
     id: Date.now(),
     title: "Nová konverzace",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    messages: [],
-  };
+	    createdAt: new Date().toISOString(),
+	    updatedAt: new Date().toISOString(),
+	    conversation_summary: "",
+	    messages: [],
+	  };
   conversations.unshift(conversation);
   setConversationEntries(conversations);
   selectedConversationId = conversation.id;
@@ -1756,10 +1908,32 @@ function renderConversationMessage(message) {
   if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
   }
+  if (message.role === "assistant" && message.token_budget) {
+    metaParts.push(
+      `zdroje ${escapeHtml(message.token_budget.used_chunk_count ?? 0)}/${escapeHtml(
+        (message.token_budget.used_chunk_count ?? 0) + (message.token_budget.omitted_chunk_count ?? 0),
+      )}`,
+    );
+  }
+  const budgetWarnings =
+    message.role === "assistant" && message.chunk_budget_warnings?.length
+      ? `<div class="budget-note conversation-budget-note">${message.chunk_budget_warnings
+          .map((warning) => `<p>${escapeHtml(warning)}</p>`)
+          .join("")}</div>`
+      : "";
+  const summaryDetails =
+    message.role === "assistant" && message.conversation_summary
+      ? `<details class="budget-details">
+          <summary>Komprimovaný kontext konverzace</summary>
+          <p>${escapeHtml(message.conversation_summary)}</p>
+        </details>`
+      : "";
   return `
     <article class="conversation-message ${messageClass}">
       <div class="conversation-message-label">${roleLabel}</div>
       <div class="conversation-message-body">${body}</div>
+      ${budgetWarnings}
+      ${summaryDetails}
       ${metaParts.length ? `<div class="conversation-message-meta">${metaParts.join(" · ")}</div>` : ""}
     </article>
   `;
@@ -1790,11 +1964,12 @@ async function submitConversationTurn() {
   let assistantText = "";
   let latestSources = [];
   let latestChunks = [];
-  const payload = buildRequestPayload({
-    question: prompt,
-    conversation_history: conversation.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
+	  const payload = buildRequestPayload({
+	    question: prompt,
+	    conversation_summary: conversation.conversation_summary || null,
+	    conversation_history: conversation.messages.map((message) => ({
+	      role: message.role,
+	      content: message.content,
     })),
   });
 
@@ -1802,7 +1977,7 @@ async function submitConversationTurn() {
     await chatRequest(payload, {
       onSources(data) {
         latestChunks = data.retrieved_chunks || [];
-        latestSources = chunksToSources(latestChunks);
+        latestSources = data.sources || chunksToSources(latestChunks);
         const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
         const messages = [...liveConversation.messages];
         const placeholderAssistant = messages[messages.length - 1];
@@ -1816,7 +1991,11 @@ async function submitConversationTurn() {
             question: prompt,
             content: assistantText,
             sources: latestSources,
-            retrieved_chunks: latestChunks,
+	            retrieved_chunks: latestChunks,
+	            omitted_chunks: [],
+	            token_budget: null,
+	            chunk_budget_warnings: [],
+	            conversation_summary: liveConversation.conversation_summary || null,
             model_used: payload.model,
             upstream_model: null,
             response_time_seconds: null,
@@ -1848,7 +2027,11 @@ async function submitConversationTurn() {
             question: prompt,
             content: assistantText,
             sources: latestSources,
-            retrieved_chunks: latestChunks,
+	            retrieved_chunks: latestChunks,
+	            omitted_chunks: [],
+	            token_budget: null,
+	            chunk_budget_warnings: [],
+	            conversation_summary: liveConversation.conversation_summary || null,
             model_used: payload.model,
             upstream_model: null,
             response_time_seconds: null,
@@ -1865,9 +2048,13 @@ async function submitConversationTurn() {
           role: "assistant",
           question: prompt,
           content: data.answer || assistantText,
-          sources: data.sources || latestSources,
-          retrieved_chunks: data.retrieved_chunks || latestChunks,
-          model_used: data.model || payload.model,
+	          sources: data.sources || latestSources,
+	          retrieved_chunks: data.retrieved_chunks || latestChunks,
+	          omitted_chunks: data.omitted_chunks || [],
+	          token_budget: data.token_budget || null,
+	          chunk_budget_warnings: data.chunk_budget_warnings || [],
+	          conversation_summary: data.conversation_summary || null,
+	          model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
           createdAt: new Date().toISOString(),
@@ -1877,7 +2064,12 @@ async function submitConversationTurn() {
         } else {
           messages.push(assistantMessage);
         }
-        updateConversation({ ...liveConversation, updatedAt: new Date().toISOString(), messages });
+	        updateConversation({
+	          ...liveConversation,
+	          conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
+	          updatedAt: new Date().toISOString(),
+	          messages,
+	        });
         renderConversationWorkspace();
       },
     });
@@ -1931,8 +2123,12 @@ function saveHistoryEntry(entry) {
     answer: entry.answer,
     sourceCount: entry.sourceCount,
     settings: sanitizeHistorySettings(entry.settings || {}),
-    retrieved_chunks: entry.retrieved_chunks || [],
-    sources: entry.sources || [],
+	    retrieved_chunks: entry.retrieved_chunks || [],
+	    omitted_chunks: entry.omitted_chunks || [],
+	    token_budget: entry.token_budget || null,
+	    chunk_budget_warnings: entry.chunk_budget_warnings || [],
+	    conversation_summary: entry.conversation_summary || null,
+	    sources: entry.sources || [],
     model_used: entry.model_used || null,
     upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
@@ -2002,6 +2198,7 @@ function renderHistory() {
 
 function renderHistoryDetail(entry) {
   const chunks = entry.retrieved_chunks || [];
+  const omittedChunks = entry.omitted_chunks || [];
   const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
   const usedCitationIds = extractCitationIds(entry.answer || "");
   historyDetail.innerHTML = `
@@ -2025,8 +2222,10 @@ function renderHistoryDetail(entry) {
         ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
         ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
         ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
-        ${renderSetting("Top-k", entry.settings?.top_k)}
-        ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
+	        ${renderSetting("Top-k", entry.settings?.top_k)}
+	        ${renderSetting("Context window", entry.token_budget?.context_window_tokens || entry.settings?.context_window_tokens)}
+	        ${renderSetting("Tokenů ve zdrojích", entry.token_budget?.estimated_source_tokens)}
+	        ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
         ${renderSetting("Váha BM25", entry.settings?.bm25_weight)}
         ${renderSetting("Min. confidence mSearch", entry.settings?.msearch_min_confidence)}
         ${renderSetting("Min. skóre", entry.settings?.min_score)}
@@ -2055,9 +2254,16 @@ function renderHistoryDetail(entry) {
     historyDialog.close();
   });
 
-  const historySources = historyDetail.querySelector("#historySources");
-  renderSourceCards(historySources, sources, chunks, entry.question, usedCitationIds, "history-source");
-}
+	  const historySources = historyDetail.querySelector("#historySources");
+	  renderSourceCards(historySources, sources, chunks, entry.question, usedCitationIds, "history-source");
+	  renderBudgetNotes(
+	    historySources,
+	    entry.chunk_budget_warnings || [],
+	    omittedChunks,
+	    entry.token_budget || null,
+	    entry.conversation_summary || "",
+	  );
+	}
 
 function renderSetting(label, value) {
   const displayValue =

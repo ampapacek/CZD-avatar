@@ -43,7 +43,15 @@ class ChatRequest(BaseModel):
     style_prompts: dict[str, str] | None = None
     length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
+    conversation_summary: str | None = None
     model_unlock_password: str | None = None
+    context_window_tokens: int | None = Field(default=None, ge=1024)
+    output_token_budget_short: int | None = Field(default=None, ge=64)
+    output_token_budget_medium: int | None = Field(default=None, ge=64)
+    output_token_budget_long: int | None = Field(default=None, ge=64)
+    min_prompt_chunks: int | None = Field(default=None, ge=0, le=20)
+    token_budget_safety_margin: float | None = Field(default=None, ge=0.0, le=0.5)
+    conversation_summary_trigger_tokens: int | None = Field(default=None, ge=256)
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     llm_provider: str | None = None
@@ -111,6 +119,18 @@ class RetrievedChunk(BaseModel):
     bm25_score: float | None = None
 
 
+class TokenBudgetMetadata(BaseModel):
+    context_window_tokens: int
+    usable_input_tokens: int
+    reserved_output_tokens: int
+    estimated_non_source_tokens: int
+    estimated_source_tokens: int
+    used_chunk_count: int
+    omitted_chunk_count: int
+    trimmed_chunk_count: int
+    conversation_summary_used: bool = False
+
+
 class RetrieveResponse(BaseModel):
     question: str
     retrieved_chunks: list[RetrievedChunk]
@@ -120,6 +140,11 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]
+    used_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    omitted_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    token_budget: TokenBudgetMetadata | None = None
+    chunk_budget_warnings: list[str] = Field(default_factory=list)
+    conversation_summary: str | None = None
     model: str
     upstream_model: str | None = None
     response_time_seconds: float

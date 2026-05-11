@@ -14,8 +14,13 @@ from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
 from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
 from app.rag.msearch import MSearchRetriever
-from app.rag.prompts import build_messages
 from app.rag.retrieval import HybridRetriever
+from app.rag.token_budget import (
+    PromptBudgetConfig,
+    conversation_history_tokens,
+    prepare_prompt_budget,
+    summarized_history,
+)
 from app.rag.vector_store import QdrantVectorStore
 
 logger = logging.getLogger(__name__)
@@ -194,11 +199,19 @@ class RAGPipeline:
         style_prompts: dict[str, str] | None = None,
         length_prompts: dict[str, str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        conversation_summary: str | None = None,
         top_k: int | None = None,
         model: str | None = None,
         llm_api_key: str | None = None,
         llm_base_url: str | None = None,
         llm_provider: str | None = None,
+        context_window_tokens: int | None = None,
+        output_token_budget_short: int | None = None,
+        output_token_budget_medium: int | None = None,
+        output_token_budget_long: int | None = None,
+        min_prompt_chunks: int | None = None,
+        token_budget_safety_margin: float | None = None,
+        conversation_summary_trigger_tokens: int | None = None,
         dense_weight: float = 0.7,
         bm25_weight: float = 0.3,
         min_score: float | None = None,
@@ -210,6 +223,24 @@ class RAGPipeline:
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
+        budget_config = PromptBudgetConfig.from_settings(
+            self.settings,
+            context_window_tokens=context_window_tokens,
+            output_token_budget_short=output_token_budget_short,
+            output_token_budget_medium=output_token_budget_medium,
+            output_token_budget_long=output_token_budget_long,
+            min_prompt_chunks=min_prompt_chunks,
+            token_budget_safety_margin=token_budget_safety_margin,
+            conversation_summary_trigger_tokens=conversation_summary_trigger_tokens,
+        )
+        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+            conversation_history or [],
+            conversation_summary=conversation_summary,
+            model=resolved_model,
+            budget_config=budget_config,
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+        )
         retrieved = self.retrieve(
             question,
             top_k,
@@ -223,20 +254,25 @@ class RAGPipeline:
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,
         )
-        messages = build_messages(
-            question,
-            retrieved,
-            style,
-            length,
-            custom_instructions,
+        budget = prepare_prompt_budget(
+            question=question,
+            retrieved_chunks=retrieved,
+            style=style,
+            length=length,
+            model=resolved_model,
+            config=budget_config,
+            custom_instructions=custom_instructions,
+            conversation_history=effective_history,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
             style_prompts=style_prompts,
             length_prompts=length_prompts,
-            conversation_history=conversation_history,
         )
+        if summary_warning:
+            budget.warnings.append(summary_warning)
+        budget.conversation_summary_used = bool(effective_summary)
         generation = self.llm.generate(
-            messages,
+            budget.messages,
             model=resolved_model,
             api_key=llm_api_key,
             base_url=llm_base_url,
@@ -256,18 +292,130 @@ class RAGPipeline:
         )
         return ChatResponse(
             answer=answer,
-            sources=[_source_from_chunk(chunk) for chunk in retrieved],
-            retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in retrieved],
+            sources=[_source_from_chunk(chunk) for chunk in budget.used_chunks],
+            retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
+            used_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
+            omitted_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.omitted_chunks],
+            token_budget=budget.metadata(),
+            chunk_budget_warnings=budget.warnings,
+            conversation_summary=effective_summary,
             model=resolved_model,
             upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),
         )
+
+    def build_chat_prompt(
+        self,
+        *,
+        question: str,
+        retrieved: list[dict[str, Any]],
+        style: str,
+        length: str,
+        model: str,
+        custom_instructions: str | None = None,
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
+        style_prompts: dict[str, str] | None = None,
+        length_prompts: dict[str, str] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        conversation_summary: str | None = None,
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        budget_config: PromptBudgetConfig | None = None,
+    ):
+        resolved_config = budget_config or PromptBudgetConfig.from_settings(self.settings)
+        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+            conversation_history or [],
+            conversation_summary=conversation_summary,
+            model=model,
+            budget_config=resolved_config,
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+        )
+        budget = prepare_prompt_budget(
+            question=question,
+            retrieved_chunks=retrieved,
+            style=style,
+            length=length,
+            model=model,
+            config=resolved_config,
+            custom_instructions=custom_instructions,
+            conversation_history=effective_history,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+            style_prompts=style_prompts,
+            length_prompts=length_prompts,
+        )
+        if summary_warning:
+            budget.warnings.append(summary_warning)
+        budget.conversation_summary_used = bool(effective_summary)
+        return budget, effective_summary
 
     def close(self) -> None:
         if self._vector_store is not None:
             logger.info("Closing vector store")
             self._vector_store.close()
             self._vector_store = None
+
+    def _resolve_conversation_context(
+        self,
+        history: list[dict[str, str]],
+        *,
+        conversation_summary: str | None,
+        model: str,
+        budget_config: PromptBudgetConfig,
+        api_key: str | None,
+        base_url: str | None,
+    ) -> tuple[list[dict[str, str]], str | None, str | None]:
+        clean_summary = (conversation_summary or "").strip()
+        history_tokens = conversation_history_tokens(history, model)
+        if clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
+            return summarized_history(clean_summary, history), clean_summary, None
+        if not clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
+            return history, None, None
+        try:
+            summary = self._summarize_conversation(history, model=model, api_key=api_key, base_url=base_url)
+        except Exception as exc:
+            if clean_summary:
+                return (
+                    summarized_history(clean_summary, history),
+                    clean_summary,
+                    f"Conversation compression failed; the previous compressed summary was used instead: {exc}",
+                )
+            return history, None, f"Conversation compression failed; raw recent history was used instead: {exc}"
+        return summarized_history(summary, history), summary, None
+
+    def _summarize_conversation(
+        self,
+        history: list[dict[str, str]],
+        *,
+        model: str,
+        api_key: str | None,
+        base_url: str | None,
+    ) -> str:
+        turns = []
+        for turn in history:
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                label = "Uživatel" if role == "user" else "Avatar"
+                turns.append(f"{label}: {content}")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Compress the conversation for a RAG assistant. Preserve user preferences, unresolved "
+                    "references, named entities, constraints, and commitments from previous answers. Do not "
+                    "invent facts. Write a concise Czech summary unless the conversation is clearly in another language."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "\n\n".join(turns),
+            },
+        ]
+        generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
+        return generation.answer.strip()
 
 
 def _retrieved_chunk_from_record(record: dict[str, Any]) -> RetrievedChunk:

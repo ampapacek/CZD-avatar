@@ -292,6 +292,41 @@
           </section>
 
           <section class="settings-section">
+            <h3>Tokenový rozpočet</h3>
+            <div class="settings-grid">
+              <label class="field">
+                <span>Context window</span>
+                <input id="contextWindowTokens" type="number" min="1024" step="1024" />
+              </label>
+              <label class="field">
+                <span>Min. chunků v promptu</span>
+                <input id="minPromptChunks" type="number" min="0" max="20" step="1" />
+              </label>
+              <label class="field">
+                <span>Rezerva krátká</span>
+                <input id="outputBudgetShort" type="number" min="64" step="64" />
+              </label>
+              <label class="field">
+                <span>Rezerva střední</span>
+                <input id="outputBudgetMedium" type="number" min="64" step="64" />
+              </label>
+              <label class="field">
+                <span>Rezerva dlouhá</span>
+                <input id="outputBudgetLong" type="number" min="64" step="64" />
+              </label>
+              <label class="field">
+                <span>Bezpečnostní marže</span>
+                <input id="tokenBudgetSafetyMargin" type="number" min="0" max="0.5" step="0.01" />
+              </label>
+              <label class="field">
+                <span>Kompresní práh konverzace</span>
+                <input id="conversationSummaryTriggerTokens" type="number" min="256" step="256" />
+              </label>
+            </div>
+            <p class="field-note">Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
+          </section>
+
+          <section class="settings-section">
             <h3>Vlastní poskytovatel</h3>
             <div class="settings-grid">
               <label class="field">

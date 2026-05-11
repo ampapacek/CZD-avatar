@@ -820,6 +820,10 @@ button:hover {
   font-size: 12px;
 }
 
+.conversation-budget-note {
+  margin: 0;
+}
+
 .conversation-composer {
   display: grid;
   gap: 10px;
@@ -1073,6 +1077,17 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+.source-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .source p {
   color: var(--muted);
   font-size: 13px;
@@ -1123,6 +1138,29 @@ body[data-theme="dark"] .source-highlight {
   white-space: pre-wrap;
   overflow: visible;
   overflow-wrap: anywhere;
+}
+
+.budget-note,
+.budget-details {
+  border: 1px solid color-mix(in srgb, var(--warn) 36%, var(--line));
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface-3));
+  color: var(--text);
+}
+
+.budget-note p,
+.budget-details p {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.budget-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .score {

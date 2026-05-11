@@ -40,6 +40,16 @@ class Settings(BaseSettings):
 
     default_style: str = Field(default="ucitel", alias="DEFAULT_STYLE")
     default_length: str = Field(default="medium", alias="DEFAULT_LENGTH")
+    context_window_tokens: int = Field(default=32768, alias="CONTEXT_WINDOW_TOKENS")
+    output_token_budget_short: int = Field(default=384, alias="OUTPUT_TOKEN_BUDGET_SHORT")
+    output_token_budget_medium: int = Field(default=768, alias="OUTPUT_TOKEN_BUDGET_MEDIUM")
+    output_token_budget_long: int = Field(default=1024, alias="OUTPUT_TOKEN_BUDGET_LONG")
+    min_prompt_chunks: int = Field(default=3, alias="MIN_PROMPT_CHUNKS")
+    token_budget_safety_margin: float = Field(default=0.10, alias="TOKEN_BUDGET_SAFETY_MARGIN")
+    conversation_summary_trigger_tokens: int = Field(
+        default=3000,
+        alias="CONVERSATION_SUMMARY_TRIGGER_TOKENS",
+    )
 
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")

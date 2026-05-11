@@ -90,8 +90,9 @@ def build_messages(
     user_prompt_template: str | None = None,
     style_prompts: dict[str, str] | None = None,
     length_prompts: dict[str, str] | None = None,
+    context_text: str | None = None,
 ) -> list[dict[str, str]]:
-    context = _format_context(retrieved_chunks)
+    context = format_context(retrieved_chunks) if context_text is None else context_text
     context_for_prompt = context if context else "Nebyly nalezeny žádné relevantní pasáže."
     custom = custom_instructions.strip() if custom_instructions else "Žádné."
     system_template = (system_prompt or "").strip() or default_system_prompt_template()
@@ -151,7 +152,7 @@ def _render_user_prompt_template(template: str, question: str, context: str, cus
         return template.strip()
 
 
-def _format_context(chunks: list[dict[str, Any]]) -> str:
+def format_context(chunks: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
         citation_id = chunk.get("citation_id") or f"Z{index}"

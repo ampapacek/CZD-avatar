@@ -44,10 +44,10 @@ from app.rag.prompts import (
     STYLE_PROMPTS,
     available_lengths,
     available_styles,
-    build_messages,
     default_system_prompt_template,
     default_user_prompt_template,
 )
+from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
 
 
 log_path = configure_logging("api")
@@ -205,6 +205,15 @@ def get_public_settings() -> dict[str, object]:
             "top_k_min": 0,
             "top_k_max": 50,
         },
+        "token_budget_defaults": {
+            "context_window_tokens": settings.context_window_tokens,
+            "output_token_budget_short": settings.output_token_budget_short,
+            "output_token_budget_medium": settings.output_token_budget_medium,
+            "output_token_budget_long": settings.output_token_budget_long,
+            "min_prompt_chunks": settings.min_prompt_chunks,
+            "token_budget_safety_margin": settings.token_budget_safety_margin,
+            "conversation_summary_trigger_tokens": settings.conversation_summary_trigger_tokens,
+        },
         "msearch_defaults": {
             "collection": settings.msearch_collection,
             "collection_presets": pipeline.msearch_retriever.collection_presets(),
@@ -327,11 +336,19 @@ def chat(request: ChatRequest) -> ChatResponse:
             style_prompts=request.style_prompts,
             length_prompts=request.length_prompts,
             conversation_history=request.conversation_history,
+            conversation_summary=request.conversation_summary,
             top_k=request.top_k,
             model=resolved_model,
             llm_api_key=resolved_api_key,
             llm_base_url=resolved_base_url,
             llm_provider=resolved_provider,
+            context_window_tokens=request.context_window_tokens,
+            output_token_budget_short=request.output_token_budget_short,
+            output_token_budget_medium=request.output_token_budget_medium,
+            output_token_budget_long=request.output_token_budget_long,
+            min_prompt_chunks=request.min_prompt_chunks,
+            token_budget_safety_margin=request.token_budget_safety_margin,
+            conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
             dense_weight=request.dense_weight,
             bm25_weight=request.bm25_weight,
             min_score=request.min_score,
@@ -341,6 +358,8 @@ def chat(request: ChatRequest) -> ChatResponse:
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
         )
+    except PromptBudgetError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -372,30 +391,49 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 msearch_mode=request.msearch_mode,
                 msearch_min_confidence=request.msearch_min_confidence,
             )
-            yield _sse_event(
-                "sources",
-                {
-                    "question": request.question,
-                    "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in retrieved],
-                    "sources": [_serialize_source(chunk) for chunk in retrieved],
-                },
+            budget_config = PromptBudgetConfig.from_settings(
+                settings,
+                context_window_tokens=request.context_window_tokens,
+                output_token_budget_short=request.output_token_budget_short,
+                output_token_budget_medium=request.output_token_budget_medium,
+                output_token_budget_long=request.output_token_budget_long,
+                min_prompt_chunks=request.min_prompt_chunks,
+                token_budget_safety_margin=request.token_budget_safety_margin,
+                conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
             )
-
-            messages = build_messages(
-                request.question,
-                retrieved,
-                style,
-                length,
-                request.custom_instructions,
+            budget, conversation_summary = pipeline.build_chat_prompt(
+                question=request.question,
+                retrieved=retrieved,
+                style=style,
+                length=length,
+                model=resolved_model,
+                custom_instructions=request.custom_instructions,
                 system_prompt=request.system_prompt,
                 user_prompt_template=request.user_prompt_template,
                 style_prompts=request.style_prompts,
                 length_prompts=request.length_prompts,
                 conversation_history=request.conversation_history,
+                conversation_summary=request.conversation_summary,
+                llm_api_key=resolved_api_key,
+                llm_base_url=resolved_base_url,
+                budget_config=budget_config,
+            )
+            yield _sse_event(
+                "sources",
+                {
+                    "question": request.question,
+                    "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
+                    "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
+                    "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
+                    "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
+                    "token_budget": budget.metadata(),
+                    "chunk_budget_warnings": budget.warnings,
+                    "conversation_summary": conversation_summary,
+                },
             )
             answer_parts: list[str] = []
             stream = pipeline.llm.stream_generate(
-                messages,
+                budget.messages,
                 model=resolved_model,
                 api_key=resolved_api_key,
                 base_url=resolved_base_url,
@@ -409,8 +447,13 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             upstream_model = stream.upstream_model or resolved_model
             response = {
                 "answer": answer,
-                "sources": [_serialize_source(chunk) for chunk in retrieved],
-                "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in retrieved],
+                "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
+                "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
+                "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
+                "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
+                "token_budget": budget.metadata(),
+                "chunk_budget_warnings": budget.warnings,
+                "conversation_summary": conversation_summary,
                 "model": resolved_model,
                 "upstream_model": upstream_model,
                 "response_time_seconds": round(elapsed, 3),
@@ -425,6 +468,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 answer[:280] + ("…" if len(answer) > 280 else ""),
             )
             yield _sse_event("done", response)
+        except PromptBudgetError as exc:
+            logger.info("Streaming chat rejected by token budget for question=%r: %s", request.question, exc)
+            yield _sse_event("error", {"detail": exc.to_payload()})
         except Exception as exc:
             logger.exception("Streaming chat failed for question=%r", request.question)
             yield _sse_event("error", {"detail": str(exc)})
