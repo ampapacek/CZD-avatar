@@ -824,6 +824,89 @@ button:hover {
   margin: 0;
 }
 
+.conversation-context-status {
+  display: grid;
+  gap: 7px;
+}
+
+.conversation-context-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conversation-context-line strong {
+  color: var(--text);
+  font-weight: 720;
+}
+
+.context-usage-ring {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, var(--surface-3) 56%, transparent 58%),
+    conic-gradient(var(--accent) var(--context-used, 0%), color-mix(in srgb, var(--line) 74%, transparent) 0);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.context-usage-ring span {
+  line-height: 1;
+}
+
+.conversation-context-details {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-3));
+}
+
+.context-budget-grid {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.context-budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.context-budget-row span {
+  color: var(--muted);
+}
+
+.context-budget-row strong {
+  color: var(--text);
+  font-weight: 720;
+}
+
+.context-summary-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.context-summary-block h4 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
 .conversation-composer {
   display: grid;
   gap: 10px;

@@ -125,6 +125,8 @@ class TokenBudgetMetadata(BaseModel):
     reserved_output_tokens: int
     estimated_non_source_tokens: int
     estimated_source_tokens: int
+    estimated_conversation_history_tokens: int = 0
+    estimated_total_input_tokens: int = 0
     used_chunk_count: int
     omitted_chunk_count: int
     trimmed_chunk_count: int

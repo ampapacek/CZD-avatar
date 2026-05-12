@@ -107,6 +107,8 @@ class PromptBudgetResult:
     reserved_output_tokens: int = 0
     estimated_non_source_tokens: int = 0
     estimated_source_tokens: int = 0
+    estimated_conversation_history_tokens: int = 0
+    estimated_total_input_tokens: int = 0
     trimmed_chunk_count: int = 0
     conversation_summary_used: bool = False
 
@@ -117,6 +119,8 @@ class PromptBudgetResult:
             "reserved_output_tokens": self.reserved_output_tokens,
             "estimated_non_source_tokens": self.estimated_non_source_tokens,
             "estimated_source_tokens": self.estimated_source_tokens,
+            "estimated_conversation_history_tokens": self.estimated_conversation_history_tokens,
+            "estimated_total_input_tokens": self.estimated_total_input_tokens,
             "used_chunk_count": len(self.used_chunks),
             "omitted_chunk_count": len(self.omitted_chunks),
             "trimmed_chunk_count": self.trimmed_chunk_count,
@@ -175,6 +179,7 @@ def prepare_prompt_budget(
     usable_input = config.usable_input_tokens(length)
     reserved_output = config.output_budget_for_length(length)
     non_source_tokens = estimate_messages_tokens(non_source_messages, model)
+    history_tokens = estimate_history_tokens_for_prompt(conversation_history, model)
     if non_source_tokens > usable_input:
         over_by = non_source_tokens - usable_input
         raise PromptBudgetError(
@@ -218,6 +223,7 @@ def prepare_prompt_budget(
         context_text=context_text,
     )
     source_tokens = max(0, estimate_messages_tokens(messages, model) - non_source_tokens)
+    total_input_tokens = non_source_tokens + source_tokens
     trimmed_count = sum(1 for chunk in used_chunks if chunk.get("metadata", {}).get("budget_status") == "trimmed")
     if omitted_chunks:
         warnings.append(f"{len(omitted_chunks)} retrieved chunks were omitted because of the context budget.")
@@ -236,7 +242,21 @@ def prepare_prompt_budget(
         reserved_output_tokens=reserved_output,
         estimated_non_source_tokens=non_source_tokens,
         estimated_source_tokens=source_tokens,
+        estimated_conversation_history_tokens=history_tokens,
+        estimated_total_input_tokens=total_input_tokens,
         trimmed_chunk_count=trimmed_count,
+    )
+
+
+def estimate_history_tokens_for_prompt(history: list[dict[str, str]] | None, model: str | None = None) -> int:
+    messages = _history_messages_for_prompt(history)
+    if not messages:
+        return 0
+    return sum(
+        4
+        + estimate_text_tokens(message["role"], model)
+        + estimate_text_tokens(message["content"], model)
+        for message in messages
     )
 
 
@@ -261,6 +281,16 @@ def summarized_history(summary: str, history: list[dict[str, str]] | None, recen
         )
     result.extend((history or [])[-recent_turns:])
     return result
+
+
+def _history_messages_for_prompt(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    messages = []
+    for turn in (history or [])[-8:]:
+        role = turn.get("role")
+        content = (turn.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content})
+    return messages
 
 
 def _fit_chunks(

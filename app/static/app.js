@@ -1908,34 +1908,112 @@ function renderConversationMessage(message) {
   if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
   }
-  if (message.role === "assistant" && message.token_budget) {
-    metaParts.push(
-      `zdroje ${escapeHtml(message.token_budget.used_chunk_count ?? 0)}/${escapeHtml(
-        (message.token_budget.used_chunk_count ?? 0) + (message.token_budget.omitted_chunk_count ?? 0),
-      )}`,
-    );
-  }
   const budgetWarnings =
     message.role === "assistant" && message.chunk_budget_warnings?.length
       ? `<div class="budget-note conversation-budget-note">${message.chunk_budget_warnings
           .map((warning) => `<p>${escapeHtml(warning)}</p>`)
           .join("")}</div>`
       : "";
-  const summaryDetails =
-    message.role === "assistant" && message.conversation_summary
-      ? `<details class="budget-details">
-          <summary>Komprimovaný kontext konverzace</summary>
-          <p>${escapeHtml(message.conversation_summary)}</p>
-        </details>`
-      : "";
+  const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
   return `
     <article class="conversation-message ${messageClass}">
       <div class="conversation-message-label">${roleLabel}</div>
       <div class="conversation-message-body">${body}</div>
       ${budgetWarnings}
-      ${summaryDetails}
+      ${contextStatus}
       ${metaParts.length ? `<div class="conversation-message-meta">${metaParts.join(" · ")}</div>` : ""}
     </article>
+  `;
+}
+
+function renderConversationContextStatus(message) {
+  const budget = message.token_budget;
+  const summary = message.conversation_summary || "";
+  if (!budget && !summary) {
+    return "";
+  }
+
+  const usedChunks = Number(budget?.used_chunk_count ?? 0);
+  const omittedChunks = Number(budget?.omitted_chunk_count ?? 0);
+  const trimmedChunks = Number(budget?.trimmed_chunk_count ?? 0);
+  const totalChunks = usedChunks + omittedChunks;
+  const sourceText =
+    totalChunks > 0
+      ? `${usedChunks}/${totalChunks} chunků posláno`
+      : budget
+        ? "bez zdrojových chunků"
+        : "stav kontextu";
+  const compressionText = budget?.conversation_summary_used || summary ? "komprese zapnutá" : "bez komprese";
+  const visibleParts = [sourceText, compressionText];
+  if (trimmedChunks > 0) {
+    visibleParts.push(`${trimmedChunks} zkráceno`);
+  }
+  const totalInputTokens =
+    budget?.estimated_total_input_tokens ??
+    (budget ? Number(budget.estimated_non_source_tokens ?? 0) + Number(budget.estimated_source_tokens ?? 0) : null);
+  const usedWindowTokens =
+    budget && totalInputTokens !== null
+      ? totalInputTokens + Number(budget.reserved_output_tokens ?? 0)
+      : null;
+  const usagePercent =
+    budget?.context_window_tokens && usedWindowTokens !== null
+      ? Math.max(0, Math.min(100, Math.round((usedWindowTokens / Number(budget.context_window_tokens)) * 100)))
+      : null;
+  if (totalInputTokens !== null) {
+    visibleParts.unshift(`${totalInputTokens} tokenů vstup`);
+  }
+
+  const detailRows = budget
+    ? [
+        ["Context window", budget.context_window_tokens],
+        ["Celkem vstup", totalInputTokens],
+        ["Použitelný vstup po rezervě", budget.usable_input_tokens],
+        ["Prompt bez zdrojů", budget.estimated_non_source_tokens],
+        ["Historie konverzace", budget.estimated_conversation_history_tokens ?? 0],
+        ["Zdroje poslané modelu", budget.estimated_source_tokens],
+        ["Rezerva pro odpověď", budget.reserved_output_tokens],
+        ["Využití okna včetně rezervy", usagePercent === null ? null : `${usagePercent}%`],
+        ["Použité chunky", usedChunks],
+        ["Vynechané chunky", omittedChunks],
+        ["Zkrácené chunky", trimmedChunks],
+        ["Komprese konverzace", budget.conversation_summary_used || summary ? "ano" : "ne"],
+      ]
+    : [["Komprese konverzace", "ano"]];
+  const detailTable = detailRows
+    .map(
+      ([label, value]) => `
+        <div class="context-budget-row">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value ?? "?")}</strong>
+        </div>
+      `,
+    )
+    .join("");
+  const summaryBlock = summary
+    ? `
+      <div class="context-summary-block">
+        <h4>Komprimovaný kontext konverzace</h4>
+        <p>${escapeHtml(summary)}</p>
+      </div>
+    `
+    : "";
+
+  return `
+    <div class="conversation-context-status">
+      <div class="conversation-context-line">
+        ${
+          usagePercent === null
+            ? `<span>Kontext</span>`
+            : `<span class="context-usage-ring" style="--context-used: ${escapeHtml(usagePercent)}%"><span>${escapeHtml(usagePercent)}%</span></span>`
+        }
+        <strong>${visibleParts.map((part) => escapeHtml(part)).join(" · ")}</strong>
+      </div>
+      <details class="budget-details conversation-context-details">
+        <summary>Detail kontextového okna</summary>
+        <div class="context-budget-grid">${detailTable}</div>
+        ${summaryBlock}
+      </details>
+    </div>
   `;
 }
 

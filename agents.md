@@ -253,6 +253,10 @@ Do not mix vectors from different embedding models in one collection.
 - Add batch generation:
   - likely use backend/pipeline code directly rather than driving the browser UI
   - support input question files, selected avatar/collection, model/provider settings, and structured output with answer, sources, timings, and errors
+- Improve answer Markdown rendering:
+  - `app/static/app.js` uses a custom `renderMarkdown()` implementation and currently does not render pipe tables, so valid Markdown tables appear as plain text
+  - add focused table parsing/styling or replace the custom renderer with a sanitized Markdown parser
+  - keep citation handling compatible with app source IDs like `[^Z1]`; models sometimes emit bare numeric citations such as `1`, which do not link to the source panel
 - Show the most relevant sentence window around matches, not just raw chunk previews
 - Better semantic explanation of why a chunk matched
 - Optional reranker after hybrid retrieval

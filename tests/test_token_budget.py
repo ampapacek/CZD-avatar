@@ -72,6 +72,41 @@ class TokenBudgetTests(unittest.TestCase):
         self.assertEqual(len(budget.used_chunks), 1)
         self.assertEqual(budget.used_chunks[0]["text"], chunks[0]["text"])
         self.assertEqual(budget.omitted_chunks, [])
+        self.assertEqual(
+            budget.metadata()["estimated_total_input_tokens"],
+            budget.metadata()["estimated_non_source_tokens"] + budget.metadata()["estimated_source_tokens"],
+        )
+
+    def test_reports_conversation_history_tokens_separately(self) -> None:
+        config = PromptBudgetConfig(
+            context_window_tokens=4096,
+            output_token_budget_short=384,
+            output_token_budget_medium=768,
+            output_token_budget_long=1024,
+            min_prompt_chunks=3,
+            token_budget_safety_margin=0.0,
+            conversation_summary_trigger_tokens=3000,
+        )
+
+        budget = prepare_prompt_budget(
+            question="Navazující otázka?",
+            retrieved_chunks=[],
+            style="ucitel",
+            length="short",
+            model="unknown-model",
+            config=config,
+            conversation_history=[
+                {"role": "user", "content": "První otázka"},
+                {"role": "assistant", "content": "První odpověď"},
+            ],
+        )
+
+        metadata = budget.metadata()
+        self.assertGreater(metadata["estimated_conversation_history_tokens"], 0)
+        self.assertGreaterEqual(
+            metadata["estimated_total_input_tokens"],
+            metadata["estimated_conversation_history_tokens"],
+        )
 
     def test_drops_least_relevant_chunks_first(self) -> None:
         chunks = [
