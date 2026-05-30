@@ -157,16 +157,27 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
 
 
 def _document_text(item: dict[str, Any], document: dict[str, Any]) -> str:
-    passages = item.get("passages")
-    if isinstance(passages, list):
-        texts = [_string(passage.get("text")) for passage in passages if isinstance(passage, dict)]
-        text = "\n\n".join(value for value in texts if value)
-        if text:
-            return text
-
+    # `document.content` is the full chunk text (requested via include_content=full).
+    # Prefer it over `passages`: with highlight=true, BM25 (source="key") hits return
+    # `passages` whose entries are single matched query tokens, not real passage text.
+    # Highlighting cited terms within this text is a frontend concern.
     content = _string(document.get("content"))
     if content:
         return content
+
+    passages = item.get("passages")
+    if isinstance(passages, list):
+        # Skip single-token highlight fragments; keep only real multi-word snippets.
+        texts = [
+            text
+            for passage in passages
+            if isinstance(passage, dict)
+            and (text := _string(passage.get("text")))
+            and len(text.split()) > 1
+        ]
+        text = "\n\n".join(texts)
+        if text:
+            return text
 
     sections = item.get("sections")
     if isinstance(sections, list):
