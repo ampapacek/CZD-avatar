@@ -250,7 +250,7 @@ Download it once (needs internet, ~2.3 GB):
 
 ```bash
 # into the default Hugging Face cache (~/.cache/huggingface/hub)
-python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-reranker-v2-m3')"
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-reranker-v2-m3')"
 # or with the CLI:
 huggingface-cli download BAAI/bge-reranker-v2-m3
 ```
