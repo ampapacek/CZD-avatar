@@ -420,7 +420,23 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
                     },
                 )
-            retrieved = pipeline.apply_rerank(request.question, candidates)
+            retrieved: list = []
+            rerank_seconds = 0.0
+            for event in pipeline.apply_rerank_iter(request.question, candidates):
+                kind = event[0]
+                if kind == "eta":
+                    # Up-front estimate from past runs; None on the first ever run.
+                    yield _sse_event("rerank_progress", {"done": 0, "total": 0, "eta_seconds": event[1]})
+                elif kind == "progress":
+                    _, done, total, elapsed = event
+                    # Refine the ETA per batch from observed per-pair cost.
+                    eta = round(elapsed / done * (total - done), 2) if done else None
+                    yield _sse_event(
+                        "rerank_progress",
+                        {"done": done, "total": total, "elapsed": round(elapsed, 3), "eta_seconds": eta},
+                    )
+                else:  # "result"
+                    retrieved, rerank_seconds = event[1], event[2]
             budget_config = PromptBudgetConfig.from_settings(
                 settings,
                 context_window_tokens=request.context_window_tokens,
@@ -463,6 +479,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 },
             )
             answer_parts: list[str] = []
+            generation_started = time.perf_counter()
             stream = pipeline.llm.stream_generate(
                 budget.messages,
                 model=resolved_model,
@@ -473,6 +490,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 answer_parts.append(token)
                 yield _sse_event("token", {"text": token})
 
+            generation_seconds = time.perf_counter() - generation_started
             answer = "".join(answer_parts).strip()
             elapsed = time.perf_counter() - started
             upstream_model = stream.upstream_model or resolved_model
@@ -489,14 +507,18 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "model": resolved_model,
                 "upstream_model": upstream_model,
                 "response_time_seconds": round(elapsed, 3),
+                "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
+                "generation_time_seconds": round(generation_seconds, 3),
             }
             logger.info(
-                "Streamed answer question=%r style=%s length=%s model=%s response_time=%.2fs answer=%s",
+                "Streamed answer question=%r style=%s length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
                 request.question,
                 style,
                 length,
                 resolved_model,
                 elapsed,
+                rerank_seconds,
+                generation_seconds,
                 answer[:280] + ("…" if len(answer) > 280 else ""),
             )
             yield _sse_event("done", response)

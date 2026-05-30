@@ -35,6 +35,52 @@ class _ReverseReranker:
         return blend_and_rank(records, scores, weight, top_k)
 
 
+class _StreamingReverseReranker(_ReverseReranker):
+    """Reverse reranker that also streams one progress event per two records."""
+
+    def rerank_iter(self, question, records, weight, top_k):
+        for done in range(2, len(records) + 1, 2):
+            yield ("progress", done, len(records), 0.01 * done)
+        yield ("progress", len(records), len(records), 0.01 * len(records))
+        yield ("result", self.rerank(question, records, weight, top_k))
+
+
+class ApplyRerankIterTests(unittest.TestCase):
+    def _pipeline(self):
+        pipeline = RAGPipeline(get_settings())
+        pipeline._retriever = _FakeRetriever(_candidates())
+        pipeline._reranker = _StreamingReverseReranker()
+        return pipeline
+
+    def test_streams_eta_progress_then_result_and_seeds_estimator(self):
+        pipeline = self._pipeline()
+        candidates = pipeline.retrieve_candidates(
+            "q", top_k=3, retrieval_backend="local", rerank_enabled=True, rerank_weight=1.0, rerank_candidates=5
+        )
+        events = list(pipeline.apply_rerank_iter("q", candidates))
+
+        # First event is the up-front ETA seed (None on this first run).
+        self.assertEqual(events[0][0], "eta")
+        self.assertIsNone(events[0][1])
+        # Final event carries the reranked chunks and a measured duration.
+        kind, chunks, seconds = events[-1]
+        self.assertEqual(kind, "result")
+        self.assertEqual(chunks[0]["chunk_id"], "c5")
+        self.assertGreaterEqual(seconds, 0.0)
+        # The completed run seeds the estimator for next time.
+        self.assertIsNotNone(pipeline._rerank_eta.seed_seconds([c["text"] for c in candidates.candidates]))
+
+    def test_inactive_rerank_yields_only_result(self):
+        pipeline = self._pipeline()
+        candidates = pipeline.retrieve_candidates(
+            "q", top_k=3, retrieval_backend="local", rerank_enabled=False, rerank_weight=0.0
+        )
+        events = list(pipeline.apply_rerank_iter("q", candidates))
+        self.assertEqual([e[0] for e in events], ["result"])
+        self.assertEqual([c["chunk_id"] for c in events[0][1]], ["c1", "c2", "c3"])
+        self.assertEqual(events[0][2], 0.0)
+
+
 class RetrieveWithBaselineTests(unittest.TestCase):
     def _pipeline(self):
         pipeline = RAGPipeline(get_settings())

@@ -1,11 +1,48 @@
 from __future__ import annotations
 
 import logging
+import time
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
+
+
+class RerankEtaEstimator:
+    """Cross-run estimate of reranking time, normalized by candidate text size.
+
+    Reranking cost scales with how much text the cross-encoder must read, so we
+    track an exponentially weighted moving average of seconds-per-character over
+    the whole candidate set. ``seed_seconds`` turns that into an up-front ETA for
+    the next run; it returns ``None`` until at least one run has completed, which
+    is why the very first reranking shows no estimate. Within a run the estimate
+    is refined per batch from the actual elapsed time, so this only provides the
+    starting point.
+
+    State is in-memory and resets on process restart by design.
+    """
+
+    def __init__(self, alpha: float = 0.3) -> None:
+        self.alpha = alpha
+        self._seconds_per_char: float | None = None
+
+    @staticmethod
+    def _total_chars(texts: list[str]) -> int:
+        # Floor at 1 so a degenerate empty candidate set can't divide by zero.
+        return sum(len(text or "") for text in texts) or 1
+
+    def seed_seconds(self, texts: list[str]) -> float | None:
+        if self._seconds_per_char is None:
+            return None
+        return self._seconds_per_char * self._total_chars(texts)
+
+    def update(self, seconds: float, texts: list[str]) -> None:
+        rate = seconds / self._total_chars(texts)
+        if self._seconds_per_char is None:
+            self._seconds_per_char = rate
+        else:
+            self._seconds_per_char = (1.0 - self.alpha) * self._seconds_per_char + self.alpha * rate
 
 
 def reranker_model_available(model_name: str) -> bool:
@@ -94,6 +131,34 @@ class CrossEncoderReranker:
             return records[:top_k]
         rerank_scores = self.score_pairs(question, [record.get("text", "") for record in records])
         return blend_and_rank(records, rerank_scores, weight, top_k)
+
+    def rerank_iter(
+        self,
+        question: str,
+        records: list[dict[str, Any]],
+        weight: float,
+        top_k: int,
+    ) -> Iterator[tuple]:
+        """Rerank one batch at a time so a caller can stream progress.
+
+        Yields ``("progress", scored_pairs, total_pairs, elapsed_seconds)`` after
+        each batch, then a final ``("result", ranked_records)``. Scoring the pairs
+        in explicit ``batch_size`` chunks (instead of one ``model.predict`` call)
+        is what lets the elapsed time be sampled mid-run for a live ETA.
+        """
+        if not records or top_k <= 0:
+            yield ("result", records[:top_k])
+            return
+        pairs = [(question, record.get("text", "") or "") for record in records]
+        total = len(pairs)
+        scores: list[float] = []
+        started = time.perf_counter()
+        for start in range(0, total, self.batch_size):
+            batch = pairs[start : start + self.batch_size]
+            batch_scores = self.model.predict(batch, batch_size=self.batch_size, show_progress_bar=False)
+            scores.extend(float(score) for score in batch_scores)
+            yield ("progress", len(scores), total, time.perf_counter() - started)
+        yield ("result", blend_and_rank(records, scores, weight, top_k))
 
 
 def blend_and_rank(

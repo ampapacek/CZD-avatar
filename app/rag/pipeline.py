@@ -16,7 +16,7 @@ from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
 from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
 from app.rag.msearch import MSearchRetriever
-from app.rag.reranker import CrossEncoderReranker
+from app.rag.reranker import CrossEncoderReranker, RerankEtaEstimator
 from app.rag.retrieval import HybridRetriever
 from app.rag.token_budget import (
     PromptBudgetConfig,
@@ -62,6 +62,7 @@ class RAGPipeline:
         self._retriever: HybridRetriever | None = None
         self._msearch_retriever: MSearchRetriever | None = None
         self._reranker: CrossEncoderReranker | None = None
+        self._rerank_eta = RerankEtaEstimator()
         self._llm: OpenAICompatibleLLM | None = None
 
     @property
@@ -334,6 +335,56 @@ class RAGPipeline:
                 ],
             )
         return chunks
+
+    def apply_rerank_iter(self, question: str, candidates: RetrievalCandidates):
+        """Streaming variant of :meth:`apply_rerank` for the SSE endpoint.
+
+        Yields ``("eta", seed_seconds | None)`` once up front, then
+        ``("progress", done, total, elapsed)`` per batch, and finally
+        ``("result", chunks, rerank_seconds)``. The seed comes from the cross-run
+        ETA estimator (``None`` on the first ever run) and the measured duration
+        feeds back into it so later runs start with a sharper estimate.
+        """
+        if not candidates.rerank_active or not candidates.candidates:
+            yield ("result", candidates.candidates[: candidates.resolved_top_k], 0.0)
+            return
+
+        texts = [record.get("text", "") for record in candidates.candidates]
+        yield ("eta", self._rerank_eta.seed_seconds(texts))
+
+        started = time.perf_counter()
+        result: list[dict[str, Any]] = []
+        for event in self.reranker.rerank_iter(
+            question, candidates.candidates, candidates.rerank_weight, candidates.resolved_top_k
+        ):
+            if event[0] == "result":
+                result = event[1]
+            else:
+                yield event
+        elapsed = time.perf_counter() - started
+        self._rerank_eta.update(elapsed, texts)
+        logger.info(
+            "Reranked %s candidates to %s chunks for question=%r weight=%.2f model=%s elapsed=%.2fs",
+            len(candidates.candidates),
+            len(result),
+            question,
+            candidates.rerank_weight,
+            self.settings.reranker_model,
+            elapsed,
+        )
+        if result:
+            logger.info(
+                "Top retrieved: %s",
+                [
+                    {
+                        "citation_id": chunk.get("citation_id"),
+                        "title": chunk.get("metadata", {}).get("title"),
+                        "score": round(float(chunk.get("score") or 0.0), 3),
+                    }
+                    for chunk in result[:5]
+                ],
+            )
+        yield ("result", result, elapsed)
 
     def _maybe_rerank(
         self,

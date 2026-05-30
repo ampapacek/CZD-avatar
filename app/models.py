@@ -159,6 +159,8 @@ class ChatResponse(BaseModel):
     model: str
     upstream_model: str | None = None
     response_time_seconds: float
+    rerank_time_seconds: float | None = None
+    generation_time_seconds: float | None = None
 
 
 class HealthResponse(BaseModel):
