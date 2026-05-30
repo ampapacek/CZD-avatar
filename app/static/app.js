@@ -64,6 +64,9 @@ const submitButton = document.querySelector("#submitButton");
 const randomQuestionButton = document.querySelector("#randomQuestionButton");
 const statusEl = document.querySelector("#status");
 const loadingIndicator = document.querySelector("#loadingIndicator");
+const rerankProgressEl = document.querySelector("#rerankProgress");
+const rerankProgressFill = document.querySelector("#rerankProgressFill");
+const rerankProgressLabel = document.querySelector("#rerankProgressLabel");
 const answerEl = document.querySelector("#answer");
 const sourcesEl = document.querySelector("#sources");
 const baselineSourcesEl = document.querySelector("#baselineSources");
@@ -223,6 +226,7 @@ form.addEventListener("submit", async (event) => {
   sourcesEl.innerHTML = "";
   baselineSourcesEl.innerHTML = "";
   renderBaselineComparison();
+  stopRerankCountdown();
   loadingIndicator.hidden = false;
 
   try {
@@ -264,7 +268,12 @@ form.addEventListener("submit", async (event) => {
           renderSources(currentAnswerSources, currentRetrievedChunks, "");
           statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} dokumentů, přeřazuji (re-ranking)...`;
         },
+        onRerankProgress(progress) {
+          statusEl.textContent = "Přeřazuji (re-ranking)...";
+          onRerankProgressUpdate(progress);
+        },
         onSources(sourceData) {
+          stopRerankCountdown();
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
           currentBaselineChunks = sourceData.baseline_chunks || [];
           currentOmittedChunks = sourceData.omitted_chunks || [];
@@ -281,9 +290,7 @@ form.addEventListener("submit", async (event) => {
         },
         onDone(doneData) {
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
-          statusEl.textContent = modelLabel
-            ? `Hotovo za ${doneData.response_time_seconds}s · ${modelLabel}`
-            : `Hotovo za ${doneData.response_time_seconds}s`;
+          statusEl.textContent = formatTimingLabel(doneData, modelLabel);
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
           currentBaselineChunks = doneData.baseline_chunks || currentBaselineChunks;
@@ -319,12 +326,15 @@ form.addEventListener("submit", async (event) => {
         model_used: data.model || model.value,
         upstream_model: data.upstream_model || null,
         response_time_seconds: data.response_time_seconds,
+        rerank_time_seconds: data.rerank_time_seconds ?? null,
+        generation_time_seconds: data.generation_time_seconds ?? null,
       });
     }
   } catch (error) {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
   } finally {
+    stopRerankCountdown();
     loadingIndicator.hidden = true;
     submitButton.disabled = false;
   }
@@ -1076,6 +1086,8 @@ async function streamChatWithHandlers(payload, handlers = {}) {
       const event = parseSseEvent(rawEvent);
       if (event.event === "preliminary_sources") {
         handlers.onPreliminarySources?.(event.data);
+      } else if (event.event === "rerank_progress") {
+        handlers.onRerankProgress?.(event.data);
       } else if (event.event === "sources") {
         handlers.onSources?.(event.data);
       } else if (event.event === "token") {
@@ -2310,6 +2322,67 @@ function formatModelUsageLabel(requestedModel, upstreamModel) {
     return `${requested} · ${upstream}`;
   }
   return requested || upstream || "";
+}
+
+// Re-ranking countdown: each batch event re-anchors a deadline, and a ticking
+// interval renders the remaining time between batches so the ETA visibly counts
+// down instead of only jumping when a batch lands.
+let rerankCountdownTimer = null;
+let rerankEtaDeadline = null; // performance.now() ms when ETA hits zero, or null
+let rerankCounted = ""; // last "done/total" text, kept while only the clock ticks
+
+function renderRerankCountdown() {
+  let etaText = "";
+  if (rerankEtaDeadline !== null) {
+    const remaining = Math.max(0, (rerankEtaDeadline - performance.now()) / 1000);
+    etaText = remaining > 0.05 ? ` · ~${remaining.toFixed(1)}s` : " · dokončuji…";
+  }
+  rerankProgressLabel.textContent = `Re-ranking${rerankCounted}${etaText}`;
+}
+
+function onRerankProgressUpdate(progress) {
+  rerankProgressEl.hidden = false;
+  if (progress.total) {
+    rerankCounted = ` ${progress.done}/${progress.total}`;
+    rerankProgressFill.style.width = `${Math.round((progress.done / progress.total) * 100)}%`;
+  }
+  // Re-anchor the countdown from the freshly observed ETA (self-correcting).
+  rerankEtaDeadline = typeof progress.eta_seconds === "number" ? performance.now() + progress.eta_seconds * 1000 : null;
+  renderRerankCountdown();
+  if (rerankCountdownTimer === null) {
+    rerankCountdownTimer = window.setInterval(renderRerankCountdown, 100);
+  }
+}
+
+function stopRerankCountdown() {
+  if (rerankCountdownTimer !== null) {
+    window.clearInterval(rerankCountdownTimer);
+    rerankCountdownTimer = null;
+  }
+  rerankEtaDeadline = null;
+  rerankCounted = "";
+  rerankProgressEl.hidden = true;
+  rerankProgressFill.style.width = "0";
+}
+
+function formatTimingLabel(doneData, modelLabel) {
+  // Total time, with a per-stage breakdown (rerank only when it ran, generation
+  // always) so the user can see where the wall time went.
+  const parts = [];
+  if (typeof doneData.rerank_time_seconds === "number") {
+    parts.push(`re-ranking ${doneData.rerank_time_seconds.toFixed(1)}s`);
+  }
+  if (typeof doneData.generation_time_seconds === "number") {
+    parts.push(`generování ${doneData.generation_time_seconds.toFixed(1)}s`);
+  }
+  let label = `Hotovo za ${doneData.response_time_seconds}s`;
+  if (parts.length) {
+    label += ` (${parts.join(" · ")})`;
+  }
+  if (modelLabel) {
+    label += ` · ${modelLabel}`;
+  }
+  return label;
 }
 
 function renderHistory() {

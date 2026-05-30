@@ -1001,6 +1001,44 @@ button:hover {
   animation-delay: 0.36s;
 }
 
+.rerank-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.rerank-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  overflow: hidden;
+}
+
+.rerank-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  /* Snap-per-batch fill eased so it slides instead of teleporting. */
+  transition: width 0.3s ease;
+}
+
+.rerank-progress-label {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rerank-progress-fill {
+    transition: none;
+  }
+}
+
 .answer {
   line-height: 1.65;
 }
