@@ -1125,6 +1125,50 @@ button:hover {
   min-width: 0;
 }
 
+.sources-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ghost-button {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted, var(--text));
+}
+
+.ghost-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.sources-columns {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.sources-column {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sources-column-title {
+  margin: 12px 0 0;
+  font-size: 0.95rem;
+  color: var(--muted, var(--text));
+}
+
+.baseline-column {
+  border-left: 1px solid var(--line);
+  padding-left: 16px;
+}
+
 .source {
   min-width: 0;
   border: 1px solid var(--line);

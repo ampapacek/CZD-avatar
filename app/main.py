@@ -29,6 +29,7 @@ from app.models import (
     UnlockResponse,
 )
 from app.rag.pipeline import RAGPipeline
+from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
 from app.rag.llm_providers import (
     available_llm_providers,
@@ -204,6 +205,11 @@ def get_public_settings() -> dict[str, object]:
             "msearch_min_confidence": settings.msearch_min_confidence,
             "top_k_min": 0,
             "top_k_max": 50,
+            "rerank_enabled": settings.reranker_enabled,
+            "rerank_weight": settings.reranker_weight,
+            "rerank_model": settings.reranker_model,
+            "rerank_candidates": settings.reranker_candidates,
+            "rerank_available": reranker_model_available(settings.reranker_model),
         },
         "token_budget_defaults": {
             "context_window_tokens": settings.context_window_tokens,
@@ -295,7 +301,7 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             request.msearch_collection or settings.msearch_collection,
             default_provider_preset["base_url"],
         )
-        chunks = pipeline.retrieve(
+        chunks, baseline_chunks = pipeline.retrieve_with_baseline(
             request.question,
             request.top_k,
             dense_weight=request.dense_weight,
@@ -306,12 +312,16 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             msearch_collection=request.msearch_collection,
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
+            rerank_enabled=request.rerank_enabled,
+            rerank_weight=request.rerank_weight,
+            rerank_candidates=request.rerank_candidates,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return RetrieveResponse(
         question=request.question,
         retrieved_chunks=[_serialize_retrieved_chunk(chunk) for chunk in chunks],
+        baseline_chunks=[_serialize_retrieved_chunk(chunk) for chunk in baseline_chunks],
     )
 
 
@@ -357,6 +367,9 @@ def chat(request: ChatRequest) -> ChatResponse:
             msearch_collection=request.msearch_collection,
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
+            rerank_enabled=request.rerank_enabled,
+            rerank_weight=request.rerank_weight,
+            rerank_candidates=request.rerank_candidates,
         )
     except PromptBudgetError as exc:
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
@@ -378,7 +391,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         try:
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
             _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
-            retrieved = pipeline.retrieve(
+            candidates = pipeline.retrieve_candidates(
                 request.question,
                 request.top_k,
                 dense_weight=request.dense_weight,
@@ -390,7 +403,24 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 msearch_collection=request.msearch_collection,
                 msearch_mode=request.msearch_mode,
                 msearch_min_confidence=request.msearch_min_confidence,
+                rerank_enabled=request.rerank_enabled,
+                rerank_weight=request.rerank_weight,
+                rerank_candidates=request.rerank_candidates,
             )
+            baseline_payload = [_serialize_retrieved_chunk(chunk) for chunk in candidates.baseline]
+            # When reranking is active, show the first-stage hits immediately so the
+            # user is not staring at an empty panel while the cross-encoder runs;
+            # the final "sources" event below replaces them with the reranked order.
+            if candidates.rerank_active and candidates.baseline:
+                yield _sse_event(
+                    "preliminary_sources",
+                    {
+                        "question": request.question,
+                        "retrieved_chunks": baseline_payload,
+                        "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
+                    },
+                )
+            retrieved = pipeline.apply_rerank(request.question, candidates)
             budget_config = PromptBudgetConfig.from_settings(
                 settings,
                 context_window_tokens=request.context_window_tokens,
@@ -425,6 +455,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                     "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
+                    "baseline_chunks": baseline_payload,
                     "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                     "token_budget": budget.metadata(),
                     "chunk_budget_warnings": budget.warnings,
@@ -451,6 +482,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                 "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                 "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
+                "baseline_chunks": baseline_payload,
                 "token_budget": budget.metadata(),
                 "chunk_budget_warnings": budget.warnings,
                 "conversation_summary": conversation_summary,
@@ -501,6 +533,7 @@ def _serialize_retrieved_chunk(chunk: dict[str, object]) -> dict[str, object]:
         "score": float(chunk.get("score") or 0.0),
         "dense_score": float(chunk["dense_score"]) if chunk.get("dense_score") is not None else None,
         "bm25_score": float(chunk["bm25_score"]) if chunk.get("bm25_score") is not None else None,
+        "rerank_score": float(chunk["rerank_score"]) if chunk.get("rerank_score") is not None else None,
     }
 
 

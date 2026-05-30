@@ -168,6 +168,17 @@
                 <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
                 <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
               </label>
+              <label class="field rerank-control" id="rerankField" hidden>
+                <span>Váha re-rankingu: <output id="rerankWeightValue">0.0</output></span>
+                <input id="rerankWeight" type="range" min="0" max="1" step="0.1" value="0" />
+              </label>
+              <label class="field rerank-control" id="rerankCandidatesField" hidden>
+                <span>Kandidátů k re-rankingu</span>
+                <input id="rerankCandidates" type="number" min="1" max="200" step="1" placeholder="Např. 40" />
+              </label>
+              <p id="rerankNote" class="field-note" hidden>
+                Re-ranking (cross-encoder) zpřesní pořadí dokumentů, ale prodlouží dobu vyhledávání.
+              </p>
               <label class="field">
                 <span>Min. skóre</span>
                 <input id="minScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.30" />
@@ -207,8 +218,22 @@
       </section>
 
       <aside class="sources-panel">
-        <h2>Zdroje</h2>
-        <div id="sources" class="sources"></div>
+        <div class="sources-header">
+          <h2>Zdroje</h2>
+          <button type="button" id="toggleBaseline" class="ghost-button" hidden aria-expanded="false">
+            Porovnat s pořadím bez re-rankingu
+          </button>
+        </div>
+        <div class="sources-columns">
+          <div class="sources-column">
+            <h3 class="sources-column-title" id="rerankedColumnTitle" hidden>Po re-rankingu</h3>
+            <div id="sources" class="sources"></div>
+          </div>
+          <div class="sources-column baseline-column" id="baselineColumn" hidden>
+            <h3 class="sources-column-title">Bez re-rankingu</h3>
+            <div id="baselineSources" class="sources"></div>
+          </div>
+        </div>
       </aside>
     </main>
 
@@ -470,6 +495,6 @@
       </div>
     </dialog>
 
-    <script src="static/app.js?v=msearch-17"></script>
+    <script src="static/app.js?v=rerank-3"></script>
   </body>
 </html>

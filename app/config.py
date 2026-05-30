@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     min_relative_score: float = Field(default=0.3, alias="MIN_RELATIVE_SCORE")
     retrieval_backend: str = Field(default="msearch", alias="RETRIEVAL_BACKEND")
 
+    reranker_enabled: bool = Field(default=False, alias="RERANKER_ENABLED")
+    reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", alias="RERANKER_MODEL")
+    reranker_weight: float = Field(default=0.0, alias="RERANKER_WEIGHT")
+    reranker_candidates: int = Field(default=40, alias="RERANKER_CANDIDATES")
+    reranker_max_length: int = Field(default=512, alias="RERANKER_MAX_LENGTH")
+    reranker_batch_size: int = Field(default=16, alias="RERANKER_BATCH_SIZE")
+    reranker_device: str = Field(default="", alias="RERANKER_DEVICE")
+
     msearch_base_url: str = Field(default="https://api.msearch.themama.ai", alias="MSEARCH_BASE_URL")
     msearch_username: str = Field(default="", alias="MSEARCH_USERNAME")
     msearch_password: str = Field(default="", alias="MSEARCH_PASSWORD")

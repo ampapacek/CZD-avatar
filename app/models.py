@@ -31,6 +31,9 @@ class RetrieveRequest(BaseModel):
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     min_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    rerank_enabled: bool | None = None
+    rerank_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    rerank_candidates: int | None = Field(default=None, ge=1, le=500)
 
 
 class ChatRequest(BaseModel):
@@ -65,6 +68,9 @@ class ChatRequest(BaseModel):
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     min_relative_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    rerank_enabled: bool | None = None
+    rerank_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    rerank_candidates: int | None = Field(default=None, ge=1, le=500)
 
 
 class PromptPreset(BaseModel):
@@ -117,6 +123,7 @@ class RetrievedChunk(BaseModel):
     score: float
     dense_score: float | None = None
     bm25_score: float | None = None
+    rerank_score: float | None = None
 
 
 class TokenBudgetMetadata(BaseModel):
@@ -136,6 +143,7 @@ class TokenBudgetMetadata(BaseModel):
 class RetrieveResponse(BaseModel):
     question: str
     retrieved_chunks: list[RetrievedChunk]
+    baseline_chunks: list[RetrievedChunk] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -144,6 +152,7 @@ class ChatResponse(BaseModel):
     retrieved_chunks: list[RetrievedChunk]
     used_chunks: list[RetrievedChunk] = Field(default_factory=list)
     omitted_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    baseline_chunks: list[RetrievedChunk] = Field(default_factory=list)
     token_budget: TokenBudgetMetadata | None = None
     chunk_budget_warnings: list[str] = Field(default_factory=list)
     conversation_summary: str | None = None

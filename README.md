@@ -228,12 +228,46 @@ The web UI lets you tune retrieval while testing:
 - embedding vs. BM25 weighting
 - minimum combined score
 - minimum score relative to the best retrieved chunk
+- cross-encoder reranker weight (0 disables it; moving the slider above 0 enables reranking and warns that it slows retrieval)
 - retrieval backend: `msearch` or `local`
 - mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
 - LLM model preset or custom model id
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
 - editable prompt presets stored in `data/prompt_presets.json`
+
+## Reranking
+
+After first-stage retrieval (`msearch` or `local`), an optional cross-encoder reranker can reorder the candidates. The cross-encoder scores each `(question, chunk)` pair jointly, which is more accurate than the bi-encoder/BM25 first stage but slower, so it only runs on a larger candidate pool (`RERANKER_CANDIDATES`) which is then truncated back to `top-k`.
+
+It is **disabled by default**. Set the `Váha re-rankingu` slider above 0 (or `RERANKER_WEIGHT>0` with `RERANKER_ENABLED=true`) to enable it. The weight blends the reranker score with the first-stage score: `0` ignores the reranker, `1` trusts it entirely, and intermediate values mix both (each signal is min-max normalized across the candidates first). The default model is `BAAI/bge-reranker-v2-m3` (multilingual, covers Czech), run locally. Reranking happens before the conversation/token-budget step, so the chunks dropped to fit the context window are chosen from the reranked order.
+
+### Downloading the model
+
+The model is **never downloaded on demand** — the reranker loads with `local_files_only=True`, so a request can never trigger a multi-gigabyte download, and an end user cannot fetch it from the UI. A **developer must download it ahead of time**; until it is present, `reranker_model_available()` returns false and the rerank controls stay hidden.
+
+Download it once (needs internet, ~2.3 GB):
+
+```bash
+# into the default Hugging Face cache (~/.cache/huggingface/hub)
+python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-reranker-v2-m3')"
+# or with the CLI:
+huggingface-cli download BAAI/bge-reranker-v2-m3
+```
+
+For another server (e.g. air-gapped), download to a directory and point `RERANKER_MODEL` at it:
+
+```bash
+huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir /models/bge-reranker-v2-m3
+# copy /models/bge-reranker-v2-m3 to the target machine, then set in .env:
+#   RERANKER_MODEL=/models/bge-reranker-v2-m3
+```
+
+`reranker_model_available()` accepts either a populated HF cache entry or a local directory path.
+
+When reranking is active, the response also carries the pre-rerank top-k (`baseline_chunks`) — the chunks that would have been shown without the cross-encoder. The Sources panel exposes a **Porovnat s pořadím bez re-rankingu** button that reveals a second column with that baseline ordering, so you can compare what reranking changed.
+
+To hide the reranker's latency, the streaming endpoint (`/chat/stream`) reveals progressively: it emits a `preliminary_sources` event with the first-stage hits as soon as retrieval finishes, then runs the cross-encoder and emits the final `sources` event, which replaces them with the reranked order.
 
 ## Configuration
 
@@ -262,6 +296,10 @@ Important `.env` variables:
 - `MIN_SCORE`
 - `MIN_RELATIVE_SCORE`
 - `RETRIEVAL_BACKEND`
+- `RERANKER_ENABLED`
+- `RERANKER_MODEL`
+- `RERANKER_WEIGHT`
+- `RERANKER_CANDIDATES`
 - `MSEARCH_BASE_URL`
 - `MSEARCH_USERNAME`
 - `MSEARCH_PASSWORD`
@@ -332,7 +370,6 @@ The app can be adapted to any topic, but this is not fully configuration-driven 
   - later, derive defaults from the selected model and its known maximum context length
   - for now, keep the retrieval set small, roughly Top10, and trim it to the model's context window
   - ideally use the same tokenizer as the selected model when counting tokens
-- Add a cross-encoder reranker after hybrid retrieval.
 - Add richer metadata extraction for your real historical archive.
 - Add evaluation sets and automated citation-grounding checks.
 - Add selectable collections and system prompts for different avatars.

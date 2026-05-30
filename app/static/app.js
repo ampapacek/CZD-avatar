@@ -50,6 +50,13 @@ const denseWeight = document.querySelector("#denseWeight");
 const denseWeightValue = document.querySelector("#denseWeightValue");
 const bm25Weight = document.querySelector("#bm25Weight");
 const bm25WeightValue = document.querySelector("#bm25WeightValue");
+const rerankField = document.querySelector("#rerankField");
+const rerankWeight = document.querySelector("#rerankWeight");
+const rerankWeightValue = document.querySelector("#rerankWeightValue");
+const rerankCandidatesField = document.querySelector("#rerankCandidatesField");
+const rerankCandidates = document.querySelector("#rerankCandidates");
+const rerankNote = document.querySelector("#rerankNote");
+let rerankAvailable = false;
 const minScore = document.querySelector("#minScore");
 const minRelativeScore = document.querySelector("#minRelativeScore");
 const embeddingModel = document.querySelector("#embeddingModel");
@@ -59,6 +66,10 @@ const statusEl = document.querySelector("#status");
 const loadingIndicator = document.querySelector("#loadingIndicator");
 const answerEl = document.querySelector("#answer");
 const sourcesEl = document.querySelector("#sources");
+const baselineSourcesEl = document.querySelector("#baselineSources");
+const baselineColumnEl = document.querySelector("#baselineColumn");
+const rerankedColumnTitleEl = document.querySelector("#rerankedColumnTitle");
+const toggleBaselineBtn = document.querySelector("#toggleBaseline");
 const conversationButton = document.querySelector("#conversationButton");
 const historyButton = document.querySelector("#historyButton");
 const historyDialog = document.querySelector("#historyDialog");
@@ -110,6 +121,8 @@ let streamedAnswerText = "";
 let currentAnswerSources = [];
 let currentRetrievedChunks = [];
 let currentOmittedChunks = [];
+let currentBaselineChunks = [];
+let baselineVisible = false;
 let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
@@ -180,7 +193,11 @@ async function loadSettings() {
   bm25Weight.value = (1 - Number(denseWeight.value)).toFixed(2);
   minScore.value = settings.retrieval_defaults?.min_score ?? 0.2;
   minRelativeScore.value = settings.retrieval_defaults?.min_relative_score ?? 0.3;
+  rerankAvailable = settings.retrieval_defaults?.rerank_available ?? false;
+  rerankWeight.value = settings.retrieval_defaults?.rerank_weight ?? 0;
+  rerankCandidates.value = settings.retrieval_defaults?.rerank_candidates ?? 40;
   updateWeightLabels();
+  updateRerankControls();
   updateRetrievalControls({ resetValues: false });
   applyTheme(localStorage.getItem("theme") || "light");
   renderHistory();
@@ -197,11 +214,15 @@ form.addEventListener("submit", async (event) => {
   currentAnswerSources = [];
   currentRetrievedChunks = [];
   currentOmittedChunks = [];
+  currentBaselineChunks = [];
+  baselineVisible = false;
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
   renderAnswer("");
   sourcesEl.innerHTML = "";
+  baselineSourcesEl.innerHTML = "";
+  renderBaselineComparison();
   loadingIndicator.hidden = false;
 
   try {
@@ -219,6 +240,7 @@ form.addEventListener("submit", async (event) => {
       renderAnswer("Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.");
       statusEl.textContent = `Nalezeno ${data.retrieved_chunks.length} chunků.`;
       currentRetrievedChunks = data.retrieved_chunks;
+      currentBaselineChunks = data.baseline_chunks || [];
       currentAnswerSources = chunksToSources(data.retrieved_chunks);
       renderSources(currentAnswerSources, currentRetrievedChunks, "");
       saveHistoryEntry({
@@ -233,8 +255,18 @@ form.addEventListener("submit", async (event) => {
     } else {
       const payload = buildRequestPayload();
       const data = await chatRequest(payload, {
+        onPreliminarySources(prelimData) {
+          // First-stage hits shown while the cross-encoder runs; replaced by the
+          // reranked order once the "sources" event arrives.
+          currentRetrievedChunks = prelimData.retrieved_chunks || [];
+          currentBaselineChunks = [];
+          currentAnswerSources = prelimData.sources || chunksToSources(currentRetrievedChunks);
+          renderSources(currentAnswerSources, currentRetrievedChunks, "");
+          statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} dokumentů, přeřazuji (re-ranking)...`;
+        },
         onSources(sourceData) {
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
+          currentBaselineChunks = sourceData.baseline_chunks || [];
           currentOmittedChunks = sourceData.omitted_chunks || [];
           currentBudgetWarnings = sourceData.chunk_budget_warnings || [];
           currentTokenBudget = sourceData.token_budget || null;
@@ -254,6 +286,7 @@ form.addEventListener("submit", async (event) => {
             : `Hotovo za ${doneData.response_time_seconds}s`;
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
+          currentBaselineChunks = doneData.baseline_chunks || currentBaselineChunks;
           currentOmittedChunks = doneData.omitted_chunks || currentOmittedChunks;
           currentBudgetWarnings = doneData.chunk_budget_warnings || currentBudgetWarnings;
           currentTokenBudget = doneData.token_budget || currentTokenBudget;
@@ -265,6 +298,7 @@ form.addEventListener("submit", async (event) => {
       renderAnswer(streamedAnswerText);
       currentAnswerSources = data.sources || currentAnswerSources;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
+      currentBaselineChunks = data.baseline_chunks || currentBaselineChunks;
       currentOmittedChunks = data.omitted_chunks || currentOmittedChunks;
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
       currentTokenBudget = data.token_budget || currentTokenBudget;
@@ -582,6 +616,9 @@ function buildRequestPayload(overrides = {}) {
     bm25_weight: Number(bm25Weight.value),
     min_score: nullableNumber(minScore.value),
     min_relative_score: nullableNumber(minRelativeScore.value),
+    rerank_weight: Number(rerankWeight.value),
+    rerank_enabled: rerankAvailable && Number(rerankWeight.value) > 0,
+    rerank_candidates: nullableNumber(rerankCandidates.value),
     ...overrides,
   };
 }
@@ -598,6 +635,9 @@ function buildRetrievePayload(overrides = {}) {
     bm25_weight: Number(bm25Weight.value),
     min_score: nullableNumber(minScore.value),
     min_relative_score: nullableNumber(minRelativeScore.value),
+    rerank_weight: Number(rerankWeight.value),
+    rerank_enabled: rerankAvailable && Number(rerankWeight.value) > 0,
+    rerank_candidates: nullableNumber(rerankCandidates.value),
     ...overrides,
   };
 }
@@ -1034,7 +1074,9 @@ async function streamChatWithHandlers(payload, handlers = {}) {
       const rawEvent = buffer.slice(0, separatorIndex);
       buffer = buffer.slice(separatorIndex + 2);
       const event = parseSseEvent(rawEvent);
-      if (event.event === "sources") {
+      if (event.event === "preliminary_sources") {
+        handlers.onPreliminarySources?.(event.data);
+      } else if (event.event === "sources") {
         handlers.onSources?.(event.data);
       } else if (event.event === "token") {
         handlers.onToken?.(event.data.text || "", event.data);
@@ -1358,6 +1400,15 @@ function updateWeightLabels() {
   bm25WeightValue.value = Number(bm25Weight.value).toFixed(2);
 }
 
+function updateRerankControls() {
+  rerankField.hidden = !rerankAvailable;
+  rerankCandidatesField.hidden = !rerankAvailable;
+  rerankWeightValue.value = Number(rerankWeight.value).toFixed(1);
+  rerankNote.hidden = !rerankAvailable || Number(rerankWeight.value) <= 0;
+}
+
+rerankWeight.addEventListener("input", updateRerankControls);
+
 denseWeight.addEventListener("input", () => {
   bm25Weight.value = (1 - Number(denseWeight.value)).toFixed(2);
   updateWeightLabels();
@@ -1478,7 +1529,34 @@ function chunksToSources(chunks) {
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
   renderSourceCards(sourcesEl, sources, chunks, question.value, extractCitationIds(answerText), "main-source");
   renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
+  renderBaselineComparison();
 }
+
+function renderBaselineComparison() {
+  const hasBaseline = Array.isArray(currentBaselineChunks) && currentBaselineChunks.length > 0;
+  toggleBaselineBtn.hidden = !hasBaseline;
+  if (!hasBaseline) {
+    baselineVisible = false;
+  }
+  const show = hasBaseline && baselineVisible;
+  baselineColumnEl.hidden = !show;
+  rerankedColumnTitleEl.hidden = !show;
+  toggleBaselineBtn.setAttribute("aria-expanded", show ? "true" : "false");
+  toggleBaselineBtn.textContent = show
+    ? "Skrýt pořadí bez re-rankingu"
+    : "Porovnat s pořadím bez re-rankingu";
+  if (show) {
+    const baselineSources = chunksToSources(currentBaselineChunks);
+    renderSourceCards(baselineSourcesEl, baselineSources, currentBaselineChunks, question.value, new Set(), "baseline-source");
+  } else {
+    baselineSourcesEl.innerHTML = "";
+  }
+}
+
+toggleBaselineBtn.addEventListener("click", () => {
+  baselineVisible = !baselineVisible;
+  renderBaselineComparison();
+});
 
 function renderAnswer(text) {
   answerEl.innerHTML = renderMarkdown(text, currentAnswerSources, "main-source");

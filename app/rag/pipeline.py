@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import logging
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
 from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
 from app.rag.msearch import MSearchRetriever
+from app.rag.reranker import CrossEncoderReranker
 from app.rag.retrieval import HybridRetriever
 from app.rag.token_budget import (
     PromptBudgetConfig,
@@ -24,6 +27,24 @@ from app.rag.token_budget import (
 from app.rag.vector_store import QdrantVectorStore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RetrievalCandidates:
+    """First-stage retrieval result, before the cross-encoder reorders it.
+
+    Splitting retrieval from reranking lets the streaming endpoint show the
+    first-stage ``baseline`` immediately and swap in the reranked order once the
+    (slower) cross-encoder finishes.
+    """
+
+    candidates: list[dict[str, Any]] = field(default_factory=list)
+    # Pre-rerank top_k snapshot (deep-copied so later blending can't mutate it).
+    # Empty when reranking is inactive.
+    baseline: list[dict[str, Any]] = field(default_factory=list)
+    rerank_active: bool = False
+    rerank_weight: float = 0.0
+    resolved_top_k: int = 0
 
 
 def _shorten(text: str, limit: int = 280) -> str:
@@ -40,6 +61,7 @@ class RAGPipeline:
         self._vector_store: QdrantVectorStore | None = None
         self._retriever: HybridRetriever | None = None
         self._msearch_retriever: MSearchRetriever | None = None
+        self._reranker: CrossEncoderReranker | None = None
         self._llm: OpenAICompatibleLLM | None = None
 
     @property
@@ -72,6 +94,17 @@ class RAGPipeline:
         if self._msearch_retriever is None:
             self._msearch_retriever = MSearchRetriever(self.settings)
         return self._msearch_retriever
+
+    @property
+    def reranker(self) -> CrossEncoderReranker:
+        if self._reranker is None:
+            self._reranker = CrossEncoderReranker(
+                self.settings.reranker_model,
+                max_length=self.settings.reranker_max_length,
+                batch_size=self.settings.reranker_batch_size,
+                device=self.settings.reranker_device,
+            )
+        return self._reranker
 
     @property
     def llm(self) -> OpenAICompatibleLLM:
@@ -116,7 +149,92 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        rerank_enabled: bool | None = None,
+        rerank_weight: float | None = None,
+        rerank_candidates: int | None = None,
     ) -> list[dict[str, Any]]:
+        chunks, _ = self.retrieve_with_baseline(
+            question,
+            top_k,
+            dense_weight=dense_weight,
+            bm25_weight=bm25_weight,
+            min_score=min_score,
+            min_relative_score=min_relative_score,
+            retrieval_backend=retrieval_backend,
+            llm_provider=llm_provider,
+            msearch_collection=msearch_collection,
+            msearch_mode=msearch_mode,
+            msearch_min_confidence=msearch_min_confidence,
+            rerank_enabled=rerank_enabled,
+            rerank_weight=rerank_weight,
+            rerank_candidates=rerank_candidates,
+        )
+        return chunks
+
+    def retrieve_with_baseline(
+        self,
+        question: str,
+        top_k: int | None = None,
+        dense_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+        min_score: float | None = None,
+        min_relative_score: float | None = None,
+        retrieval_backend: str | None = None,
+        llm_provider: str | None = None,
+        msearch_collection: str | None = None,
+        msearch_mode: str | None = None,
+        msearch_min_confidence: float | None = None,
+        rerank_enabled: bool | None = None,
+        rerank_weight: float | None = None,
+        rerank_candidates: int | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Retrieve chunks and, when reranking is active, the pre-rerank ordering.
+
+        The second list is the top_k the user would have seen without the
+        cross-encoder (a snapshot taken before blending), so the UI can show the
+        two orderings side by side. It is empty when reranking is inactive.
+        """
+        candidates = self.retrieve_candidates(
+            question,
+            top_k,
+            dense_weight=dense_weight,
+            bm25_weight=bm25_weight,
+            min_score=min_score,
+            min_relative_score=min_relative_score,
+            retrieval_backend=retrieval_backend,
+            llm_provider=llm_provider,
+            msearch_collection=msearch_collection,
+            msearch_mode=msearch_mode,
+            msearch_min_confidence=msearch_min_confidence,
+            rerank_enabled=rerank_enabled,
+            rerank_weight=rerank_weight,
+            rerank_candidates=rerank_candidates,
+        )
+        reranked = self.apply_rerank(question, candidates)
+        return reranked, candidates.baseline
+
+    def retrieve_candidates(
+        self,
+        question: str,
+        top_k: int | None = None,
+        dense_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+        min_score: float | None = None,
+        min_relative_score: float | None = None,
+        retrieval_backend: str | None = None,
+        llm_provider: str | None = None,
+        msearch_collection: str | None = None,
+        msearch_mode: str | None = None,
+        msearch_min_confidence: float | None = None,
+        rerank_enabled: bool | None = None,
+        rerank_weight: float | None = None,
+        rerank_candidates: int | None = None,
+    ) -> RetrievalCandidates:
+        """Run only the first stage and snapshot the pre-rerank top_k.
+
+        Reranking is deferred to :meth:`apply_rerank` so callers (e.g. the
+        streaming endpoint) can surface the baseline before the cross-encoder runs.
+        """
         resolved_top_k = self.settings.top_k if top_k is None else top_k
         resolved_backend = retrieval_backend or self.settings.retrieval_backend
         resolved_min_score = self.settings.min_score if min_score is None else min_score
@@ -130,12 +248,21 @@ class RAGPipeline:
                 question,
                 resolved_top_k,
             )
-            return []
+            return RetrievalCandidates()
+
+        resolved_rerank_weight = self.settings.reranker_weight if rerank_weight is None else rerank_weight
+        rerank_active = (
+            self.settings.reranker_enabled if rerank_enabled is None else rerank_enabled
+        ) and resolved_rerank_weight > 0
+        resolved_candidates = self.settings.reranker_candidates if rerank_candidates is None else rerank_candidates
+        # When reranking, pull a larger candidate pool for the cross-encoder to
+        # reorder, then truncate back to top_k after blending.
+        candidate_k = max(resolved_top_k, resolved_candidates) if rerank_active else resolved_top_k
 
         if resolved_backend == "msearch":
             chunks = self.msearch_retriever.retrieve(
                 question,
-                resolved_top_k,
+                candidate_k,
                 collection_id=effective_msearch_collection,
                 mode=msearch_mode,
                 min_confidence=msearch_min_confidence,
@@ -143,36 +270,56 @@ class RAGPipeline:
                 min_relative_score=resolved_min_relative_score,
             )
             logger.info(
-                "Retrieved %s chunks from mSearch for question=%r top_k=%s collection=%s mode=%s min_confidence=%s",
+                "Retrieved %s chunks from mSearch for question=%r top_k=%s candidates=%s collection=%s mode=%s min_confidence=%s",
                 len(chunks),
                 question,
                 resolved_top_k,
+                candidate_k,
                 effective_msearch_collection,
                 msearch_mode or self.settings.msearch_mode,
                 self.settings.msearch_min_confidence if msearch_min_confidence is None else msearch_min_confidence,
             )
-            return chunks
-
-        if resolved_backend != "local":
+        elif resolved_backend == "local":
+            chunks = self.retriever.retrieve(
+                question,
+                candidate_k,
+                dense_weight=dense_weight,
+                bm25_weight=bm25_weight,
+                min_score=resolved_min_score,
+                min_relative_score=resolved_min_relative_score,
+            )
+            logger.info(
+                "Retrieved %s chunks for question=%r top_k=%s dense_weight=%.3f bm25_weight=%.3f min_score=%s min_relative_score=%s",
+                len(chunks),
+                question,
+                resolved_top_k,
+                dense_weight,
+                bm25_weight,
+                resolved_min_score,
+                resolved_min_relative_score,
+            )
+        else:
             raise RuntimeError(f"Unknown retrieval backend: {resolved_backend}")
 
-        chunks = self.retriever.retrieve(
-            question,
-            resolved_top_k,
-            dense_weight=dense_weight,
-            bm25_weight=bm25_weight,
-            min_score=resolved_min_score,
-            min_relative_score=resolved_min_relative_score,
+        # Snapshot the pre-rerank top_k before apply_rerank mutates the records
+        # in place (it rewrites score/citation_id during blending).
+        baseline = [copy.deepcopy(chunk) for chunk in chunks[:resolved_top_k]] if rerank_active else []
+        return RetrievalCandidates(
+            candidates=chunks,
+            baseline=baseline,
+            rerank_active=rerank_active,
+            rerank_weight=resolved_rerank_weight,
+            resolved_top_k=resolved_top_k,
         )
-        logger.info(
-            "Retrieved %s chunks for question=%r top_k=%s dense_weight=%.3f bm25_weight=%.3f min_score=%s min_relative_score=%s",
-            len(chunks),
+
+    def apply_rerank(self, question: str, candidates: RetrievalCandidates) -> list[dict[str, Any]]:
+        """Blend in the cross-encoder (when active) and truncate to top_k."""
+        chunks = self._maybe_rerank(
             question,
-            resolved_top_k,
-            dense_weight,
-            bm25_weight,
-            resolved_min_score,
-            resolved_min_relative_score,
+            candidates.candidates,
+            candidates.rerank_active,
+            candidates.rerank_weight,
+            candidates.resolved_top_k,
         )
         if chunks:
             logger.info(
@@ -187,6 +334,29 @@ class RAGPipeline:
                 ],
             )
         return chunks
+
+    def _maybe_rerank(
+        self,
+        question: str,
+        chunks: list[dict[str, Any]],
+        rerank_active: bool,
+        weight: float,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        if not rerank_active or not chunks:
+            return chunks[:top_k]
+        started = time.perf_counter()
+        reranked = self.reranker.rerank(question, chunks, weight, top_k)
+        logger.info(
+            "Reranked %s candidates to %s chunks for question=%r weight=%.2f model=%s elapsed=%.2fs",
+            len(chunks),
+            len(reranked),
+            question,
+            weight,
+            self.settings.reranker_model,
+            time.perf_counter() - started,
+        )
+        return reranked
 
     def chat(
         self,
@@ -220,6 +390,9 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        rerank_enabled: bool | None = None,
+        rerank_weight: float | None = None,
+        rerank_candidates: int | None = None,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -241,7 +414,7 @@ class RAGPipeline:
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
-        retrieved = self.retrieve(
+        retrieved, baseline_retrieved = self.retrieve_with_baseline(
             question,
             top_k,
             dense_weight=dense_weight,
@@ -253,6 +426,9 @@ class RAGPipeline:
             msearch_collection=msearch_collection,
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,
+            rerank_enabled=rerank_enabled,
+            rerank_weight=rerank_weight,
+            rerank_candidates=rerank_candidates,
         )
         budget = prepare_prompt_budget(
             question=question,
@@ -296,6 +472,7 @@ class RAGPipeline:
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
             used_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
             omitted_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.omitted_chunks],
+            baseline_chunks=[_retrieved_chunk_from_record(chunk) for chunk in baseline_retrieved],
             token_budget=budget.metadata(),
             chunk_budget_warnings=budget.warnings,
             conversation_summary=effective_summary,
@@ -427,6 +604,7 @@ def _retrieved_chunk_from_record(record: dict[str, Any]) -> RetrievedChunk:
         score=float(record.get("score") or 0.0),
         dense_score=float(record["dense_score"]) if record.get("dense_score") is not None else None,
         bm25_score=float(record["bm25_score"]) if record.get("bm25_score") is not None else None,
+        rerank_score=float(record["rerank_score"]) if record.get("rerank_score") is not None else None,
     )
 
 
