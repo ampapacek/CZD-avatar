@@ -236,6 +236,13 @@ Do not mix vectors from different embedding models in one collection.
 - `app/static/styles.css`
 - `app/main.py`
 
+## Known review findings
+
+- `/chat` and `/retrieve` in `app/main.py` wrap intended `HTTPException` 400 errors as 500s because the broad `except Exception` handlers catch them. Add `except HTTPException: raise` before generic exception handling so user/config errors such as a locked model or disallowed WP2 collection keep their original status code.
+- The frontend currently cannot persist or send non-custom provider base URL overrides even though the UI/API shape suggests it can. `app/static/app.js` has listeners for `llmBaseUrl`, but `persistLlmSettings()` does not store `base_url` for normal providers and `selectedProviderBaseUrl()` returns only the provider preset base URL outside the custom provider path.
+- Streaming chat assumes the LLM stream object has an `upstream_model` attribute. `pipeline.llm.stream_generate()` is typed as returning `Iterator[str]`, so a future LLM client or test double that returns a plain generator could stream tokens successfully and then fail before the final `done` event when `app/main.py` reads `stream.upstream_model`.
+- Last review verification: `./.venv/bin/python -m unittest discover -s tests -v` passed, and `./.venv/bin/python -m compileall -q app scripts tests` passed. `./.venv/bin/python -m pytest -q` could not run because `pytest` was not installed in the venv.
+
 ## Nice next improvements
 
 - Make the avatar general, not history-only:
