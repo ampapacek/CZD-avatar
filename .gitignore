@@ -13,6 +13,7 @@ __pycache__/
 logs/
 answers_avatar*.txt
 notes.md
+ignored
 
 data/qdrant/
 data/processed/
