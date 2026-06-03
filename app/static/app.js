@@ -165,6 +165,7 @@ function currentProviderBaseUrl() {
 async function loadSettings() {
   const response = await fetch("settings");
   const settings = await response.json();
+  logLlmModelRefresh("page-load", settings);
   appSettings = settings;
   style.value = settings.default_style || "ucitel";
   length.value = settings.default_length || "medium";
@@ -740,7 +741,7 @@ function renderProviderApiKeyFields() {
       const publicModels = providerPublicModels(provider, appSettings);
       const policyNote =
         publicModels.length > 0
-          ? `Bez odemykacího hesla jsou povolené modely pro ${providerLabel}: ${publicModels.join(", ")}.`
+          ? `Bez odemykacího hesla jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`
           : `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
       return `
         <label class="field provider-key-row">
@@ -980,7 +981,13 @@ function setModelRefreshStatus(message, variant = "") {
 async function refreshProviderModels() {
   const previousProvider = normalizeProviderId(llmProvider.value);
   const previousModel = selectedModelValue();
+  const originalLabel = refreshModelsButton.textContent;
+  console.info("[rag-avatar] LLM model refresh requested", {
+    trigger: "manual-refresh",
+    provider: previousProvider,
+  });
   refreshModelsButton.disabled = true;
+  refreshModelsButton.textContent = "Obnovuji...";
   setModelRefreshStatus("Obnovuji seznam modelů...");
   try {
     const response = await fetch("llm-providers/refresh", { method: "POST" });
@@ -988,18 +995,44 @@ async function refreshProviderModels() {
     if (!response.ok) {
       throw new Error(formatErrorDetail(data.detail || "Nepodařilo se obnovit seznam modelů."));
     }
+    logLlmModelRefresh("manual-refresh", data);
     applyLlmSettingsUpdate(data, previousProvider);
     refreshModelOptions(appSettings);
     if (previousModel && Array.from(model.options).some((option) => option.value === previousModel)) {
       model.value = previousModel;
     }
     renderProviderApiKeyFields();
-    setModelRefreshStatus("Seznam modelů aktualizován.", "success");
+    const provider = selectedProviderConfig(appSettings);
+    const modelCount = Array.isArray(provider?.model_presets) ? provider.model_presets.length : 0;
+    setModelRefreshStatus(`Seznam modelů aktualizován (${modelCount} modelů).`, "success");
   } catch (error) {
+    console.error("[rag-avatar] LLM model refresh failed", {
+      trigger: "manual-refresh",
+      provider: previousProvider,
+      error,
+    });
     setModelRefreshStatus(error.message, "error");
   } finally {
     refreshModelsButton.disabled = false;
+    refreshModelsButton.textContent = originalLabel;
   }
+}
+
+function logLlmModelRefresh(trigger, settings) {
+  const providers = Array.isArray(settings?.llm_providers) ? settings.llm_providers : [];
+  console.info("[rag-avatar] LLM provider models loaded", {
+    trigger,
+    provider: settings?.llm_provider || "",
+    model: settings?.llm_model || "",
+    cache_ttl_seconds: settings?.llm_policy?.models_cache_ttl_seconds ?? null,
+    providers: providers.map((provider) => ({
+      id: provider.id,
+      label: provider.label || provider.id,
+      models: Array.isArray(provider.model_presets) ? provider.model_presets.length : 0,
+      public_models: Array.isArray(provider.public_models) ? provider.public_models.length : 0,
+      discover_models: provider.discover_models === true,
+    })),
+  });
 }
 
 function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
@@ -1512,7 +1545,7 @@ function updateLlmPolicyNote(policy, unlocked = false, browserApiKeyProvided = f
   }
   const publicModels = providerPublicModels(provider, appSettings);
   if (publicModels.length > 0) {
-    llmPolicyNote.textContent = `Bez odemykacího hesla jsou povolené modely pro ${providerLabel}: ${publicModels.join(", ")}.`;
+    llmPolicyNote.textContent = `Bez odemykacího hesla jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`;
     return;
   }
   llmPolicyNote.textContent = `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
