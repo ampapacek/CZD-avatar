@@ -13,6 +13,8 @@ const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const unlockModelsButton = document.querySelector("#unlockModelsButton");
 const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPasswordButton");
 const unlockModelsStatus = document.querySelector("#unlockModelsStatus");
+const refreshModelsButton = document.querySelector("#refreshModelsButton");
+const modelRefreshStatus = document.querySelector("#modelRefreshStatus");
 const contextWindowTokens = document.querySelector("#contextWindowTokens");
 const outputBudgetShort = document.querySelector("#outputBudgetShort");
 const outputBudgetMedium = document.querySelector("#outputBudgetMedium");
@@ -536,6 +538,7 @@ providerApiKeyList.addEventListener("click", (event) => {
   renderProviderApiKeyFields();
   refreshModelOptions(appSettings);
 });
+refreshModelsButton.addEventListener("click", refreshProviderModels);
 customModel.addEventListener("input", persistLlmSettings);
 model.addEventListener("change", () => {
   updateCustomModelVisibility(customModelAllowed());
@@ -963,6 +966,59 @@ function setUnlockStatus(message, variant = "") {
   unlockModelsStatus.textContent = message;
   unlockModelsStatus.classList.toggle("success", variant === "success");
   unlockModelsStatus.classList.toggle("error", variant === "error");
+}
+
+function setModelRefreshStatus(message, variant = "") {
+  if (!modelRefreshStatus) {
+    return;
+  }
+  modelRefreshStatus.textContent = message;
+  modelRefreshStatus.classList.toggle("success", variant === "success");
+  modelRefreshStatus.classList.toggle("error", variant === "error");
+}
+
+async function refreshProviderModels() {
+  const previousProvider = normalizeProviderId(llmProvider.value);
+  const previousModel = selectedModelValue();
+  refreshModelsButton.disabled = true;
+  setModelRefreshStatus("Obnovuji seznam modelů...");
+  try {
+    const response = await fetch("llm-providers/refresh", { method: "POST" });
+    const data = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(formatErrorDetail(data.detail || "Nepodařilo se obnovit seznam modelů."));
+    }
+    applyLlmSettingsUpdate(data, previousProvider);
+    refreshModelOptions(appSettings);
+    if (previousModel && Array.from(model.options).some((option) => option.value === previousModel)) {
+      model.value = previousModel;
+    }
+    renderProviderApiKeyFields();
+    setModelRefreshStatus("Seznam modelů aktualizován.", "success");
+  } catch (error) {
+    setModelRefreshStatus(error.message, "error");
+  } finally {
+    refreshModelsButton.disabled = false;
+  }
+}
+
+function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
+  appSettings = {
+    ...appSettings,
+    llm_provider: data.llm_provider ?? appSettings.llm_provider,
+    llm_base_url: data.llm_base_url ?? appSettings.llm_base_url,
+    llm_model: data.llm_model ?? appSettings.llm_model,
+    llm_providers: Array.isArray(data.llm_providers) ? data.llm_providers : appSettings.llm_providers,
+    model_presets: Array.isArray(data.model_presets) ? data.model_presets : appSettings.model_presets,
+    all_model_presets: Array.isArray(data.all_model_presets) ? data.all_model_presets : appSettings.all_model_presets,
+    llm_policy: data.llm_policy && typeof data.llm_policy === "object" ? data.llm_policy : appSettings.llm_policy,
+  };
+  const providers = getLlmProviders(appSettings);
+  const selectedProvider = providers.some((provider) => provider.id === normalizeProviderId(preferredProvider))
+    ? normalizeProviderId(preferredProvider)
+    : normalizeProviderId(appSettings.llm_provider || providers[0]?.id || "");
+  populateProviderOptions(providers, selectedProvider);
+  loadProviderValues(selectedProvider, { preferStored: true });
 }
 
 async function streamChat(payload) {

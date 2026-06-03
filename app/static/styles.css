@@ -265,16 +265,19 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   line-height: 1.4;
 }
 
-.unlock-status {
+.unlock-status,
+#modelRefreshStatus {
   min-height: 17px;
   font-weight: 700;
 }
 
-.unlock-status.success {
+.unlock-status.success,
+#modelRefreshStatus.success {
   color: var(--accent);
 }
 
-.unlock-status.error {
+.unlock-status.error,
+#modelRefreshStatus.error {
   color: var(--warn);
 }
 
