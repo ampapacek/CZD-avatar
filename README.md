@@ -21,13 +21,14 @@ For the default hosted `msearch` flow, define one or more providers in `.env`. A
 
 ```env
 LLM_PROVIDER=aiufal
+LLM_MODELS_CACHE_TTL_SECONDS=3600
 LLM_PROVIDERS=aiufal,openrouter
 
 LLM_PROVIDER_AIUFAL_NAME=AI Ufal
 LLM_PROVIDER_AIUFAL_BASE_URL=https://ai.ufal.mff.cuni.cz/api
 LLM_PROVIDER_AIUFAL_API_KEY=your_ai_ufal_key
 LLM_PROVIDER_AIUFAL_DEFAULT_MODEL=LLM1-A40.llama3.3:latest
-LLM_PROVIDER_AIUFAL_PUBLIC_MODELS=LLM1-A40.llama3.3:latest
+LLM_PROVIDER_AIUFAL_PUBLIC_MODELS=*
 LLM_PROVIDER_AIUFAL_DISCOVER_MODELS=true
 
 LLM_PROVIDER_OPENROUTER_NAME=OpenRouter
@@ -60,7 +61,13 @@ Each provider can define:
 
 If `LLM_PROVIDER` is set, that provider is selected by default in the UI. If it is empty, the first provider in `LLM_PROVIDERS` is used.
 
+Discovered model lists are cached server-side for `LLM_MODELS_CACHE_TTL_SECONDS`, which defaults to `3600` seconds. Opening the app refreshes stale model lists through `/settings`; the Settings dialog also has an `Obnovit seznam modelů` button that forces an immediate server-side refresh without exposing provider API keys to the browser.
+
 If you also set `LLM_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models configured for the selected provider appear in the selector.
+
+Set `LLM_PROVIDER_<ID>_PUBLIC_MODELS=*` to make every resolved model for that provider public. If discovery succeeds, this means all discovered models. If discovery fails, it means the fallback configured models from `MODELS` plus `DEFAULT_MODEL`.
+
+When `DISCOVER_MODELS=true`, discovered models are treated as authoritative. `MODELS` is used only as a fallback if discovery fails, so stale explicit model names do not appear while provider discovery is working.
 
 Provider API keys go into `LLM_PROVIDER_<ID>_API_KEY`, where `<ID>` is the uppercase provider id from `LLM_PROVIDERS`. For example, `aiufal` uses `LLM_PROVIDER_AIUFAL_API_KEY`, and `openrouter` uses `LLM_PROVIDER_OPENROUTER_API_KEY`.
 
@@ -276,6 +283,7 @@ Important `.env` variables:
 - `LLM_PROVIDER`
 - `LLM_PROVIDERS`
 - `LLM_UNLOCK_PASSWORD`
+- `LLM_MODELS_CACHE_TTL_SECONDS`
 - `LLM_PROVIDER_<ID>_NAME`
 - `LLM_PROVIDER_<ID>_BASE_URL`
 - `LLM_PROVIDER_<ID>_API_KEY`
