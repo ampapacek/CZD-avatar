@@ -67,15 +67,47 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 settings = get_settings()
 provider_presets = available_llm_providers()
-default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
-default_provider_preset = provider_preset(default_provider, provider_presets)
-provider_model_presets = _dedupe_preserve_order(
-    [model for provider in provider_presets for model in provider["model_presets"]]
-)
-default_model = provider_default_model(default_provider, provider_presets)
+default_provider = ""
+default_provider_preset: dict[str, object] = {}
+all_llm_models: list[str] = []
+default_model = ""
 
 
-all_llm_models = _dedupe_preserve_order(provider_model_presets)
+def _refresh_provider_state(force_model_refresh: bool = False) -> None:
+    global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
+    provider_presets = available_llm_providers(force_model_refresh=force_model_refresh)
+    default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
+    default_provider_preset = provider_preset(default_provider, provider_presets)
+    provider_model_presets = _dedupe_preserve_order(
+        [model for provider in provider_presets for model in provider["model_presets"]]
+    )
+    default_model = provider_default_model(default_provider, provider_presets)
+    all_llm_models = _dedupe_preserve_order(provider_model_presets)
+
+
+def _llm_settings_payload() -> dict[str, object]:
+    selected_provider = default_provider_preset
+    return {
+        "llm_provider": default_provider,
+        "llm_base_url": selected_provider["base_url"],
+        "llm_model": selected_provider["default_model"],
+        "llm_providers": provider_presets,
+        "model_presets": selected_provider["model_presets"],
+        "all_model_presets": all_llm_models,
+        "llm_policy": {
+            "provider": default_provider,
+            "providers": provider_presets,
+            "public_models": selected_provider["public_models"],
+            "model_presets": selected_provider["model_presets"],
+            "all_models": all_llm_models,
+            "custom_model_requires_browser_key": True,
+            "unlock_password_enabled": bool(settings.llm_unlock_password),
+            "models_cache_ttl_seconds": settings.llm_models_cache_ttl_seconds,
+        },
+    }
+
+
+_refresh_provider_state()
 logger.info(
     "Loaded settings: provider=%s model=%s providers=%s llm_unlock_password=%s",
     default_provider,
@@ -171,29 +203,15 @@ def health() -> HealthResponse:
 
 @app.get("/settings")
 def get_public_settings() -> dict[str, object]:
-    selected_provider = default_provider_preset
+    _refresh_provider_state()
     return {
         "styles": available_styles(),
         "lengths": available_lengths(),
         "default_style": settings.default_style,
         "default_length": settings.default_length,
-        "llm_provider": default_provider,
-        "llm_base_url": selected_provider["base_url"],
-        "llm_model": selected_provider["default_model"],
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
-        "llm_providers": provider_presets,
-        "model_presets": selected_provider["model_presets"],
-        "all_model_presets": all_llm_models,
-        "llm_policy": {
-            "provider": default_provider,
-            "providers": provider_presets,
-            "public_models": selected_provider["public_models"],
-            "model_presets": selected_provider["model_presets"],
-            "all_models": all_llm_models,
-            "custom_model_requires_browser_key": True,
-            "unlock_password_enabled": bool(settings.llm_unlock_password),
-        },
+        **_llm_settings_payload(),
         "collection": settings.qdrant_collection,
         "retrieval_backend": settings.retrieval_backend,
         "retrieval_backends": ["msearch", "local"],
@@ -235,6 +253,12 @@ def get_public_settings() -> dict[str, object]:
             "length_prompts": LENGTH_PROMPTS,
         },
     }
+
+
+@app.post("/llm-providers/refresh")
+def refresh_llm_providers() -> dict[str, object]:
+    _refresh_provider_state(force_model_refresh=True)
+    return _llm_settings_payload()
 
 
 @app.get("/questions/random")

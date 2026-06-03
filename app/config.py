@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     llm_provider: str = Field(default="", alias="LLM_PROVIDER")
     llm_unlock_password: str = Field(default="", alias="LLM_UNLOCK_PASSWORD")
+    llm_models_cache_ttl_seconds: int = Field(default=3600, alias="LLM_MODELS_CACHE_TTL_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")

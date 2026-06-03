@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -14,9 +15,21 @@ from app.config import load_env_values
 logger = logging.getLogger(__name__)
 
 _PROVIDER_ENV_PATTERN = re.compile(
-    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|DISCOVER_MODELS|SUPPORTS_STREAMING|API_KEY_LABEL)$"
+    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|DISCOVER_MODELS|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
 )
 _EXCLUDED_MODEL_PATTERNS = ("rag-*", "openwebuidocs")
+_DEFAULT_MODELS_CACHE_TTL_SECONDS = 3600.0
+_PUBLIC_ALL_MODELS = "*"
+
+
+@dataclass(slots=True)
+class ModelDiscoveryCacheEntry:
+    models: tuple[str, ...]
+    refreshed_at: float
+    error: str = ""
+
+
+_model_discovery_cache: dict[str, ModelDiscoveryCacheEntry] = {}
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -34,6 +47,16 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def _parse_float(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value.strip())
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
 
 
 def _normalize_provider_id(value: str | None) -> str:
@@ -124,7 +147,7 @@ def _filter_model_names(model_names: list[str] | tuple[str, ...]) -> tuple[str, 
     return tuple(dict.fromkeys(name for name in model_names if name and not _is_excluded_model_name(name)))
 
 
-def _discover_models(base_url: str, api_key: str, timeout: float = 20.0, models_url: str | None = None) -> list[str]:
+def _discover_models(base_url: str, api_key: str, timeout: float = 20.0, models_url: str | None = None) -> tuple[str, ...]:
     resolved_url = (models_url or f"{base_url.rstrip('/')}/models").rstrip("/")
     headers = {
         "Content-Type": "application/json",
@@ -137,13 +160,53 @@ def _discover_models(base_url: str, api_key: str, timeout: float = 20.0, models_
         response = httpx.get(resolved_url, headers=headers, timeout=timeout)
         response.raise_for_status()
         names = _extract_model_names(response.json())
-        return list(_filter_model_names(names))
+        return _filter_model_names(names)
     except Exception as exc:
-        logger.debug("Could not discover models from %s: %s", resolved_url, exc)
-        return []
+        raise RuntimeError(f"Could not discover models from {resolved_url}: {exc}") from exc
 
 
-def load_provider_configs(env: dict[str, str] | None = None) -> list[LLMProviderConfig]:
+def _discovery_cache_key(provider_id: str, base_url: str, models_url: str | None) -> str:
+    return "|".join([provider_id, base_url.strip().rstrip("/"), (models_url or "").strip().rstrip("/")])
+
+
+def _models_cache_ttl_seconds(env: dict[str, str], provider_id: str) -> float:
+    return _parse_float(
+        env.get(_env_key(provider_id, "MODELS_CACHE_TTL_SECONDS")),
+        _parse_float(env.get("LLM_MODELS_CACHE_TTL_SECONDS"), _DEFAULT_MODELS_CACHE_TTL_SECONDS),
+    )
+
+
+def _discover_models_cached(
+    provider_id: str,
+    base_url: str,
+    api_key: str,
+    models_url: str | None,
+    ttl_seconds: float,
+    force_refresh: bool,
+) -> ModelDiscoveryCacheEntry:
+    cache_key = _discovery_cache_key(provider_id, base_url, models_url)
+    cached = _model_discovery_cache.get(cache_key)
+    now = time.time()
+    if cached and not force_refresh and now - cached.refreshed_at < ttl_seconds:
+        return cached
+
+    try:
+        models = _discover_models(base_url, api_key, models_url=models_url)
+        entry = ModelDiscoveryCacheEntry(models=models, refreshed_at=now)
+        _model_discovery_cache[cache_key] = entry
+        return entry
+    except RuntimeError as exc:
+        logger.debug("%s", exc)
+        if cached:
+            return ModelDiscoveryCacheEntry(models=cached.models, refreshed_at=cached.refreshed_at, error=str(exc))
+        return ModelDiscoveryCacheEntry(models=(), refreshed_at=now, error=str(exc))
+
+
+def clear_model_discovery_cache() -> None:
+    _model_discovery_cache.clear()
+
+
+def load_provider_configs(env: dict[str, str] | None = None, force_model_refresh: bool = False) -> list[LLMProviderConfig]:
     resolved_env = env or load_env_values()
     provider_ids = _discover_provider_ids(resolved_env)
     providers: list[LLMProviderConfig] = []
@@ -153,10 +216,13 @@ def load_provider_configs(env: dict[str, str] | None = None) -> list[LLMProvider
         base_url = _env_value(resolved_env, provider_id, "BASE_URL")
         api_key = _env_value(resolved_env, provider_id, "API_KEY")
         default_model = _env_value(resolved_env, provider_id, "DEFAULT_MODEL")
-        public_models = _filter_model_names(_split_csv(_env_value(resolved_env, provider_id, "PUBLIC_MODELS")))
+        public_models_raw = _env_value(resolved_env, provider_id, "PUBLIC_MODELS")
+        public_all_models = public_models_raw == _PUBLIC_ALL_MODELS
+        public_models = _filter_model_names(_split_csv(public_models_raw)) if not public_all_models else ()
         static_models = _filter_model_names(_split_csv(_env_value(resolved_env, provider_id, "MODELS")))
         models_url = _env_value(resolved_env, provider_id, "MODELS_URL") or None
         discover_models = _parse_bool(resolved_env.get(_env_key(provider_id, "DISCOVER_MODELS")), default=False)
+        cache_ttl_seconds = _models_cache_ttl_seconds(resolved_env, provider_id)
         supports_streaming = _parse_bool(
             resolved_env.get(_env_key(provider_id, "SUPPORTS_STREAMING")),
             default=True,
@@ -164,15 +230,33 @@ def load_provider_configs(env: dict[str, str] | None = None) -> list[LLMProvider
         api_key_label = _env_value(resolved_env, provider_id, "API_KEY_LABEL") or "API key"
 
         if discover_models and base_url:
-            discovered_models = tuple(_discover_models(base_url, api_key, models_url=models_url))
+            discovery_entry = _discover_models_cached(
+                provider_id,
+                base_url,
+                api_key,
+                models_url,
+                cache_ttl_seconds,
+                force_model_refresh,
+            )
+            discovered_models = discovery_entry.models
         else:
             discovered_models = ()
 
         model_presets = discovered_models or static_models
-        if default_model and not _is_excluded_model_name(default_model) and default_model not in model_presets:
+        if (
+            not discovered_models
+            and default_model
+            and not _is_excluded_model_name(default_model)
+            and default_model not in model_presets
+        ):
             model_presets = (default_model, *model_presets)
-        if not public_models and default_model and not _is_excluded_model_name(default_model):
+        if public_all_models:
+            public_models = model_presets
+        elif not public_models and default_model and not _is_excluded_model_name(default_model):
             public_models = (default_model,)
+        else:
+            public_models = tuple(model for model in public_models if model in model_presets)
+        resolved_default_model = default_model if default_model in model_presets else (model_presets[0] if model_presets else "")
 
         providers.append(
             LLMProviderConfig(
@@ -180,7 +264,7 @@ def load_provider_configs(env: dict[str, str] | None = None) -> list[LLMProvider
                 label=label,
                 base_url=base_url,
                 api_key=api_key,
-                default_model=default_model or (model_presets[0] if model_presets else ""),
+                default_model=resolved_default_model,
                 public_models=public_models,
                 model_presets=tuple(dict.fromkeys(model_presets)),
                 supports_streaming=supports_streaming,
@@ -193,8 +277,8 @@ def load_provider_configs(env: dict[str, str] | None = None) -> list[LLMProvider
     return providers
 
 
-def available_llm_providers(env: dict[str, str] | None = None) -> list[dict[str, Any]]:
-    return [provider.to_dict() for provider in load_provider_configs(env)]
+def available_llm_providers(env: dict[str, str] | None = None, force_model_refresh: bool = False) -> list[dict[str, Any]]:
+    return [provider.to_dict() for provider in load_provider_configs(env, force_model_refresh=force_model_refresh)]
 
 
 def resolve_llm_provider(
