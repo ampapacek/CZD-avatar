@@ -13,6 +13,7 @@ __pycache__/
 logs/
 answers_avatar*.txt
 notes.md
+prompt_preset_refactor_plan.md
 ignored
 
 data/qdrant/
