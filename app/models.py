@@ -3,7 +3,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AnswerStyle = Literal["laik", "ucitel", "historik"]
 AnswerLength = Literal["short", "medium", "long"]
 RetrievalBackend = Literal["msearch", "local"]
 MSearchMode = Literal["hybrid", "semantic", "keyword"]
@@ -40,13 +39,10 @@ class RetrieveRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     wp_id: str | None = None
-    style: AnswerStyle | None = None
     length: AnswerLength | None = None
     custom_instructions: str | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None
-    style_prompts: dict[str, str] | None = None
-    length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     conversation_summary: str | None = None
     admin_password: str | None = None
@@ -93,6 +89,34 @@ class PromptPresetSaveRequest(BaseModel):
     system_prompt: str
     user_prompt_template: str
     length_prompts: dict[str, str] = Field(default_factory=dict)
+    owner_id: str | None = None
+    admin_password: str | None = None
+
+
+class OptionDef(BaseModel):
+    name: str
+    label: str
+    text: str = ""
+
+
+class Placeholder(BaseModel):
+    name: str
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
+    owner_id: str | None = None
+    updated_at: str | None = None
+
+
+class PlaceholderSaveRequest(BaseModel):
+    name: str
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
     owner_id: str | None = None
     admin_password: str | None = None
 

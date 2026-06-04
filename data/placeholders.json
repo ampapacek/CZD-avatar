@@ -1,0 +1,40 @@
+{
+  "placeholders": [
+    {
+      "name": "length",
+      "label": "Délka",
+      "kind": "select",
+      "help": null,
+      "default": "medium",
+      "options": [
+        {
+          "name": "short",
+          "label": "Krátká",
+          "text": "Odpověz stručně, přibližně 1-2 odstavce."
+        },
+        {
+          "name": "medium",
+          "label": "Střední",
+          "text": "Odpověz středně dlouze, přibližně 3-5 kratších odstavců nebo několik přehledných bodů."
+        },
+        {
+          "name": "long",
+          "label": "Dlouhá",
+          "text": "Odpověz podrobněji, ale stále přehledně. Uveď hlavní nuance, pokud je podporuje kontext."
+        }
+      ],
+      "owner_id": "",
+      "updated_at": ""
+    },
+    {
+      "name": "custom_instructions",
+      "label": "Vlastní instrukce",
+      "kind": "text",
+      "help": null,
+      "default": "Žádné.",
+      "options": [],
+      "owner_id": "",
+      "updated_at": ""
+    }
+  ]
+}
