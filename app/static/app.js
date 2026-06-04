@@ -35,6 +35,7 @@ const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
+const wpSelect = document.querySelector("#wpSelect");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const newPromptButton = document.querySelector("#newPromptButton");
@@ -122,12 +123,6 @@ const STYLE_LABELS = {
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
-const DEFAULT_PROMPT_PRESET_ID = "builtin-ucitel";
-const BUILTIN_PROMPT_DEFINITIONS = [
-  { id: "builtin-laik", name: "Laik", style: "laik" },
-  { id: "builtin-ucitel", name: "Učitel", style: "ucitel" },
-  { id: "builtin-historik", name: "Historik", style: "historik" },
-];
 const KNOWN_PROMPT_VARIABLES = new Set([
   "question",
   "context",
@@ -159,7 +154,8 @@ let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
-let activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
+let activePromptPresetId = "";
+let activeWpId = "";
 let currentStylePrompts = {};
 let currentLengthPrompts = {};
 let llmModelsUnlocked = false;
@@ -171,6 +167,55 @@ let llmSettingsState = {
 
 function normalizeProviderId(providerId) {
   return String(providerId || "").trim().toLowerCase();
+}
+
+function getWpConfigs() {
+  return Array.isArray(appSettings.wps) ? appSettings.wps : [];
+}
+
+function getWpConfig(wpId) {
+  return getWpConfigs().find((wp) => wp.id === wpId) || null;
+}
+
+function resolveWpId(wpId) {
+  const configs = getWpConfigs();
+  if (configs.some((wp) => wp.id === wpId)) {
+    return wpId;
+  }
+  if (appSettings.default_wp && configs.some((wp) => wp.id === appSettings.default_wp)) {
+    return appSettings.default_wp;
+  }
+  return configs[0]?.id || "";
+}
+
+function wpDefaultCollectionMsearchId(wp) {
+  if (!wp) {
+    return "";
+  }
+  const collections = wp.collections || [];
+  const preferred = collections.find((collection) => collection.id === wp.default_collection_id);
+  return (preferred || collections[0])?.msearch_collection_id || "";
+}
+
+function populateWpSelect() {
+  wpSelect.innerHTML = getWpConfigs()
+    .map((wp) => `<option value="${escapeHtml(wp.id)}">${escapeHtml(wp.label || wp.id)}</option>`)
+    .join("");
+  wpSelect.value = activeWpId;
+}
+
+// Switch the active work package: pick its default collection and prompt, which
+// in turn loads the WP's length definitions and re-renders the WP-filtered
+// prompt options. Pass explicit ids when restoring a saved conversation.
+function selectWp(wpId, { promptId, collectionId } = {}) {
+  activeWpId = resolveWpId(wpId);
+  wpSelect.value = activeWpId;
+  const wp = getWpConfig(activeWpId);
+  populateMsearchCollections(collectionId || wpDefaultCollectionMsearchId(wp));
+  const targetPrompt = promptId && promptPresetExists(promptId)
+    ? promptId
+    : defaultPromptPresetId(activeWpId);
+  applyPromptPresetById(targetPrompt);
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
@@ -211,7 +256,9 @@ async function loadSettings() {
     await verifyUnlockPassword({ silent: true });
   }
   refreshModelOptions(settings);
-  populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
+  activeWpId = resolveWpId(settings.default_wp);
+  populateWpSelect();
+  populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
   msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? "";
@@ -492,6 +539,7 @@ lengthPromptInputs.forEach((input) => {
 });
 systemPrompt.addEventListener("input", updatePromptTemplateWarning);
 userPromptTemplate.addEventListener("input", updatePromptTemplateWarning);
+wpSelect.addEventListener("change", () => selectWp(wpSelect.value));
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
 sharePromptOnServer.addEventListener("change", updatePromptShareNote);
@@ -551,13 +599,13 @@ llmProvider.addEventListener("change", () => {
   const providerId = normalizeProviderId(llmProvider.value);
   loadProviderValues(providerId, { preferStored: true });
   refreshModelOptions(appSettings);
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
   updateRetrievalControls({ resetValues: false });
   persistLlmSettings();
 });
 llmBaseUrl.addEventListener("input", () => {
   persistLlmSettings();
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
 });
 llmApiKey.addEventListener("input", () => {
   persistLlmSettings();
@@ -618,7 +666,7 @@ customProviderName.addEventListener("input", () => {
 customProviderBaseUrl.addEventListener("input", () => {
   persistLlmSettings();
   loadProviderValues(llmProvider.value, { preferStored: true });
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
 });
 saveCustomProviderApiKeyButton.addEventListener("click", () => {
   if (!customProviderApiKey.value.trim()) {
@@ -667,6 +715,7 @@ function buildRequestPayload(overrides = {}) {
     question: question.value,
     style: style.value,
     length: length.value,
+    wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
     custom_instructions: customInstructions.value,
@@ -700,6 +749,7 @@ function buildRetrievePayload(overrides = {}) {
   const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
+    wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
     top_k: Number(topK.value),
@@ -1427,7 +1477,7 @@ function extractPromptVariables(template) {
   return variables;
 }
 
-async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+async function loadPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   localPromptPresets = loadLocalPromptPresets();
   try {
     const response = await fetch("prompt-presets");
@@ -1443,7 +1493,7 @@ async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PR
   applyPromptPresetById(selectedId);
 }
 
-function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   const resolvedId = normalizePromptPresetId(selectedId);
   renderPromptPresetSelect(activePromptPreset, resolvedId);
   renderPromptPresetSelect(promptPreset, resolvedId);
@@ -1453,16 +1503,18 @@ function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT
 }
 
 function renderPromptPresetSelect(selectEl, selectedId) {
+  const wpLocal = localPromptPresets.filter((preset) => presetWpId(preset) === activeWpId);
+  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === activeWpId);
   const builtinOptions = builtInPromptPresets()
     .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
     .join("");
-  const localOptions = localPromptPresets.length
-    ? `<optgroup label="Lokální prompty">${localPromptPresets
+  const localOptions = wpLocal.length
+    ? `<optgroup label="Lokální prompty">${wpLocal
         .map((preset) => `<option value="${escapeHtml(preset.id)}">Local - ${escapeHtml(preset.name)}</option>`)
         .join("")}</optgroup>`
     : "";
-  const serverOptions = promptPresets.length
-    ? `<optgroup label="Sdílené prompty">${promptPresets
+  const serverOptions = wpServer.length
+    ? `<optgroup label="Sdílené prompty">${wpServer
         .map((preset) => {
           const ownedSuffix = isOwnedServerPromptPreset(preset.id) ? " (tvůj)" : "";
           return `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}${ownedSuffix}</option>`;
@@ -1473,19 +1525,23 @@ function renderPromptPresetSelect(selectEl, selectedId) {
   selectEl.value = normalizePromptPresetId(selectedId);
 }
 
+function presetWpId(preset) {
+  return resolveWpId(preset?.wp_id);
+}
+
 function promptPresetExists(presetId) {
   return Boolean(getPromptPresetById(presetId));
 }
 
 function normalizePromptPresetId(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
-    return DEFAULT_PROMPT_PRESET_ID;
+    return defaultPromptPresetId();
   }
-  return promptPresetExists(presetId) ? presetId : DEFAULT_PROMPT_PRESET_ID;
+  return promptPresetExists(presetId) ? presetId : defaultPromptPresetId();
 }
 
 function isBuiltInPromptPreset(presetId) {
-  return String(presetId || "").startsWith(BUILTIN_PROMPT_PREFIX);
+  return allBuiltInPromptPresets().some((preset) => preset.id === presetId);
 }
 
 function isLocalPromptPreset(presetId) {
@@ -1503,29 +1559,41 @@ function isEditablePromptPreset(presetId) {
   return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
 }
 
-function builtInPromptPresets() {
-  const stylePrompts = appSettings.prompt_defaults?.style_prompts || {};
-  return BUILTIN_PROMPT_DEFINITIONS.map((definition) => ({
-    id: definition.id,
-    name: definition.name,
-    style: definition.style,
-    system_prompt: renderBuiltInSystemPrompt(stylePrompts[definition.style] || ""),
-    user_prompt_template: appSettings.prompt_defaults?.user_prompt_template || "",
+// Built-in prompts are shipped per WP by the backend (appSettings.wps). Each
+// carries the WP's length definitions so selecting it loads them.
+function wpBuiltInPromptPresets(wp) {
+  if (!wp) {
+    return [];
+  }
+  return (wp.builtin_prompts || []).map((preset) => ({
+    id: preset.id,
+    name: preset.name,
+    wp_id: wp.id,
+    system_prompt: preset.system_prompt || "",
+    user_prompt_template: preset.user_prompt_template || "",
     style_prompts: {},
-    length_prompts: { ...(appSettings.prompt_defaults?.length_prompts || {}) },
+    length_prompts: { ...(wp.length_prompts || {}), ...(preset.length_prompts || {}) },
   }));
 }
 
-function renderBuiltInSystemPrompt(stylePrompt) {
-  const template = appSettings.prompt_defaults?.system_prompt || "";
-  return template.replaceAll("{style}", stylePrompt);
+function builtInPromptPresets(wpId = activeWpId) {
+  return wpBuiltInPromptPresets(getWpConfig(wpId));
+}
+
+function allBuiltInPromptPresets() {
+  return getWpConfigs().flatMap((wp) => wpBuiltInPromptPresets(wp));
+}
+
+function defaultPromptPresetId(wpId = activeWpId) {
+  const wp = getWpConfig(wpId);
+  return wp?.default_prompt_id || wpBuiltInPromptPresets(wp)[0]?.id || "";
 }
 
 function getPromptPresetById(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
-    return getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+    return getPromptPresetById(defaultPromptPresetId());
   }
-  return builtInPromptPresets().find((preset) => preset.id === presetId)
+  return allBuiltInPromptPresets().find((preset) => preset.id === presetId)
     || localPromptPresets.find((preset) => preset.id === presetId)
     || promptPresets.find((preset) => preset.id === presetId)
     || null;
@@ -1541,7 +1609,7 @@ function applyPromptPresetById(presetId) {
   const preset = getPromptPresetById(resolvedId);
   if (!preset) {
     resetPromptEditorValues();
-    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+    renderPromptPresets(defaultPromptPresetId());
     return;
   }
   if (preset.style) {
@@ -1558,8 +1626,8 @@ function applyPromptPresetById(presetId) {
 function activePromptPresetMetadata() {
   const preset = getPromptPresetById(activePromptPresetId);
   return {
-    id: preset?.id || activePromptPresetId || DEFAULT_PROMPT_PRESET_ID,
-    name: preset?.name || activePromptPresetId || "Učitel",
+    id: preset?.id || activePromptPresetId || defaultPromptPresetId(),
+    name: preset?.name || activePromptPresetId || "Výchozí",
   };
 }
 
@@ -1576,8 +1644,8 @@ function currentPromptDraft({ id = null, name }) {
 }
 
 function activePromptWpId() {
-  const active = getPromptPresetById(activePromptPresetId);
-  return active?.wp_id || appSettings.default_wp || "";
+  // Drafts are saved under the currently selected WP.
+  return resolveWpId(activeWpId);
 }
 
 async function saveCurrentPromptPreset({ mode }) {
@@ -1722,24 +1790,24 @@ function persistLocalPromptPresets() {
 }
 
 function createBlankPromptDraft() {
-  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
+  activePromptPresetId = defaultPromptPresetId();
   systemPrompt.value = "";
   userPromptTemplate.value = "";
   currentStylePrompts = {};
   currentLengthPrompts = {};
   updatePromptDescriptionEditors();
-  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  renderPromptPresets(defaultPromptPresetId());
   systemPrompt.focus();
 }
 
 function resetPromptEditors() {
   resetPromptEditorValues();
-  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  renderPromptPresets(defaultPromptPresetId());
 }
 
 function resetPromptEditorValues() {
-  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
-  const defaultPrompt = getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+  activePromptPresetId = defaultPromptPresetId();
+  const defaultPrompt = getPromptPresetById(defaultPromptPresetId());
   if (defaultPrompt) {
     style.value = defaultPrompt.style || "ucitel";
     systemPrompt.value = defaultPrompt.system_prompt || "";
@@ -1774,49 +1842,26 @@ async function deleteSelectedPromptPreset() {
     throw new Error(data.detail || "Prompt preset delete failed");
   }
   resetPromptEditors();
-  await loadPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  await loadPromptPresets(defaultPromptPresetId());
 }
 
-function populateMsearchCollections(presets, currentCollection) {
-  const fallbackPresets = [
-    {
-      label: "WP1: histoedu v2026-02",
-      collection_id: "64d6f521-5044-4b02-8658-380b639801af",
-    },
-    {
-      label: "WP2: zaplavy v2025-11",
-      collection_id: "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
-    },
-    {
-      label: "WP3: law v2026-02",
-      collection_id: "d4be44d5-689c-4bbe-a372-b959929cd511",
-    },
-    {
-      label: "WP4: v2026-03",
-      collection_id: "3429956e-8a21-4502-ad21-a41fddc5ef99",
-    },
-  ];
+// Collection options are scoped to the active WP. Each WP currently has a
+// single collection, but the data model already supports several per WP.
+function populateMsearchCollections(currentCollection) {
+  const collections = getWpConfig(activeWpId)?.collections || [];
   const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
-  const usablePresets = (presets.length ? presets : fallbackPresets).map((preset) => ({
-    ...preset,
-    disabled:
-      (preset.collection_id || "") === WP2_MSEARCH_COLLECTION ||
-      String(preset.label || preset.collection_name || "").startsWith("WP2")
-        ? !aiUfalSelected
-        : false,
-  }));
-  msearchCollection.innerHTML = usablePresets
-    .map((preset) => {
-      const value = preset.collection_id || "";
-      const label = preset.label || preset.collection_name || value;
-      const disabled = preset.disabled ? " disabled" : "";
+  msearchCollection.innerHTML = collections
+    .map((collection) => {
+      const value = collection.msearch_collection_id || "";
+      const label = collection.label || value;
+      const disabled = value === WP2_MSEARCH_COLLECTION && !aiUfalSelected ? " disabled" : "";
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
   const options = Array.from(msearchCollection.options);
   const enabledCurrent = options.find((option) => option.value === currentCollection && !option.disabled);
   const firstEnabled = options.find((option) => !option.disabled);
-  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || "";
+  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || options[0]?.value || "";
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
@@ -1826,12 +1871,7 @@ function updateRetrievalControls({ resetValues = false } = {}) {
       topK.value = appSettings.msearch_defaults?.max_results ?? 10;
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
       msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
-      if (appSettings.msearch_defaults?.collection) {
-        const targetOption = Array.from(msearchCollection.options).find((option) => option.value === appSettings.msearch_defaults.collection);
-        if (targetOption && !targetOption.disabled) {
-          msearchCollection.value = targetOption.value;
-        }
-      }
+      populateMsearchCollections(msearchCollection.value || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
     } else {
       topK.value = appSettings.top_k ?? 10;
       denseWeight.value = appSettings.retrieval_defaults?.dense_weight ?? 0.7;
@@ -2900,6 +2940,7 @@ function renderHistoryDetail(entry) {
     <section class="history-block">
       <h4>Použitá nastavení</h4>
       <div class="settings-grid">
+        ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
         ${renderSetting("Profil", entry.settings?.style)}
         ${renderSetting("Délka", entry.settings?.length)}
@@ -2973,13 +3014,23 @@ function promptPresetLabelFromSettings(settings) {
   return settings?.prompt_preset_name || preset?.name || presetId;
 }
 
+function wpLabelFromSettings(settings) {
+  const wp = getWpConfig(resolveWpId(settings?.wp_id));
+  return wp?.label || settings?.wp_id || "";
+}
+
 function promptPresetIdFromSettings(settings) {
   const savedId = settings?.prompt_preset_id;
   if (promptPresetExists(savedId)) {
     return normalizePromptPresetId(savedId);
   }
-  const stylePromptId = `${BUILTIN_PROMPT_PREFIX}${settings?.style || ""}`;
-  return promptPresetExists(stylePromptId) ? stylePromptId : DEFAULT_PROMPT_PRESET_ID;
+  // Legacy history used builtin-<style> ids; map them to the matching WP1 built-in.
+  const style = String(settings?.style || savedId || "").replace(BUILTIN_PROMPT_PREFIX, "");
+  const legacyId = `wp1-${style}`;
+  if (promptPresetExists(legacyId)) {
+    return legacyId;
+  }
+  return defaultPromptPresetId(resolveWpId(settings?.wp_id));
 }
 
 function applyHistoryEntryToForm(entry) {
@@ -2988,11 +3039,14 @@ function applyHistoryEntryToForm(entry) {
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
   }
+  activeWpId = resolveWpId(entry.settings?.wp_id);
+  wpSelect.value = activeWpId;
+  populateMsearchCollections(entry.settings?.msearch_collection || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   const savedPromptId = promptPresetIdFromSettings(entry.settings || {});
   if (promptPresetExists(savedPromptId)) {
     applyPromptPresetById(savedPromptId);
   } else {
-    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+    renderPromptPresets(defaultPromptPresetId());
   }
   style.value = entry.settings?.style || style.value;
   length.value = entry.settings?.length || length.value;

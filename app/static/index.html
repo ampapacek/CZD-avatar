@@ -88,11 +88,17 @@
           </div>
 
           <div class="controls">
+            <label class="field wp-control">
+              <span>WP</span>
+              <select id="wpSelect"></select>
+            </label>
+            <label class="field msearch-control collection-control">
+              <span>Kolekce</span>
+              <select id="msearchCollection"></select>
+            </label>
             <label class="field prompt-control">
               <span>Prompt</span>
-              <select id="activePromptPreset">
-                <option value="builtin-ucitel">Učitel</option>
-              </select>
+              <select id="activePromptPreset"></select>
             </label>
             <input id="style" type="hidden" value="ucitel" />
             <label class="field">
@@ -135,10 +141,6 @@
                   <option value="msearch">mSearch</option>
                   <option value="local">Lokální databáze</option>
                 </select>
-              </label>
-              <label class="field msearch-control">
-                <span>Kolekce</span>
-                <select id="msearchCollection"></select>
               </label>
               <label class="field msearch-control">
                 <span>Režim mSearch</span>
@@ -522,6 +524,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=local-prompts-1"></script>
+  <script src="static/app.js?v=wp-selector-1"></script>
 </body>
 </html>

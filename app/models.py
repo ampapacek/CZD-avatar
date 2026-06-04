@@ -22,6 +22,7 @@ class IngestResponse(BaseModel):
 
 class RetrieveRequest(BaseModel):
     question: str
+    wp_id: str | None = None
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     msearch_collection: str | None = None
@@ -38,6 +39,7 @@ class RetrieveRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+    wp_id: str | None = None
     style: AnswerStyle | None = None
     length: AnswerLength | None = None
     custom_instructions: str | None = None
