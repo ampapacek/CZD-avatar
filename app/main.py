@@ -49,6 +49,7 @@ from app.rag.prompts import (
     default_user_prompt_template,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
+from app.rag.wp_config import default_wp_id, wp_public_payload
 
 
 log_path = configure_logging("api")
@@ -252,6 +253,8 @@ def get_public_settings() -> dict[str, object]:
             "style_prompts": STYLE_PROMPTS,
             "length_prompts": LENGTH_PROMPTS,
         },
+        "wps": wp_public_payload(),
+        "default_wp": default_wp_id(),
     }
 
 
@@ -321,7 +324,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
         name=name,
         system_prompt=request.system_prompt,
         user_prompt_template=request.user_prompt_template,
-        style_prompts=request.style_prompts,
+        wp_id=request.wp_id,
         length_prompts=request.length_prompts,
         preset_id=request.id,
         owner_id=request.owner_id,

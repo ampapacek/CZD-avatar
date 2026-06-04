@@ -1571,12 +1571,17 @@ function currentPromptDraft({ id = null, name }) {
   return {
     id,
     name: name.trim(),
+    wp_id: activePromptWpId(),
     style: style.value,
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
-    style_prompts: currentStylePrompts,
     length_prompts: currentLengthPrompts,
   };
+}
+
+function activePromptWpId() {
+  const active = getPromptPresetById(activePromptPresetId);
+  return active?.wp_id || appSettings.default_wp || "";
 }
 
 async function saveCurrentPromptPreset({ mode }) {
@@ -1691,10 +1696,10 @@ function normalizeLocalPromptPreset(item) {
   return {
     id,
     name,
+    wp_id: String(item.wp_id || appSettings.default_wp || ""),
     style: String(item.style || ""),
     system_prompt: String(item.system_prompt || ""),
     user_prompt_template: String(item.user_prompt_template || ""),
-    style_prompts: stringMap(item.style_prompts),
     length_prompts: stringMap(item.length_prompts),
   };
 }

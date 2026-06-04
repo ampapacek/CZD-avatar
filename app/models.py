@@ -76,9 +76,9 @@ class ChatRequest(BaseModel):
 class PromptPreset(BaseModel):
     id: str
     name: str
+    wp_id: str
     system_prompt: str
     user_prompt_template: str
-    style_prompts: dict[str, str] = Field(default_factory=dict)
     length_prompts: dict[str, str] = Field(default_factory=dict)
     owner_id: str | None = None
     updated_at: str | None = None
@@ -87,9 +87,9 @@ class PromptPreset(BaseModel):
 class PromptPresetSaveRequest(BaseModel):
     id: str | None = None
     name: str
+    wp_id: str | None = None
     system_prompt: str
     user_prompt_template: str
-    style_prompts: dict[str, str] = Field(default_factory=dict)
     length_prompts: dict[str, str] = Field(default_factory=dict)
     owner_id: str | None = None
     admin_password: str | None = None

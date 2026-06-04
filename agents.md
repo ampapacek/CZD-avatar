@@ -33,8 +33,9 @@ This file is a practical handoff for future agents working in this repo.
 - `app/config.py` - settings loading
 - `app/logging_config.py` - timestamped logging into `logs/`
 - `app/rag/` - ingestion, chunking, retrieval, prompting, vector store, pipeline
+- `app/rag/wp_config.py` - single source of WP (work package) configuration: labels, built-in prompts, collections, defaults, and length definitions
 - `app/static/` - frontend HTML/CSS/JS
-- `data/prompt_presets.json` - saved prompt presets for the UI if present
+- `data/prompt_presets.json` - saved shared prompt presets for the UI if present
 - `scripts/ingest.py` - CLI ingestion
 - `scripts/ask.py` - CLI ask
 - `scripts/batch_answers.py` - batch question/answer runner
@@ -162,6 +163,30 @@ uvicorn app.main:app --reload
   - respond briefly and naturally
   - mention it is primarily a historical assistant
   - do not force citations if they are not relevant
+
+## WP configuration and prompt preset schema
+
+- WP (work package) configuration is centralized in `app/rag/wp_config.py` as typed dataclasses, not env or JSON. It is the single source for WP labels, descriptions, built-in (read-only) prompts, the default prompt, collections, the default collection, length definitions, and optional placeholder definitions.
+- Defined WPs: `WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`. WP1 carries the existing history prompts (`Učitel`/`Historik`/`Laik`); WP2–WP4 ship neutral starter prompts to refine later.
+- WP collections map by number to existing mSearch collections: WP1→histoedu, WP2→zaplavy, WP3→law, WP4→v2026-03.
+- The config is exposed to the frontend via `GET /settings` under `wps` (full WP list) and `default_wp`. Built-in WP prompts come from this config and appear even when `data/prompt_presets.json` is empty.
+- Finalized prompt preset JSON shape (one record per shared preset in `data/prompt_presets.json`, and the same shape for browser-local presets in `localStorage`):
+
+```json
+{
+  "id": "string",
+  "name": "string",
+  "wp_id": "WP1-historie",
+  "system_prompt": "string",
+  "user_prompt_template": "string",
+  "length_prompts": {"short": "...", "medium": "...", "long": "..."},
+  "owner_id": "string",
+  "updated_at": "ISO-8601"
+}
+```
+
+- Every shared and local preset stores `wp_id`. Unknown or missing `wp_id` falls back to the default WP on load/save.
+- The legacy `style_prompts` field was removed from the preset schema; the loader stays tolerant of older records (and missing/empty/malformed files) by normalizing them to the new shape. The orthogonal length placeholder `{length}` is the only style/length variable kept inside a preset's `system_prompt`.
 
 ## Special data handling: WP1 subset
 

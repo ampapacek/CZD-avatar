@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +89,37 @@ class PromptPresetEndpointTests(unittest.TestCase):
             params={"owner_id": "owner-b", "admin_password": "s3cret"},
         )
         self.assertEqual(deleted.status_code, 204)
+
+    def test_saved_server_prompt_writes_only_intended_fields(self) -> None:
+        response = self.client.post(
+            "/prompt-presets",
+            json={
+                "name": "Scoped",
+                "wp_id": "WP2-média",
+                "system_prompt": "sys",
+                "user_prompt_template": "{question}",
+                "owner_id": "owner-a",
+                # Legacy field a stale client might still send; must not be persisted.
+                "style_prompts": {"ucitel": "x"},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["wp_id"], "WP2-média")
+
+        written = json.loads(self.path.read_text(encoding="utf-8"))["presets"][0]
+        self.assertEqual(
+            set(written),
+            {
+                "id",
+                "name",
+                "wp_id",
+                "system_prompt",
+                "user_prompt_template",
+                "length_prompts",
+                "owner_id",
+                "updated_at",
+            },
+        )
 
     def test_ownerless_preset_requires_password(self) -> None:
         created = self._create("Legacy", owner_id="")

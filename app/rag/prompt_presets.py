@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.rag.wp_config import resolve_wp_id
+
 
 def load_prompt_presets(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -25,7 +27,7 @@ def save_prompt_preset(
     name: str,
     system_prompt: str,
     user_prompt_template: str,
-    style_prompts: dict[str, str] | None = None,
+    wp_id: str | None = None,
     length_prompts: dict[str, str] | None = None,
     preset_id: str | None = None,
     owner_id: str | None = None,
@@ -42,12 +44,13 @@ def save_prompt_preset(
     # Keep ownership stable across updates; an authorized edit of an ownerless
     # preset lets the editing browser claim it.
     resolved_owner = (existing.get("owner_id") if existing else "") or (owner_id or "").strip()
+    resolved_wp_id = resolve_wp_id(wp_id if wp_id is not None else (existing.get("wp_id") if existing else None))
     record = {
         "id": resolved_id,
         "name": name.strip(),
+        "wp_id": resolved_wp_id,
         "system_prompt": system_prompt,
         "user_prompt_template": user_prompt_template,
-        "style_prompts": style_prompts or {},
         "length_prompts": length_prompts or {},
         "owner_id": resolved_owner,
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -77,9 +80,9 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, str]:
     return {
         "id": preset_id,
         "name": name,
+        "wp_id": resolve_wp_id(item.get("wp_id")),
         "system_prompt": str(item.get("system_prompt") or ""),
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
-        "style_prompts": _string_dict(item.get("style_prompts")),
         "length_prompts": _string_dict(item.get("length_prompts")),
         "owner_id": str(item.get("owner_id") or ""),
         "updated_at": str(item.get("updated_at") or ""),
