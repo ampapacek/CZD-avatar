@@ -14,6 +14,7 @@ logs/
 answers_avatar*.txt
 notes.md
 prompt_preset_refactor_plan.md
+task14_wp_lengths_placeholders_notes.md
 ignored
 
 data/qdrant/
