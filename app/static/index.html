@@ -91,17 +91,10 @@
             <label class="field prompt-control">
               <span>Prompt</span>
               <select id="activePromptPreset">
-                <option value="default">Výchozí prompt</option>
+                <option value="builtin-ucitel">Učitel</option>
               </select>
             </label>
-            <label class="field">
-              <span>Profil</span>
-              <select id="style">
-                <option value="laik">laik</option>
-                <option value="ucitel" selected>učitel</option>
-                <option value="historik">historik</option>
-              </select>
-            </label>
+            <input id="style" type="hidden" value="ucitel" />
             <label class="field">
               <span>Délka</span>
               <select id="length">
@@ -422,10 +415,10 @@
               </div>
             </div>
             <label class="field prompt-editor">
-              <span>Systémový prompt ({style}, {length})</span>
+              <span>Systémový prompt ({length})</span>
               <textarea id="systemPrompt" rows="12"></textarea>
             </label>
-            <label class="field prompt-editor">
+            <label class="field prompt-editor" hidden>
               <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
               <textarea id="stylePromptDescription" rows="4"></textarea>
             </label>

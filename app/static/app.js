@@ -115,7 +115,14 @@ const STYLE_LABELS = {
   ucitel: "učitel",
   historik: "historik",
 };
-const DEFAULT_PROMPT_PRESET_ID = "default";
+const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
+const BUILTIN_PROMPT_PREFIX = "builtin-";
+const DEFAULT_PROMPT_PRESET_ID = "builtin-ucitel";
+const BUILTIN_PROMPT_DEFINITIONS = [
+  { id: "builtin-laik", name: "Laik", style: "laik" },
+  { id: "builtin-ucitel", name: "Učitel", style: "ucitel" },
+  { id: "builtin-historik", name: "Historik", style: "historik" },
+];
 const LENGTH_LABELS = {
   short: "krátká",
   medium: "střední",
@@ -634,7 +641,6 @@ function buildRequestPayload(overrides = {}) {
     custom_instructions: customInstructions.value,
     system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
     user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
-    style_prompts: promptMapOverride(currentStylePrompts, appSettings.prompt_defaults?.style_prompts),
     length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
     ...currentTokenBudgetSettings(),
@@ -1338,7 +1344,7 @@ function refreshModelOptions(settings = appSettings) {
 }
 
 function updatePromptDescriptionEditors() {
-  stylePromptDescriptionLabel.textContent = `Popis profilu ${STYLE_LABELS[style.value] || style.value} místo {style}`;
+  stylePromptDescriptionLabel.textContent = `Popis kompatibilního profilu ${STYLE_LABELS[style.value] || style.value} místo {style}`;
   lengthPromptDescriptionLabel.textContent = `Popis délky ${LENGTH_LABELS[length.value] || length.value} místo {length}`;
   stylePromptDescription.value = currentStylePrompts[style.value] || "";
   lengthPromptDescription.value = currentLengthPrompts[length.value] || "";
@@ -1356,29 +1362,73 @@ async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PR
     promptPresets = [];
     console.warn("Could not load prompt presets", error);
   }
-  renderPromptPresets(selectedId);
+  applyPromptPresetById(selectedId);
 }
 
 function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
-  const resolvedId = promptPresetExists(selectedId) ? selectedId : DEFAULT_PROMPT_PRESET_ID;
+  const resolvedId = normalizePromptPresetId(selectedId);
   renderPromptPresetSelect(activePromptPreset, resolvedId);
   renderPromptPresetSelect(promptPreset, resolvedId);
   activePromptPresetId = resolvedId;
-  deletePromptButton.disabled = resolvedId === DEFAULT_PROMPT_PRESET_ID;
-  updatePromptButton.disabled = resolvedId === DEFAULT_PROMPT_PRESET_ID;
+  deletePromptButton.disabled = !isServerPromptPreset(resolvedId);
+  updatePromptButton.disabled = !isServerPromptPreset(resolvedId);
 }
 
 function renderPromptPresetSelect(selectEl, selectedId) {
-  selectEl.innerHTML =
-    `<option value="${DEFAULT_PROMPT_PRESET_ID}">Výchozí prompt</option>` +
-    promptPresets
-      .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
-      .join("");
-  selectEl.value = promptPresetExists(selectedId) ? selectedId : DEFAULT_PROMPT_PRESET_ID;
+  const builtinOptions = builtInPromptPresets()
+    .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+    .join("");
+  const serverOptions = promptPresets.length
+    ? `<optgroup label="Uložené prompty">${promptPresets
+        .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+        .join("")}</optgroup>`
+    : "";
+  selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${serverOptions}`;
+  selectEl.value = normalizePromptPresetId(selectedId);
 }
 
 function promptPresetExists(presetId) {
-  return presetId === DEFAULT_PROMPT_PRESET_ID || promptPresets.some((preset) => preset.id === presetId);
+  return Boolean(getPromptPresetById(presetId));
+}
+
+function normalizePromptPresetId(presetId) {
+  if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
+    return DEFAULT_PROMPT_PRESET_ID;
+  }
+  return promptPresetExists(presetId) ? presetId : DEFAULT_PROMPT_PRESET_ID;
+}
+
+function isBuiltInPromptPreset(presetId) {
+  return String(presetId || "").startsWith(BUILTIN_PROMPT_PREFIX);
+}
+
+function isServerPromptPreset(presetId) {
+  return !isBuiltInPromptPreset(presetId) && promptPresets.some((preset) => preset.id === presetId);
+}
+
+function builtInPromptPresets() {
+  const stylePrompts = appSettings.prompt_defaults?.style_prompts || {};
+  return BUILTIN_PROMPT_DEFINITIONS.map((definition) => ({
+    id: definition.id,
+    name: definition.name,
+    style: definition.style,
+    system_prompt: renderBuiltInSystemPrompt(stylePrompts[definition.style] || ""),
+    user_prompt_template: appSettings.prompt_defaults?.user_prompt_template || "",
+    style_prompts: {},
+    length_prompts: { ...(appSettings.prompt_defaults?.length_prompts || {}) },
+  }));
+}
+
+function renderBuiltInSystemPrompt(stylePrompt) {
+  const template = appSettings.prompt_defaults?.system_prompt || "";
+  return template.replaceAll("{style}", stylePrompt);
+}
+
+function getPromptPresetById(presetId) {
+  if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
+    return getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+  }
+  return builtInPromptPresets().find((preset) => preset.id === presetId) || promptPresets.find((preset) => preset.id === presetId) || null;
 }
 
 function applySelectedPromptPreset() {
@@ -1386,41 +1436,38 @@ function applySelectedPromptPreset() {
 }
 
 function applyPromptPresetById(presetId) {
-  const resolvedId = promptPresetExists(presetId) ? presetId : DEFAULT_PROMPT_PRESET_ID;
+  const resolvedId = normalizePromptPresetId(presetId);
   activePromptPresetId = resolvedId;
-  if (resolvedId === DEFAULT_PROMPT_PRESET_ID) {
-    resetPromptEditorValues();
-    renderPromptPresets(resolvedId);
-    return;
-  }
-  const preset = promptPresets.find((item) => item.id === resolvedId);
+  const preset = getPromptPresetById(resolvedId);
   if (!preset) {
     resetPromptEditorValues();
     renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
     return;
   }
+  if (preset.style) {
+    style.value = preset.style;
+  }
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
-  currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}), ...(preset.style_prompts || {}) };
+  currentStylePrompts = { ...(preset.style_prompts || {}) };
   currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(preset.length_prompts || {}) };
   updatePromptDescriptionEditors();
   renderPromptPresets(resolvedId);
 }
 
 function activePromptPresetMetadata() {
-  if (activePromptPresetId === DEFAULT_PROMPT_PRESET_ID) {
-    return { id: DEFAULT_PROMPT_PRESET_ID, name: "Výchozí prompt" };
-  }
-  const preset = promptPresets.find((item) => item.id === activePromptPresetId);
+  const preset = getPromptPresetById(activePromptPresetId);
   return {
     id: preset?.id || activePromptPresetId || DEFAULT_PROMPT_PRESET_ID,
-    name: preset?.name || activePromptPresetId || "Výchozí prompt",
+    name: preset?.name || activePromptPresetId || "Učitel",
   };
 }
 
 async function saveCurrentPromptPreset({ mode }) {
   const isUpdate = mode === "update";
-  const currentPreset = isUpdate ? promptPresets.find((item) => item.id === promptPreset.value) : null;
+  const currentPreset = isUpdate && isServerPromptPreset(promptPreset.value)
+    ? promptPresets.find((item) => item.id === promptPreset.value)
+    : null;
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber uložený prompt, který chceš aktualizovat.");
   }
@@ -1467,15 +1514,19 @@ function resetPromptEditors() {
 
 function resetPromptEditorValues() {
   activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
-  systemPrompt.value = appSettings.prompt_defaults?.system_prompt || "";
-  userPromptTemplate.value = appSettings.prompt_defaults?.user_prompt_template || "";
-  currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}) };
-  currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}) };
-  updatePromptDescriptionEditors();
+  const defaultPrompt = getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+  if (defaultPrompt) {
+    style.value = defaultPrompt.style || "ucitel";
+    systemPrompt.value = defaultPrompt.system_prompt || "";
+    userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
+    currentStylePrompts = { ...(defaultPrompt.style_prompts || {}) };
+    currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(defaultPrompt.length_prompts || {}) };
+    updatePromptDescriptionEditors();
+  }
 }
 
 async function deleteSelectedPromptPreset() {
-  if (promptPreset.value === "default") {
+  if (!isServerPromptPreset(promptPreset.value)) {
     return;
   }
   const response = await fetch(`prompt-presets/${encodeURIComponent(promptPreset.value)}`, {
@@ -2680,12 +2731,18 @@ function renderSetting(label, value) {
 }
 
 function promptPresetLabelFromSettings(settings) {
-  const presetId = settings?.prompt_preset_id || DEFAULT_PROMPT_PRESET_ID;
-  if (presetId === DEFAULT_PROMPT_PRESET_ID) {
-    return settings?.prompt_preset_name || "Výchozí prompt";
-  }
-  const preset = promptPresets.find((item) => item.id === presetId);
+  const presetId = promptPresetIdFromSettings(settings);
+  const preset = getPromptPresetById(presetId);
   return settings?.prompt_preset_name || preset?.name || presetId;
+}
+
+function promptPresetIdFromSettings(settings) {
+  const savedId = settings?.prompt_preset_id;
+  if (promptPresetExists(savedId)) {
+    return normalizePromptPresetId(savedId);
+  }
+  const stylePromptId = `${BUILTIN_PROMPT_PREFIX}${settings?.style || ""}`;
+  return promptPresetExists(stylePromptId) ? stylePromptId : DEFAULT_PROMPT_PRESET_ID;
 }
 
 function applyHistoryEntryToForm(entry) {
@@ -2694,7 +2751,7 @@ function applyHistoryEntryToForm(entry) {
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
   }
-  const savedPromptId = entry.settings?.prompt_preset_id || DEFAULT_PROMPT_PRESET_ID;
+  const savedPromptId = promptPresetIdFromSettings(entry.settings || {});
   if (promptPresetExists(savedPromptId)) {
     applyPromptPresetById(savedPromptId);
   } else {
