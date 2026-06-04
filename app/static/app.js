@@ -35,6 +35,7 @@ const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
+const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const savePromptButton = document.querySelector("#savePromptButton");
 const resetPromptButton = document.querySelector("#resetPromptButton");
@@ -113,6 +114,7 @@ const STYLE_LABELS = {
   ucitel: "učitel",
   historik: "historik",
 };
+const DEFAULT_PROMPT_PRESET_ID = "default";
 const LENGTH_LABELS = {
   short: "krátká",
   medium: "střední",
@@ -133,6 +135,7 @@ let currentTokenBudget = null;
 let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
+let activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
 let currentStylePrompts = {};
 let currentLengthPrompts = {};
 let llmModelsUnlocked = false;
@@ -460,7 +463,8 @@ stylePromptDescription.addEventListener("input", () => {
 lengthPromptDescription.addEventListener("input", () => {
   currentLengthPrompts[length.value] = lengthPromptDescription.value;
 });
-  promptPreset.addEventListener("change", applySelectedPromptPreset);
+activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
+promptPreset.addEventListener("change", applySelectedPromptPreset);
 savePromptButton.addEventListener("click", async () => {
   savePromptButton.disabled = true;
   try {
@@ -605,10 +609,13 @@ document.querySelectorAll("[data-toggle-secret]").forEach((button) => {
 });
 
 function buildRequestPayload(overrides = {}) {
+  const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
     style: style.value,
     length: length.value,
+    prompt_preset_id: activePrompt.id,
+    prompt_preset_name: activePrompt.name,
     custom_instructions: customInstructions.value,
     system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
     user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
@@ -638,8 +645,11 @@ function buildRequestPayload(overrides = {}) {
 }
 
 function buildRetrievePayload(overrides = {}) {
+  const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
+    prompt_preset_id: activePrompt.id,
+    prompt_preset_name: activePrompt.name,
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -1319,7 +1329,7 @@ function updatePromptDescriptionEditors() {
   lengthPromptDescription.value = currentLengthPrompts[length.value] || "";
 }
 
-async function loadPromptPresets(selectedId = promptPreset.value || "default") {
+async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
   try {
     const response = await fetch("prompt-presets");
     const data = await response.json();
@@ -1334,27 +1344,43 @@ async function loadPromptPresets(selectedId = promptPreset.value || "default") {
   renderPromptPresets(selectedId);
 }
 
-function renderPromptPresets(selectedId = promptPreset.value || "default") {
-  promptPreset.innerHTML =
-    `<option value="default">Výchozí prompt</option>` +
+function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+  const resolvedId = promptPresetExists(selectedId) ? selectedId : DEFAULT_PROMPT_PRESET_ID;
+  renderPromptPresetSelect(activePromptPreset, resolvedId);
+  renderPromptPresetSelect(promptPreset, resolvedId);
+  activePromptPresetId = resolvedId;
+  deletePromptButton.disabled = resolvedId === DEFAULT_PROMPT_PRESET_ID;
+}
+
+function renderPromptPresetSelect(selectEl, selectedId) {
+  selectEl.innerHTML =
+    `<option value="${DEFAULT_PROMPT_PRESET_ID}">Výchozí prompt</option>` +
     promptPresets
       .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
       .join("");
-  promptPreset.value = Array.from(promptPreset.options).some((option) => option.value === selectedId)
-    ? selectedId
-    : "default";
-  deletePromptButton.disabled = promptPreset.value === "default";
+  selectEl.value = promptPresetExists(selectedId) ? selectedId : DEFAULT_PROMPT_PRESET_ID;
+}
+
+function promptPresetExists(presetId) {
+  return presetId === DEFAULT_PROMPT_PRESET_ID || promptPresets.some((preset) => preset.id === presetId);
 }
 
 function applySelectedPromptPreset() {
-  if (promptPreset.value === "default") {
-    resetPromptEditors();
+  applyPromptPresetById(promptPreset.value);
+}
+
+function applyPromptPresetById(presetId) {
+  const resolvedId = promptPresetExists(presetId) ? presetId : DEFAULT_PROMPT_PRESET_ID;
+  activePromptPresetId = resolvedId;
+  if (resolvedId === DEFAULT_PROMPT_PRESET_ID) {
+    resetPromptEditorValues();
+    renderPromptPresets(resolvedId);
     return;
   }
-  const preset = promptPresets.find((item) => item.id === promptPreset.value);
+  const preset = promptPresets.find((item) => item.id === resolvedId);
   if (!preset) {
-    renderPromptPresets("default");
-    resetPromptEditors();
+    resetPromptEditorValues();
+    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
     return;
   }
   systemPrompt.value = preset.system_prompt || "";
@@ -1362,7 +1388,18 @@ function applySelectedPromptPreset() {
   currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}), ...(preset.style_prompts || {}) };
   currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(preset.length_prompts || {}) };
   updatePromptDescriptionEditors();
-  deletePromptButton.disabled = false;
+  renderPromptPresets(resolvedId);
+}
+
+function activePromptPresetMetadata() {
+  if (activePromptPresetId === DEFAULT_PROMPT_PRESET_ID) {
+    return { id: DEFAULT_PROMPT_PRESET_ID, name: "Výchozí prompt" };
+  }
+  const preset = promptPresets.find((item) => item.id === activePromptPresetId);
+  return {
+    id: preset?.id || activePromptPresetId || DEFAULT_PROMPT_PRESET_ID,
+    name: preset?.name || activePromptPresetId || "Výchozí prompt",
+  };
 }
 
 async function saveCurrentPromptPreset() {
@@ -1393,12 +1430,17 @@ async function saveCurrentPromptPreset() {
 }
 
 function resetPromptEditors() {
+  resetPromptEditorValues();
+  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+}
+
+function resetPromptEditorValues() {
+  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
   systemPrompt.value = appSettings.prompt_defaults?.system_prompt || "";
   userPromptTemplate.value = appSettings.prompt_defaults?.user_prompt_template || "";
   currentStylePrompts = { ...(appSettings.prompt_defaults?.style_prompts || {}) };
   currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}) };
   updatePromptDescriptionEditors();
-  renderPromptPresets("default");
 }
 
 async function deleteSelectedPromptPreset() {
@@ -1413,7 +1455,7 @@ async function deleteSelectedPromptPreset() {
     throw new Error(data.detail || "Prompt preset delete failed");
   }
   resetPromptEditors();
-  await loadPromptPresets("default");
+  await loadPromptPresets(DEFAULT_PROMPT_PRESET_ID);
 }
 
 function populateMsearchCollections(presets, currentCollection) {
@@ -2229,6 +2271,7 @@ async function submitConversationTurn() {
 	      content: message.content,
     })),
   });
+  const sanitizedPayload = sanitizeHistorySettings(payload);
 
   try {
     await chatRequest(payload, {
@@ -2247,6 +2290,7 @@ async function submitConversationTurn() {
             role: "assistant",
             question: prompt,
             content: assistantText,
+            settings: sanitizedPayload,
             sources: latestSources,
 	            retrieved_chunks: latestChunks,
 	            omitted_chunks: [],
@@ -2283,6 +2327,7 @@ async function submitConversationTurn() {
             role: "assistant",
             question: prompt,
             content: assistantText,
+            settings: sanitizedPayload,
             sources: latestSources,
 	            retrieved_chunks: latestChunks,
 	            omitted_chunks: [],
@@ -2305,6 +2350,7 @@ async function submitConversationTurn() {
           role: "assistant",
           question: prompt,
           content: data.answer || assistantText,
+          settings: sanitizedPayload,
 	          sources: data.sources || latestSources,
 	          retrieved_chunks: data.retrieved_chunks || latestChunks,
 	          omitted_chunks: data.omitted_chunks || [],
@@ -2341,6 +2387,7 @@ async function submitConversationTurn() {
           role: "assistant",
           question: prompt,
           content: `Nepodařilo se dokončit odpověď: ${error.message}`,
+          settings: sanitizedPayload,
           sources: [],
           retrieved_chunks: [],
           model_used: payload.model,
@@ -2534,6 +2581,7 @@ function renderHistoryDetail(entry) {
     <section class="history-block">
       <h4>Použitá nastavení</h4>
       <div class="settings-grid">
+        ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
         ${renderSetting("Profil", entry.settings?.style)}
         ${renderSetting("Délka", entry.settings?.length)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
@@ -2600,11 +2648,26 @@ function renderSetting(label, value) {
   `;
 }
 
+function promptPresetLabelFromSettings(settings) {
+  const presetId = settings?.prompt_preset_id || DEFAULT_PROMPT_PRESET_ID;
+  if (presetId === DEFAULT_PROMPT_PRESET_ID) {
+    return settings?.prompt_preset_name || "Výchozí prompt";
+  }
+  const preset = promptPresets.find((item) => item.id === presetId);
+  return settings?.prompt_preset_name || preset?.name || presetId;
+}
+
 function applyHistoryEntryToForm(entry) {
   question.value = entry.question || "";
   const providerValue = normalizeProviderId(entry.settings?.llm_provider || llmProvider.value || "");
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
+  }
+  const savedPromptId = entry.settings?.prompt_preset_id || DEFAULT_PROMPT_PRESET_ID;
+  if (promptPresetExists(savedPromptId)) {
+    applyPromptPresetById(savedPromptId);
+  } else {
+    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
   }
   style.value = entry.settings?.style || style.value;
   length.value = entry.settings?.length || length.value;
@@ -2620,7 +2683,6 @@ function applyHistoryEntryToForm(entry) {
     ...(entry.settings?.length_prompts || {}),
   };
   updatePromptDescriptionEditors();
-  renderPromptPresets("default");
   refreshModelOptions(appSettings);
   const modelValue = entry.settings?.model || "";
   const unlocked = customModelAllowed();

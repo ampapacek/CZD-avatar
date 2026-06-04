@@ -53,6 +53,8 @@ Expected commit:
 
 ## Task 2: Add Prompt Preset Selection To The Main Page
 
+Status: Done.
+
 Scope:
 
 - Add a `Prompt` dropdown to the main chat controls.
