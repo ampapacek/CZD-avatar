@@ -403,6 +403,54 @@ select:focus {
   display: none;
 }
 
+.placeholder-defs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.placeholder-def-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.placeholder-def-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.placeholder-defs-inline {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.placeholder-def-options {
+  margin-top: 8px;
+}
+
+.placeholder-def-option-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr auto;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.placeholder-def-dialog .settings-body {
+  max-width: 640px;
+}
+
 .advanced {
   border: 1px solid var(--line);
   border-radius: 8px;

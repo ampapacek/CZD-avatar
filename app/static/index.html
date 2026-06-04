@@ -389,6 +389,18 @@
             <p class="field-note">Vlastní poskytovatel se objeví v rozbalovacím seznamu `Poskytovatel` na hlavní stránce. U něj je volba `Jiný model` dostupná vždy.</p>
           </section>
 
+          <section class="settings-section placeholder-defs-section">
+            <h3>Proměnné promptu</h3>
+            <p class="field-note">
+              Globální proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>.
+              Sdílené proměnné se ukládají na serveru pro všechny; lokální jen v tomto prohlížeči.
+              Prompty pak mohou mít vlastní (inline) proměnné, které tyto globální přebijí.
+            </p>
+            <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
+            <div class="prompt-actions">
+              <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
+            </div>
+          </section>
           <section class="settings-section prompt-section-body">
             <h3>Prompty</h3>
             <div class="prompt-controls">
@@ -417,9 +429,76 @@
               <textarea id="userPromptTemplate" rows="8"></textarea>
             </label>
             <p id="promptTemplateWarning" class="prompt-template-warning" hidden></p>
+            <div class="placeholder-defs-inline">
+              <h4>Vlastní proměnné tohoto promptu (inline)</h4>
+              <p class="field-note">
+                Inline proměnné přebijí globální. Uloží se do promptu při „Uložit jako nový“
+                nebo „Aktualizovat vybraný“. Vestavěné prompty nelze upravit přímo — ulož je
+                nejdřív jako nový prompt.
+              </p>
+              <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
+              <div class="prompt-actions">
+                <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat inline proměnnou</button>
+              </div>
+            </div>
           </section>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="placeholderDefDialog" class="settings-dialog placeholder-def-dialog">
+      <form id="placeholderDefForm" method="dialog">
+        <div class="history-dialog-header">
+          <div>
+            <h2 id="placeholderDefTitle">Proměnná promptu</h2>
+            <p id="placeholderDefScopeNote" class="field-note"></p>
+          </div>
+          <button id="closePlaceholderDefButton" class="icon-button help-close" type="button" aria-label="Zavřít" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="settings-body">
+          <label class="field">
+            <span>Název (token <code>{...}</code>)</span>
+            <input id="placeholderDefName" type="text" autocomplete="off" />
+            <small class="field-note">Jen písmena, číslice a podtržítka. Použije se jako <code>{token}</code> v promptu.</small>
+          </label>
+          <label class="field">
+            <span>Popisek</span>
+            <input id="placeholderDefLabel" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Nápověda (volitelné)</span>
+            <input id="placeholderDefHelp" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Typ</span>
+            <select id="placeholderDefKind">
+              <option value="text">Text</option>
+              <option value="select">Výběr (select)</option>
+            </select>
+          </label>
+          <label class="field" id="placeholderDefDefaultTextField">
+            <span>Výchozí text</span>
+            <textarea id="placeholderDefDefaultText" rows="2"></textarea>
+            <small class="field-note">Použije se, když uživatel nechá pole prázdné.</small>
+          </label>
+          <label class="field" id="placeholderDefDefaultSelectField" hidden>
+            <span>Výchozí možnost (název)</span>
+            <input id="placeholderDefDefaultSelect" type="text" autocomplete="off" />
+          </label>
+          <div id="placeholderDefOptionsBlock" class="placeholder-def-options" hidden>
+            <h4>Možnosti</h4>
+            <div id="placeholderDefOptionsList"></div>
+            <button id="addPlaceholderOptionButton" class="secondary" type="button">Přidat možnost</button>
+          </div>
+          <p id="placeholderDefError" class="prompt-template-warning" hidden></p>
+          <div class="prompt-actions" id="placeholderDefActions"></div>
+        </div>
+      </form>
     </dialog>
 
     <dialog id="historyDialog" class="history-dialog">

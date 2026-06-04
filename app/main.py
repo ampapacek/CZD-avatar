@@ -419,11 +419,14 @@ def remove_placeholder(
 def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, str]]:
     """Resolve placeholder defs and selections for a chat request.
 
-    Precedence (most specific wins, wholesale per name): prompt-inline (the
-    selected prompt's ``placeholder_defs``) -> shared server overlay
-    (``placeholders.json``) -> ``DEFAULT_PLACEHOLDERS`` code floor. Browser-local
-    global defs land in 14c via the same ``placeholder_defs`` request field.
-    Selections come from the dedicated request fields the frontend sends.
+    As of 14d, ``placeholder_defs`` carries the FULLY RESOLVED effective def for
+    each placeholder the prompt uses, already collapsed by the frontend in the
+    order inline -> browser-local global -> shared overlay. The server is stateless
+    about ``localStorage``, so it treats ``placeholder_defs`` as the highest
+    precedence source: this lets browser-local globals (which the server cannot
+    see) take effect. The shared overlay (``placeholders.json``) and the
+    ``DEFAULT_PLACEHOLDERS`` code floor below it are a harmless fallback for any
+    name the request omits. Selections come from the dedicated request fields.
     """
 
     system_template = (request.system_prompt or "").strip() or default_system_prompt_template()

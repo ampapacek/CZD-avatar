@@ -249,5 +249,73 @@ class PlaceholderEndpointTests(unittest.TestCase):
         )
 
 
+class ResolveChatPlaceholdersTests(unittest.TestCase):
+    """14d: the chat request's ``placeholder_defs`` carries fully resolved
+    effective defs (inline -> browser-local global -> shared overlay) and must win
+    over the server's own shared overlay, so browser-local globals take effect."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "placeholders.json"
+        self._orig_path = main.settings.placeholders_path
+        main.settings.placeholders_path = self.path
+
+    def tearDown(self) -> None:
+        main.settings.placeholders_path = self._orig_path
+        self._tmp.cleanup()
+
+    def _request(self, placeholder_defs):
+        from app.models import ChatRequest
+
+        return ChatRequest(
+            question="q",
+            system_prompt="Délka: {length}",
+            user_prompt_template="Otázka: {question}",
+            selections={"length": "short"},
+            placeholder_defs=placeholder_defs,
+        )
+
+    def test_request_defs_override_shared_overlay(self) -> None:
+        # Shared overlay on disk says one thing...
+        save_placeholder(
+            self.path,
+            name="length",
+            label="Délka",
+            kind="select",
+            default="short",
+            options=[{"name": "short", "label": "K", "text": "OVERLAY short"}],
+        )
+        # ...but the request carries an effective (e.g. browser-local) def that wins.
+        request = self._request(
+            {
+                "length": {
+                    "label": "Délka",
+                    "kind": "select",
+                    "default": "short",
+                    "options": [{"name": "short", "label": "K", "text": "LOCAL short"}],
+                }
+            }
+        )
+        defs, selections = main._resolve_chat_placeholders(request)
+        self.assertEqual(defs["length"].options[0].text, "LOCAL short")
+        self.assertEqual(selections["length"], "short")
+
+    def test_falls_back_to_overlay_then_code_floor(self) -> None:
+        save_placeholder(
+            self.path,
+            name="length",
+            label="Délka",
+            kind="select",
+            default="short",
+            options=[{"name": "short", "label": "K", "text": "OVERLAY short"}],
+        )
+        # Request omits length: overlay supplies it; custom_instructions falls to floor.
+        request = self._request(None)
+        request.user_prompt_template = "Otázka: {question} {custom_instructions}"
+        defs, _ = main._resolve_chat_placeholders(request)
+        self.assertEqual(defs["length"].options[0].text, "OVERLAY short")
+        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+
+
 if __name__ == "__main__":
     unittest.main()

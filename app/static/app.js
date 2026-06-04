@@ -46,6 +46,28 @@ const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const systemPrompt = document.querySelector("#systemPrompt");
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
+const globalPlaceholderDefsList = document.querySelector("#globalPlaceholderDefsList");
+const newGlobalPlaceholderButton = document.querySelector("#newGlobalPlaceholderButton");
+const inlinePlaceholderDefsList = document.querySelector("#inlinePlaceholderDefsList");
+const newInlinePlaceholderButton = document.querySelector("#newInlinePlaceholderButton");
+const placeholderDefDialog = document.querySelector("#placeholderDefDialog");
+const placeholderDefForm = document.querySelector("#placeholderDefForm");
+const placeholderDefTitle = document.querySelector("#placeholderDefTitle");
+const placeholderDefScopeNote = document.querySelector("#placeholderDefScopeNote");
+const closePlaceholderDefButton = document.querySelector("#closePlaceholderDefButton");
+const placeholderDefName = document.querySelector("#placeholderDefName");
+const placeholderDefLabel = document.querySelector("#placeholderDefLabel");
+const placeholderDefHelp = document.querySelector("#placeholderDefHelp");
+const placeholderDefKind = document.querySelector("#placeholderDefKind");
+const placeholderDefDefaultTextField = document.querySelector("#placeholderDefDefaultTextField");
+const placeholderDefDefaultText = document.querySelector("#placeholderDefDefaultText");
+const placeholderDefDefaultSelectField = document.querySelector("#placeholderDefDefaultSelectField");
+const placeholderDefDefaultSelect = document.querySelector("#placeholderDefDefaultSelect");
+const placeholderDefOptionsBlock = document.querySelector("#placeholderDefOptionsBlock");
+const placeholderDefOptionsList = document.querySelector("#placeholderDefOptionsList");
+const addPlaceholderOptionButton = document.querySelector("#addPlaceholderOptionButton");
+const placeholderDefError = document.querySelector("#placeholderDefError");
+const placeholderDefActions = document.querySelector("#placeholderDefActions");
 const topK = document.querySelector("#topK");
 const topKValue = document.querySelector("#topKValue");
 const denseWeight = document.querySelector("#denseWeight");
@@ -110,6 +132,10 @@ const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
 const TOKEN_BUDGET_STORAGE_KEY = "czdemos4ai-token-budget";
 const LOCAL_PROMPT_PRESETS_STORAGE_KEY = "czdemos4ai-local-prompt-presets";
+// Browser-local global placeholder defs (name -> def). Private to this browser,
+// no password. In resolution they sit between inline (on the selected prompt) and
+// the shared server overlay: inline -> browser-local -> shared overlay -> code floor.
+const LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY = "czdemos4ai-local-placeholder-defs";
 const BROWSER_OWNER_ID_STORAGE_KEY = "czdemos4ai-browser-owner-id";
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
@@ -148,6 +174,8 @@ let activeWpId = "";
 // current control values (name -> value). Both are rebuilt on every prompt switch.
 let activePlaceholderDefs = {};
 let placeholderSelections = {};
+// Browser-local global placeholder defs (name -> def), loaded from localStorage.
+let localPlaceholderDefs = {};
 let llmModelsUnlocked = false;
 let llmSettingsState = {
   selected_provider: "",
@@ -229,6 +257,7 @@ async function loadSettings() {
   const settings = await response.json();
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
+  localPlaceholderDefs = loadLocalPlaceholderDefs();
   embeddingModel.value = settings.embedding_model || "";
   llmSettingsState = loadLlmSettings();
   const providers = getLlmProviders(settings);
@@ -439,6 +468,8 @@ helpDialog.addEventListener("click", (event) => {
 settingsButton.addEventListener("click", () => {
   renderProviderApiKeyFields();
   populateCustomProviderFields();
+  renderGlobalPlaceholderDefs();
+  renderInlinePlaceholderDefs();
   settingsDialog.showModal();
 });
 closeSettingsButton.addEventListener("click", () => {
@@ -700,10 +731,11 @@ function buildRequestPayload(overrides = {}) {
     wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
-    // Generic placeholder values + the selected prompt's inline defs so the
-    // server can resolve inline-over-global overrides.
+    // Generic placeholder values + the FULLY RESOLVED effective defs (inline ->
+    // browser-local global -> shared overlay) so the server substitutes exactly
+    // what the user configured, including browser-local globals it cannot see.
     selections: { ...placeholderSelections },
-    placeholder_defs: activePromptInlinePlaceholderDefs(),
+    placeholder_defs: effectivePlaceholderDefsForRequest(),
     system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
     user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
     conversation_history: [],
@@ -1424,6 +1456,12 @@ function globalPlaceholderDefs() {
   return defs;
 }
 
+// Browser-local global placeholder defs (name -> def). These sit between the
+// selected prompt's inline defs and the shared server overlay in resolution.
+function localGlobalPlaceholderDefs() {
+  return localPlaceholderDefs && typeof localPlaceholderDefs === "object" ? localPlaceholderDefs : {};
+}
+
 // Inline placeholder defs declared on the currently selected prompt; these
 // override the global defs wholesale.
 function activePromptInlinePlaceholderDefs() {
@@ -1434,21 +1472,24 @@ function activePromptInlinePlaceholderDefs() {
 
 // Resolve the parameter placeholders used by the current prompt text: parse the
 // {tokens} from the system + user templates, drop system placeholders, and for
-// each remaining token take its def from the prompt's inline map, else the merged
-// global. Tokens with no def anywhere get no control (they render literally).
+// each remaining token take its def wholesale from the most specific scope:
+// inline (selected prompt) -> browser-local global -> shared server overlay
+// (DEFAULT_PLACEHOLDERS already merged into appSettings.placeholders). Tokens with
+// no def anywhere get no control (they render literally).
 function resolveActivePlaceholderDefs() {
   const tokens = new Set([
     ...extractPromptVariables(systemPrompt.value),
     ...extractPromptVariables(userPromptTemplate.value),
   ]);
   const inline = activePromptInlinePlaceholderDefs();
+  const local = localGlobalPlaceholderDefs();
   const globals = globalPlaceholderDefs();
   const resolved = {};
   for (const token of tokens) {
     if (SYSTEM_PLACEHOLDERS.has(token)) {
       continue;
     }
-    const def = inline[token] || globals[token];
+    const def = inline[token] || local[token] || globals[token];
     if (def) {
       resolved[token] = def;
     }
@@ -1456,9 +1497,543 @@ function resolveActivePlaceholderDefs() {
   return resolved;
 }
 
+// Effective resolved def for a single placeholder name (inline -> local -> shared
+// overlay). Used to build the chat request's effective placeholder_defs.
+function effectivePlaceholderDef(name) {
+  return activePromptInlinePlaceholderDefs()[name]
+    || localGlobalPlaceholderDefs()[name]
+    || globalPlaceholderDefs()[name]
+    || null;
+}
+
+// Build the placeholder_defs map sent on a chat request. Carries the FULLY
+// RESOLVED effective def (inline -> browser-local global -> shared overlay) for
+// each parameter placeholder the prompt uses, not just inline defs. The server is
+// stateless about localStorage, so it treats placeholder_defs as the highest
+// precedence source; sending effective defs makes it substitute exactly what the
+// user configured here (its own overlay + code floor remain a harmless fallback).
+function effectivePlaceholderDefsForRequest() {
+  const defs = {};
+  for (const name of Object.keys(activePlaceholderDefs)) {
+    const def = effectivePlaceholderDef(name);
+    if (def) {
+      defs[name] = def;
+    }
+  }
+  return defs;
+}
+
 function placeholderDefaultValue(def) {
   return typeof def?.default === "string" ? def.default : "";
 }
+
+// ---------------------------------------------------------------------------
+// Placeholder definition editor (Task 14d)
+//
+// Manages placeholder DEFINITIONS (not the per-question selections) at two
+// scopes: global (shared server overlay via /placeholders + browser-local in
+// localStorage) and inline (on the selected prompt preset). Reuses one dialog
+// editor for every scope.
+// ---------------------------------------------------------------------------
+
+function loadLocalPlaceholderDefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY) || "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+    const defs = {};
+    for (const [name, def] of Object.entries(raw)) {
+      const normalized = normalizePlaceholderDef(name, def);
+      if (normalized) {
+        defs[normalized.name] = normalized.def;
+      }
+    }
+    return defs;
+  } catch {
+    return {};
+  }
+}
+
+function persistLocalPlaceholderDefs() {
+  localStorage.setItem(LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY, JSON.stringify(localPlaceholderDefs));
+}
+
+// Coerce an arbitrary stored object into a clean {name, def} pair, or null.
+function normalizePlaceholderDef(name, def) {
+  const slug = slugifyPlaceholderName(name);
+  if (!slug || !def || typeof def !== "object") {
+    return null;
+  }
+  const kind = def.kind === "select" ? "select" : "text";
+  const options = kind === "select" && Array.isArray(def.options)
+    ? def.options
+        .map((option) => {
+          const optionName = String(option?.name || "").trim();
+          if (!optionName) {
+            return null;
+          }
+          return {
+            name: optionName,
+            label: String(option?.label || optionName).trim(),
+            text: String(option?.text || ""),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  const help = def.help != null && String(def.help).trim() ? String(def.help).trim() : null;
+  return {
+    name: slug,
+    def: {
+      label: String(def.label || slug).trim(),
+      kind,
+      help,
+      default: String(def.default || ""),
+      options,
+    },
+  };
+}
+
+function slugifyPlaceholderName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// After any def change (global or inline) re-fetch the merged globals from the
+// server, then re-render the lists and the active main-page controls so changes
+// show immediately.
+async function refreshAfterPlaceholderDefChange() {
+  try {
+    const response = await fetch("settings");
+    if (response.ok) {
+      const settings = await response.json();
+      appSettings = { ...appSettings, placeholders: settings.placeholders };
+    }
+  } catch (error) {
+    console.warn("Could not refresh settings after placeholder def change", error);
+  }
+  renderPlaceholderControls();
+  renderGlobalPlaceholderDefs();
+  renderInlinePlaceholderDefs();
+}
+
+// Describe where an effective global def currently comes from, for the list.
+function globalPlaceholderDefSource(name) {
+  if (Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)) {
+    return "local";
+  }
+  const record = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+    .find((item) => item && item.name === name);
+  if (record && (record.owner_id || record.updated_at)) {
+    return "shared";
+  }
+  return "builtin";
+}
+
+const PLACEHOLDER_SOURCE_LABELS = {
+  local: "lokální (jen tento prohlížeč)",
+  shared: "sdílená (server)",
+  builtin: "vestavěná",
+};
+
+function renderGlobalPlaceholderDefs() {
+  if (!globalPlaceholderDefsList) {
+    return;
+  }
+  // Union of merged server globals + browser-local globals, deduped by name.
+  const names = new Set([
+    ...Object.keys(globalPlaceholderDefs()),
+    ...Object.keys(localGlobalPlaceholderDefs()),
+  ]);
+  const sorted = Array.from(names).sort();
+  globalPlaceholderDefsList.innerHTML = sorted
+    .map((name) => {
+      const source = globalPlaceholderDefSource(name);
+      const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || {};
+      const sourceLabel = PLACEHOLDER_SOURCE_LABELS[source] || source;
+      const kindLabel = def.kind === "select" ? "výběr" : "text";
+      return `
+        <div class="placeholder-def-row" data-global-placeholder="${escapeHtml(name)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(def.label || name)}</strong>
+            <code>{${escapeHtml(name)}}</code>
+            <span class="field-note">${escapeHtml(kindLabel)} · ${escapeHtml(sourceLabel)}</span>
+          </div>
+          <div class="inline-actions">
+            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="local">Upravit lokálně</button>
+            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="shared">Upravit sdíleně</button>
+            ${source === "builtin"
+              ? ""
+              : `<button class="secondary danger-lite" type="button" data-delete-global="${escapeHtml(name)}" data-delete-scope="${source}">Smazat</button>`}
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderInlinePlaceholderDefs() {
+  if (!inlinePlaceholderDefsList) {
+    return;
+  }
+  const inline = activePromptInlinePlaceholderDefs();
+  const names = Object.keys(inline).sort();
+  if (!names.length) {
+    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>`;
+    return;
+  }
+  inlinePlaceholderDefsList.innerHTML = names
+    .map((name) => {
+      const def = inline[name] || {};
+      const kindLabel = def.kind === "select" ? "výběr" : "text";
+      return `
+        <div class="placeholder-def-row" data-inline-placeholder="${escapeHtml(name)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(def.label || name)}</strong>
+            <code>{${escapeHtml(name)}}</code>
+            <span class="field-note">${escapeHtml(kindLabel)} · inline</span>
+          </div>
+          <div class="inline-actions">
+            <button class="secondary" type="button" data-edit-inline="${escapeHtml(name)}">Upravit</button>
+            <button class="secondary danger-lite" type="button" data-delete-inline="${escapeHtml(name)}">Smazat</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+// --- shared dialog editor ---------------------------------------------------
+// editorContext describes where the result is saved:
+//   { scope: "global-local" | "global-shared" | "inline", originalName }
+let placeholderEditorContext = null;
+
+function openPlaceholderDefEditor(context, def) {
+  placeholderEditorContext = context;
+  const isNew = !context.originalName;
+  placeholderDefName.value = context.originalName || "";
+  placeholderDefLabel.value = def?.label || "";
+  placeholderDefHelp.value = def?.help || "";
+  placeholderDefKind.value = def?.kind === "select" ? "select" : "text";
+  placeholderDefDefaultText.value = def?.kind === "select" ? "" : (def?.default || "");
+  placeholderDefDefaultSelect.value = def?.kind === "select" ? (def?.default || "") : "";
+  renderPlaceholderOptionRows(def?.kind === "select" && Array.isArray(def.options) ? def.options : []);
+  updatePlaceholderKindVisibility();
+  setPlaceholderDefError("");
+  placeholderDefTitle.textContent = isNew ? "Nová proměnná" : "Upravit proměnnou";
+  placeholderDefScopeNote.textContent = placeholderScopeNote(context.scope);
+  renderPlaceholderDefActions(context.scope, isNew);
+  placeholderDefDialog.showModal();
+  placeholderDefName.focus();
+}
+
+function placeholderScopeNote(scope) {
+  if (scope === "global-local") {
+    return "Globální proměnná uložená jen v tomto prohlížeči.";
+  }
+  if (scope === "global-shared") {
+    return "Globální proměnná sdílená přes server (vyžaduje vlastnictví nebo admin heslo).";
+  }
+  return "Inline proměnná tohoto promptu (přebije globální). Uloží se až při uložení promptu.";
+}
+
+// Default action is "save as new" so editing does not silently shadow a shared
+// def; updating an existing name is the explicit secondary action.
+function renderPlaceholderDefActions(scope, isNew) {
+  const saveLabel = scope === "inline" ? "Uložit jako novou inline" : "Uložit jako novou";
+  const updateLabel = "Aktualizovat tuto";
+  const actions = [`<button class="secondary" type="button" data-def-action="save-new">${escapeHtml(saveLabel)}</button>`];
+  if (!isNew) {
+    actions.push(`<button class="secondary" type="button" data-def-action="update">${escapeHtml(updateLabel)}</button>`);
+  }
+  placeholderDefActions.innerHTML = actions.join("");
+}
+
+function updatePlaceholderKindVisibility() {
+  const isSelect = placeholderDefKind.value === "select";
+  placeholderDefDefaultTextField.hidden = isSelect;
+  placeholderDefDefaultSelectField.hidden = !isSelect;
+  placeholderDefOptionsBlock.hidden = !isSelect;
+}
+
+function renderPlaceholderOptionRows(options) {
+  placeholderDefOptionsList.innerHTML = (options.length ? options : [{ name: "", label: "", text: "" }])
+    .map((option) => placeholderOptionRowHtml(option))
+    .join("");
+}
+
+function placeholderOptionRowHtml(option) {
+  return `
+    <div class="placeholder-def-option-row">
+      <input type="text" data-option-field="name" placeholder="název" value="${escapeHtml(option?.name || "")}" autocomplete="off" />
+      <input type="text" data-option-field="label" placeholder="popisek" value="${escapeHtml(option?.label || "")}" autocomplete="off" />
+      <textarea data-option-field="text" rows="2" placeholder="vložený text">${escapeHtml(option?.text || "")}</textarea>
+      <button class="secondary danger-lite" type="button" data-remove-option>×</button>
+    </div>`;
+}
+
+function collectPlaceholderOptionRows() {
+  return Array.from(placeholderDefOptionsList.querySelectorAll(".placeholder-def-option-row"))
+    .map((row) => ({
+      name: row.querySelector('[data-option-field="name"]')?.value || "",
+      label: row.querySelector('[data-option-field="label"]')?.value || "",
+      text: row.querySelector('[data-option-field="text"]')?.value || "",
+    }))
+    .filter((option) => option.name.trim());
+}
+
+function setPlaceholderDefError(message) {
+  if (!placeholderDefError) {
+    return;
+  }
+  placeholderDefError.hidden = !message;
+  placeholderDefError.textContent = message || "";
+}
+
+// Build a {name, def} from the dialog inputs, or null with an error shown.
+function readPlaceholderDefFromEditor() {
+  const slug = slugifyPlaceholderName(placeholderDefName.value);
+  if (!slug) {
+    setPlaceholderDefError("Zadej platný název (písmena, číslice, podtržítka).");
+    return null;
+  }
+  const kind = placeholderDefKind.value === "select" ? "select" : "text";
+  const options = kind === "select" ? collectPlaceholderOptionRows() : [];
+  if (kind === "select" && !options.length) {
+    setPlaceholderDefError("Výběr potřebuje aspoň jednu možnost.");
+    return null;
+  }
+  const help = placeholderDefHelp.value.trim() ? placeholderDefHelp.value.trim() : null;
+  const def = {
+    label: placeholderDefLabel.value.trim() || slug,
+    kind,
+    help,
+    default: kind === "select" ? placeholderDefDefaultSelect.value.trim() : placeholderDefDefaultText.value,
+    options,
+  };
+  return { name: slug, def };
+}
+
+async function submitPlaceholderDefEditor(action) {
+  const result = readPlaceholderDefFromEditor();
+  if (!result) {
+    return;
+  }
+  const context = placeholderEditorContext || {};
+  // "update" keeps the original name; "save-new" uses the typed name and refuses
+  // to silently overwrite an existing entry in the same scope.
+  const targetName = action === "update" && context.originalName ? context.originalName : result.name;
+  try {
+    if (context.scope === "global-local") {
+      saveLocalGlobalPlaceholderDef(targetName, result.def, action);
+    } else if (context.scope === "global-shared") {
+      await saveSharedGlobalPlaceholderDef(targetName, result.def, action);
+    } else {
+      saveInlinePlaceholderDef(targetName, result.def, action);
+    }
+  } catch (error) {
+    setPlaceholderDefError(error.message);
+    return;
+  }
+  placeholderDefDialog.close();
+  await refreshAfterPlaceholderDefChange();
+}
+
+function saveLocalGlobalPlaceholderDef(name, def, action) {
+  if (action === "save-new" && Object.prototype.hasOwnProperty.call(localPlaceholderDefs, name)) {
+    throw new Error(`Lokální proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const normalized = normalizePlaceholderDef(name, def);
+  if (!normalized) {
+    throw new Error("Proměnnou se nepodařilo uložit.");
+  }
+  localPlaceholderDefs = { ...localPlaceholderDefs, [normalized.name]: normalized.def };
+  persistLocalPlaceholderDefs();
+}
+
+async function saveSharedGlobalPlaceholderDef(name, def, action) {
+  const existing = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+    .find((item) => item && item.name === name && (item.owner_id || item.updated_at));
+  if (action === "save-new" && existing) {
+    throw new Error(`Sdílená proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const payload = {
+    name,
+    label: def.label,
+    kind: def.kind,
+    help: def.help,
+    default: def.default,
+    options: def.options,
+    owner_id: getBrowserOwnerId(),
+    admin_password: llmUnlockPassword.value.trim() || null,
+  };
+  const response = await fetch("placeholders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(data.detail || "Uložení sdílené proměnné selhalo.");
+  }
+}
+
+// Inline defs live on the selected prompt preset. We mutate the in-memory preset's
+// placeholders map; the change persists when the user saves the prompt (save-as-new
+// / update), matching how the rest of the prompt editor works.
+function saveInlinePlaceholderDef(name, def, action) {
+  const preset = getPromptPresetById(activePromptPresetId);
+  if (!preset) {
+    throw new Error("Nejdřív vyber prompt.");
+  }
+  if (isBuiltInPromptPreset(activePromptPresetId)) {
+    throw new Error("Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.");
+  }
+  if (!preset.placeholders || typeof preset.placeholders !== "object" || Array.isArray(preset.placeholders)) {
+    preset.placeholders = {};
+  }
+  if (action === "save-new" && Object.prototype.hasOwnProperty.call(preset.placeholders, name)) {
+    throw new Error(`Inline proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const normalized = normalizePlaceholderDef(name, def);
+  if (!normalized) {
+    throw new Error("Proměnnou se nepodařilo uložit.");
+  }
+  preset.placeholders[normalized.name] = normalized.def;
+  // Persist immediately for editable local presets so an inline def is not lost if
+  // the user forgets to re-save; server presets persist on the next prompt save.
+  if (isLocalPromptPreset(activePromptPresetId)) {
+    persistLocalPromptPresets();
+  }
+}
+
+function deleteLocalGlobalPlaceholderDef(name) {
+  if (!Object.prototype.hasOwnProperty.call(localPlaceholderDefs, name)) {
+    return;
+  }
+  const next = { ...localPlaceholderDefs };
+  delete next[name];
+  localPlaceholderDefs = next;
+  persistLocalPlaceholderDefs();
+}
+
+async function deleteSharedGlobalPlaceholderDef(name) {
+  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
+  const adminPassword = llmUnlockPassword.value.trim();
+  if (adminPassword) {
+    params.set("admin_password", adminPassword);
+  }
+  const response = await fetch(`placeholders/${encodeURIComponent(name)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!response.ok && response.status !== 404) {
+    const data = await safeJson(response);
+    throw new Error(data.detail || "Smazání sdílené proměnné selhalo.");
+  }
+}
+
+function deleteInlinePlaceholderDef(name) {
+  const preset = getPromptPresetById(activePromptPresetId);
+  if (!preset || !preset.placeholders) {
+    return;
+  }
+  delete preset.placeholders[name];
+  if (isLocalPromptPreset(activePromptPresetId)) {
+    persistLocalPromptPresets();
+  }
+}
+
+// --- editor event wiring ----------------------------------------------------
+newGlobalPlaceholderButton?.addEventListener("click", () => {
+  openPlaceholderDefEditor({ scope: "global-local", originalName: "" }, null);
+});
+newInlinePlaceholderButton?.addEventListener("click", () => {
+  if (isBuiltInPromptPreset(activePromptPresetId)) {
+    statusEl.className = "status error";
+    statusEl.textContent = "Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.";
+    return;
+  }
+  openPlaceholderDefEditor({ scope: "inline", originalName: "" }, null);
+});
+
+globalPlaceholderDefsList?.addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-global]");
+  if (editButton) {
+    const name = editButton.dataset.editGlobal;
+    const scope = editButton.dataset.editScope === "shared" ? "global-shared" : "global-local";
+    const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || null;
+    // Editing a built-in/shared into local scope starts from its current def but
+    // creates a NEW browser-local entry (so default action is still save-as-new
+    // unless the name already exists in that scope).
+    const existsInScope = scope === "global-local"
+      ? Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)
+      : Boolean((Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+          .find((item) => item && item.name === name && (item.owner_id || item.updated_at)));
+    openPlaceholderDefEditor({ scope, originalName: existsInScope ? name : "" }, def);
+    if (!existsInScope) {
+      placeholderDefName.value = name;
+    }
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-global]");
+  if (deleteButton) {
+    const name = deleteButton.dataset.deleteGlobal;
+    const scope = deleteButton.dataset.deleteScope;
+    if (!window.confirm(`Smazat proměnnou "${name}"?`)) {
+      return;
+    }
+    try {
+      if (scope === "local") {
+        deleteLocalGlobalPlaceholderDef(name);
+      } else {
+        await deleteSharedGlobalPlaceholderDef(name);
+      }
+      await refreshAfterPlaceholderDefChange();
+    } catch (error) {
+      statusEl.className = "status error";
+      statusEl.textContent = error.message;
+    }
+  }
+});
+
+inlinePlaceholderDefsList?.addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-inline]");
+  if (editButton) {
+    const name = editButton.dataset.editInline;
+    const def = activePromptInlinePlaceholderDefs()[name] || null;
+    openPlaceholderDefEditor({ scope: "inline", originalName: name }, def);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-inline]");
+  if (deleteButton) {
+    const name = deleteButton.dataset.deleteInline;
+    if (!window.confirm(`Smazat inline proměnnou "${name}"?`)) {
+      return;
+    }
+    deleteInlinePlaceholderDef(name);
+    await refreshAfterPlaceholderDefChange();
+  }
+});
+
+placeholderDefKind?.addEventListener("change", updatePlaceholderKindVisibility);
+addPlaceholderOptionButton?.addEventListener("click", () => {
+  placeholderDefOptionsList.insertAdjacentHTML("beforeend", placeholderOptionRowHtml({}));
+});
+placeholderDefOptionsList?.addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-option]");
+  if (removeButton) {
+    removeButton.closest(".placeholder-def-option-row")?.remove();
+  }
+});
+placeholderDefActions?.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("[data-def-action]");
+  if (actionButton) {
+    submitPlaceholderDefEditor(actionButton.dataset.defAction);
+  }
+});
+closePlaceholderDefButton?.addEventListener("click", () => placeholderDefDialog.close());
+placeholderDefForm?.addEventListener("submit", (event) => event.preventDefault());
 
 // Re-render the main-page controls for the active prompt and reset every value to
 // its resolved def default. Called on every prompt switch and on prompt-text edits.
@@ -1559,12 +2134,14 @@ function updatePromptTemplateWarning() {
 function unknownPromptVariables(templates) {
   const unknown = new Set();
   const inline = activePromptInlinePlaceholderDefs();
+  const local = localGlobalPlaceholderDefs();
   const globals = globalPlaceholderDefs();
   templates.forEach((template) => {
     extractPromptVariables(template).forEach((name) => {
       // Known if it is a system/code-floor placeholder, or resolves to any def.
       const known = KNOWN_PROMPT_VARIABLES.has(name)
         || Object.prototype.hasOwnProperty.call(inline, name)
+        || Object.prototype.hasOwnProperty.call(local, name)
         || Object.prototype.hasOwnProperty.call(globals, name);
       if (!known) {
         unknown.add(name);
@@ -1724,6 +2301,7 @@ function applyPromptPresetById(presetId) {
   // prior values (including text placeholders) are preserved across the switch.
   renderPlaceholderControls();
   updatePromptTemplateWarning();
+  renderInlinePlaceholderDefs();
   renderPromptPresets(resolvedId);
 }
 
@@ -1742,7 +2320,8 @@ function currentPromptDraft({ id = null, name }) {
     wp_id: activePromptWpId(),
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
-    // Inline placeholder defs are carried through unchanged; editing them is 14d.
+    // Inline placeholder defs come from the live preset object, which the inline
+    // def editor (14d) mutates in place; saving the prompt persists them.
     placeholders: activePromptInlinePlaceholderDefs(),
   };
 }
@@ -1873,7 +2452,8 @@ function normalizeLocalPromptPreset(item) {
     wp_id: String(item.wp_id || appSettings.default_wp || ""),
     system_prompt: String(item.system_prompt || ""),
     user_prompt_template: String(item.user_prompt_template || ""),
-    // Inline placeholder defs are passed through as-is; editing is 14d.
+    // Inline placeholder defs are passed through as-is; the inline def editor
+    // (14d) mutates them and persists via persistLocalPromptPresets().
     placeholders: item.placeholders && typeof item.placeholders === "object" && !Array.isArray(item.placeholders)
       ? item.placeholders
       : {},
