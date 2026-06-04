@@ -165,7 +165,7 @@ let llmModelsUnlocked = false;
 let llmSettingsState = {
   selected_provider: "",
   provider_settings: {},
-  model_unlock_password: "",
+  admin_password: "",
 };
 
 function normalizeProviderId(providerId) {
@@ -204,7 +204,7 @@ async function loadSettings() {
   populateCustomProviderFields();
   renderProviderApiKeyFields();
   loadProviderValues(selectedProvider, { preferStored: true });
-  llmUnlockPassword.value = llmSettingsState.model_unlock_password || "";
+  llmUnlockPassword.value = llmSettingsState.admin_password || "";
   populateTokenBudgetFields(settings);
   if (llmUnlockPassword.value.trim()) {
     await verifyUnlockPassword({ silent: true });
@@ -683,7 +683,7 @@ function buildRequestPayload(overrides = {}) {
     llm_provider: llmProvider.value,
     llm_base_url: nullableString(selectedProviderBaseUrl()),
     llm_api_key: nullableString(selectedProviderApiKey()),
-    model_unlock_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
+    admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: retrievalBackend.value,
     msearch_collection: msearchCollection.value,
@@ -729,7 +729,7 @@ function loadLlmSettings() {
       return {
         selected_provider: typeof raw.selected_provider === "string" ? normalizeProviderId(raw.selected_provider) : "",
         provider_settings: raw.provider_settings,
-        model_unlock_password: typeof raw.model_unlock_password === "string" ? raw.model_unlock_password : "",
+        admin_password: typeof raw.admin_password === "string" ? raw.admin_password : "",
       };
     }
     const legacyProvider = typeof raw.llm_provider === "string" ? normalizeProviderId(raw.llm_provider) : "";
@@ -745,10 +745,10 @@ function loadLlmSettings() {
     return {
       selected_provider: legacyProvider,
       provider_settings: legacySettings,
-      model_unlock_password: typeof raw.model_unlock_password === "string" ? raw.model_unlock_password : "",
+      admin_password: typeof raw.admin_password === "string" ? raw.admin_password : "",
     };
   } catch {
-    return { selected_provider: "", provider_settings: {}, model_unlock_password: "" };
+    return { selected_provider: "", provider_settings: {}, admin_password: "" };
   }
 }
 
@@ -866,14 +866,14 @@ function persistLlmSettings() {
   llmSettingsState = {
     selected_provider: providerId,
     provider_settings: providerSettings,
-    model_unlock_password: llmUnlockPassword.value,
+    admin_password: llmUnlockPassword.value,
   };
   localStorage.setItem(
     LLM_SETTINGS_STORAGE_KEY,
     JSON.stringify({
       selected_provider: llmSettingsState.selected_provider,
       provider_settings: llmSettingsState.provider_settings,
-      model_unlock_password: llmSettingsState.model_unlock_password,
+      admin_password: llmSettingsState.admin_password,
     }),
   );
 }
@@ -899,7 +899,7 @@ function saveProviderApiKey(providerId, apiKey) {
     JSON.stringify({
       selected_provider: llmSettingsState.selected_provider,
       provider_settings: llmSettingsState.provider_settings,
-      model_unlock_password: llmSettingsState.model_unlock_password,
+      admin_password: llmSettingsState.admin_password,
     }),
   );
 }
@@ -924,7 +924,7 @@ function clearProviderApiKey(providerId) {
     JSON.stringify({
       selected_provider: llmSettingsState.selected_provider,
       provider_settings: llmSettingsState.provider_settings,
-      model_unlock_password: llmSettingsState.model_unlock_password,
+      admin_password: llmSettingsState.admin_password,
     }),
   );
 }
@@ -1595,7 +1595,7 @@ async function saveCurrentPromptPreset({ mode }) {
   const payload = {
     ...currentPromptDraft({ id: isUpdate ? currentPreset.id : null, name }),
     owner_id: getBrowserOwnerId(),
-    unlock_password: llmUnlockPassword.value.trim() || null,
+    admin_password: llmUnlockPassword.value.trim() || null,
   };
   const response = await fetch("prompt-presets", {
     method: "POST",
@@ -1754,9 +1754,9 @@ async function deleteSelectedPromptPreset() {
     return;
   }
   const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
-  const unlockPassword = llmUnlockPassword.value.trim();
-  if (unlockPassword) {
-    params.set("unlock_password", unlockPassword);
+  const adminPassword = llmUnlockPassword.value.trim();
+  if (adminPassword) {
+    params.set("admin_password", adminPassword);
   }
   const response = await fetch(
     `prompt-presets/${encodeURIComponent(promptPreset.value)}?${params.toString()}`,
@@ -2759,7 +2759,7 @@ function saveHistoryEntry(entry) {
 function sanitizeHistorySettings(settings) {
   const sanitized = { ...settings };
   delete sanitized.llm_api_key;
-  delete sanitized.model_unlock_password;
+  delete sanitized.admin_password;
   return sanitized;
 }
 

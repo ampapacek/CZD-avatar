@@ -101,7 +101,7 @@ def _llm_settings_payload() -> dict[str, object]:
             "model_presets": selected_provider["model_presets"],
             "all_models": all_llm_models,
             "custom_model_requires_browser_key": True,
-            "unlock_password_enabled": bool(settings.llm_unlock_password),
+            "unlock_password_enabled": bool(settings.admin_password),
             "models_cache_ttl_seconds": settings.llm_models_cache_ttl_seconds,
         },
     }
@@ -109,11 +109,11 @@ def _llm_settings_payload() -> dict[str, object]:
 
 _refresh_provider_state()
 logger.info(
-    "Loaded settings: provider=%s model=%s providers=%s llm_unlock_password=%s",
+    "Loaded settings: provider=%s model=%s providers=%s admin_password=%s",
     default_provider,
     default_model,
     [provider["id"] for provider in provider_presets],
-    "set" if settings.llm_unlock_password else "missing",
+    "set" if settings.admin_password else "missing",
 )
 pipeline = RAGPipeline(settings)
 
@@ -161,10 +161,10 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
     provider_base_url = str(provider_config.get("base_url") or "").strip().rstrip("/")
     use_server_api_key = not requested_base_url or requested_base_url == provider_base_url
     server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
-    browser_unlock_password = request.model_unlock_password.strip() if request.model_unlock_password else ""
-    unlock_enabled = bool(settings.llm_unlock_password) and hmac.compare_digest(
-        browser_unlock_password,
-        settings.llm_unlock_password,
+    browser_admin_password = request.admin_password.strip() if request.admin_password else ""
+    unlock_enabled = bool(settings.admin_password) and hmac.compare_digest(
+        browser_admin_password,
+        settings.admin_password,
     )
     resolved_api_key = browser_api_key or server_api_key or None
     public_models = provider_public_models(resolved_provider, provider_presets, request.llm_base_url)
@@ -288,8 +288,8 @@ def _can_modify_prompt_preset(preset: dict[str, str], owner_id: str | None, pass
     requester = (owner_id or "").strip()
     if owner and requester and hmac.compare_digest(owner, requester):
         return True
-    if settings.llm_unlock_password and hmac.compare_digest(
-        (password or "").strip(), settings.llm_unlock_password
+    if settings.admin_password and hmac.compare_digest(
+        (password or "").strip(), settings.admin_password
     ):
         return True
     return False
@@ -302,9 +302,9 @@ def get_prompt_presets() -> list[PromptPreset]:
 
 @app.post("/unlock", response_model=UnlockResponse)
 def unlock_models(request: UnlockRequest) -> UnlockResponse:
-    if not settings.llm_unlock_password:
+    if not settings.admin_password:
         return UnlockResponse(unlocked=False)
-    unlocked = hmac.compare_digest(request.password.strip(), settings.llm_unlock_password)
+    unlocked = hmac.compare_digest(request.password.strip(), settings.admin_password)
     return UnlockResponse(unlocked=unlocked)
 
 
@@ -314,7 +314,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
     if not name:
         raise HTTPException(status_code=400, detail="Prompt preset name is required.")
     existing = _find_prompt_preset(request.id) if request.id else None
-    if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.unlock_password):
+    if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     preset = save_prompt_preset(
         settings.prompt_presets_path,
@@ -333,12 +333,12 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
 def remove_prompt_preset(
     preset_id: str,
     owner_id: str | None = None,
-    unlock_password: str | None = None,
+    admin_password: str | None = None,
 ) -> Response:
     existing = _find_prompt_preset(preset_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Prompt preset not found.")
-    if not _can_modify_prompt_preset(existing, owner_id, unlock_password):
+    if not _can_modify_prompt_preset(existing, owner_id, admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     delete_prompt_preset(settings.prompt_presets_path, preset_id)
     return Response(status_code=204)

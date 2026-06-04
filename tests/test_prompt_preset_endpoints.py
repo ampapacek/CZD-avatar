@@ -12,14 +12,14 @@ class PromptPresetEndpointTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.path = Path(self._tmp.name) / "prompt_presets.json"
         self._orig_path = main.settings.prompt_presets_path
-        self._orig_password = main.settings.llm_unlock_password
+        self._orig_password = main.settings.admin_password
         main.settings.prompt_presets_path = self.path
-        main.settings.llm_unlock_password = "s3cret"
+        main.settings.admin_password = "s3cret"
         self.client = TestClient(main.app)
 
     def tearDown(self) -> None:
         main.settings.prompt_presets_path = self._orig_path
-        main.settings.llm_unlock_password = self._orig_password
+        main.settings.admin_password = self._orig_password
         self._tmp.cleanup()
 
     def _create(self, name: str, owner_id: str | None) -> dict:
@@ -79,13 +79,13 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "system_prompt": "sys",
                 "user_prompt_template": "{question}",
                 "owner_id": "owner-b",
-                "unlock_password": "s3cret",
+                "admin_password": "s3cret",
             },
         )
         self.assertEqual(update.status_code, 200, update.text)
         deleted = self.client.delete(
             f"/prompt-presets/{created['id']}",
-            params={"owner_id": "owner-b", "unlock_password": "s3cret"},
+            params={"owner_id": "owner-b", "admin_password": "s3cret"},
         )
         self.assertEqual(deleted.status_code, 204)
 

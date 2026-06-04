@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     llm_provider: str = Field(default="", alias="LLM_PROVIDER")
-    llm_unlock_password: str = Field(default="", alias="LLM_UNLOCK_PASSWORD")
+    admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
     llm_models_cache_ttl_seconds: int = Field(default=3600, alias="LLM_MODELS_CACHE_TTL_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")

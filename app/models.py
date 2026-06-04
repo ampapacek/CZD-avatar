@@ -47,7 +47,7 @@ class ChatRequest(BaseModel):
     length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     conversation_summary: str | None = None
-    model_unlock_password: str | None = None
+    admin_password: str | None = None
     context_window_tokens: int | None = Field(default=None, ge=1024)
     output_token_budget_short: int | None = Field(default=None, ge=64)
     output_token_budget_medium: int | None = Field(default=None, ge=64)
@@ -92,7 +92,7 @@ class PromptPresetSaveRequest(BaseModel):
     style_prompts: dict[str, str] = Field(default_factory=dict)
     length_prompts: dict[str, str] = Field(default_factory=dict)
     owner_id: str | None = None
-    unlock_password: str | None = None
+    admin_password: str | None = None
 
 
 class UnlockRequest(BaseModel):

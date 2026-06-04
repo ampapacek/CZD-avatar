@@ -63,7 +63,7 @@ If `LLM_PROVIDER` is set, that provider is selected by default in the UI. If it 
 
 Discovered model lists are cached server-side for `LLM_MODELS_CACHE_TTL_SECONDS`, which defaults to `3600` seconds. Opening the app refreshes stale model lists through `/settings`; the Settings dialog also has an `Obnovit seznam modelů` button that forces an immediate server-side refresh without exposing provider API keys to the browser.
 
-If you also set `LLM_UNLOCK_PASSWORD`, the browser can enter that shared password to unlock the full model list. Without it, only the public models configured for the selected provider appear in the selector.
+If you also set `ADMIN_PASSWORD`, the browser can enter that shared admin password to unlock the full model list and to modify or delete shared prompt presets owned by another browser (creating a new shared prompt stays open). Without it, only the public models configured for the selected provider appear in the selector. Future public deployments may also require this password for creating shared/server prompts.
 
 Set `LLM_PROVIDER_<ID>_PUBLIC_MODELS=*` to make every resolved model for that provider public. If discovery succeeds, this means all discovered models. If discovery fails, it means the fallback configured models from `MODELS` plus `DEFAULT_MODEL`.
 
@@ -282,7 +282,7 @@ Important `.env` variables:
 
 - `LLM_PROVIDER`
 - `LLM_PROVIDERS`
-- `LLM_UNLOCK_PASSWORD`
+- `ADMIN_PASSWORD`
 - `LLM_MODELS_CACHE_TTL_SECONDS`
 - `LLM_PROVIDER_<ID>_NAME`
 - `LLM_PROVIDER_<ID>_BASE_URL`
