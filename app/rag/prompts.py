@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import string
+from datetime import date
 from typing import Any
 
 
@@ -21,6 +23,9 @@ LENGTH_PROMPTS = {
     "medium": "Odpověz středně dlouze, přibližně 3-5 kratších odstavců nebo několik přehledných bodů.",
     "long": "Odpověz podrobněji, ale stále přehledně. Uveď hlavní nuance, pokud je podporuje kontext.",
 }
+
+KNOWN_PROMPT_VARIABLES = {"question", "context", "custom_instructions", "length", "current_date"}
+COMPATIBILITY_PROMPT_VARIABLES = {"style", "style_key", "length_key"}
 
 
 def available_styles() -> list[str]:
@@ -124,25 +129,52 @@ def _render_system_prompt_template(
 ) -> str:
     resolved_style_prompts = {**STYLE_PROMPTS, **(style_prompts or {})}
     resolved_length_prompts = {**LENGTH_PROMPTS, **(length_prompts or {})}
-    try:
-        return template.format(
-            style=resolved_style_prompts[style],
-            length=resolved_length_prompts[length],
-            style_key=style,
-            length_key=length,
-        ).strip()
-    except (KeyError, ValueError):
-        return template.strip()
+    return _render_prompt_template(
+        template,
+        {
+            "style": resolved_style_prompts[style],
+            "length": resolved_length_prompts[length],
+            "style_key": style,
+            "length_key": length,
+            "current_date": date.today().isoformat(),
+        },
+    )
 
 
 def _render_user_prompt_template(template: str, question: str, context: str, custom_instructions: str) -> str:
+    return _render_prompt_template(
+        template,
+        {
+            "question": question,
+            "context": context,
+            "custom_instructions": custom_instructions,
+            "current_date": date.today().isoformat(),
+        },
+    )
+
+
+class _UnknownPlaceholder(str):
+    def __new__(cls, key: str) -> "_UnknownPlaceholder":
+        value = super().__new__(cls, f"{{{key}}}")
+        value.key = key
+        return value
+
+    def __format__(self, format_spec: str) -> str:
+        if not format_spec:
+            return str(self)
+        return f"{{{self.key}:{format_spec}}}"
+
+
+class _PromptTemplateValues(dict[str, str]):
+    def __missing__(self, key: str) -> _UnknownPlaceholder:
+        return _UnknownPlaceholder(key)
+
+
+def _render_prompt_template(template: str, values: dict[str, str]) -> str:
     try:
-        return template.format(
-            question=question,
-            context=context,
-            custom_instructions=custom_instructions,
-        ).strip()
-    except (KeyError, ValueError):
+        formatter = string.Formatter()
+        return formatter.vformat(template, (), _PromptTemplateValues(values)).strip()
+    except (IndexError, ValueError):
         return template.strip()
 
 

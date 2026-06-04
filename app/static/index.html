@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CZDEMOS4AI Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=msearch-17" />
+    <link rel="stylesheet" href="static/styles.css?v=prompt-template-1" />
   </head>
   <body>
     <main class="shell">
@@ -422,14 +422,25 @@
               <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
               <textarea id="stylePromptDescription" rows="4"></textarea>
             </label>
-            <label class="field prompt-editor">
-              <span id="lengthPromptDescriptionLabel">Popis vybrané délky</span>
-              <textarea id="lengthPromptDescription" rows="4"></textarea>
-            </label>
+            <div class="length-prompt-editors">
+              <label class="field prompt-editor length-prompt-editor">
+                <span>Krátká délka ({length})</span>
+                <textarea id="lengthPromptShort" data-length-prompt="short" rows="3"></textarea>
+              </label>
+              <label class="field prompt-editor length-prompt-editor">
+                <span>Střední délka ({length})</span>
+                <textarea id="lengthPromptMedium" data-length-prompt="medium" rows="3"></textarea>
+              </label>
+              <label class="field prompt-editor length-prompt-editor">
+                <span>Dlouhá délka ({length})</span>
+                <textarea id="lengthPromptLong" data-length-prompt="long" rows="3"></textarea>
+              </label>
+            </div>
             <label class="field prompt-editor">
               <span>Plný prompt</span>
               <textarea id="userPromptTemplate" rows="8"></textarea>
             </label>
+            <p id="promptTemplateWarning" class="prompt-template-warning" hidden></p>
           </section>
         </div>
       </div>
@@ -506,6 +517,6 @@
       </div>
     </dialog>
 
-    <script src="static/app.js?v=rerank-3"></script>
-  </body>
+  <script src="static/app.js?v=prompt-template-1"></script>
+</body>
 </html>

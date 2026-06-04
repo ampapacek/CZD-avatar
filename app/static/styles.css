@@ -462,6 +462,27 @@ select:focus {
   line-height: 1.45;
 }
 
+.length-prompt-editors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.length-prompt-editor textarea {
+  min-height: 96px;
+}
+
+.prompt-template-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(194, 124, 0, 0.35);
+  border-radius: 6px;
+  background: rgba(194, 124, 0, 0.12);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .inline-field {
   align-content: end;
   grid-template-columns: auto 1fr;
@@ -1526,6 +1547,7 @@ body[data-theme="dark"] .source-highlight {
 @media (max-width: 560px) {
   .controls,
   .advanced-grid,
+  .length-prompt-editors,
   .prompt-controls,
   .provider-key-list,
   .settings-grid,

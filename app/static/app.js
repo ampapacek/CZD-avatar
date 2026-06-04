@@ -45,9 +45,9 @@ const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const systemPrompt = document.querySelector("#systemPrompt");
 const stylePromptDescriptionLabel = document.querySelector("#stylePromptDescriptionLabel");
 const stylePromptDescription = document.querySelector("#stylePromptDescription");
-const lengthPromptDescriptionLabel = document.querySelector("#lengthPromptDescriptionLabel");
-const lengthPromptDescription = document.querySelector("#lengthPromptDescription");
+const lengthPromptInputs = Array.from(document.querySelectorAll("[data-length-prompt]"));
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
+const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
 const topK = document.querySelector("#topK");
 const topKValue = document.querySelector("#topKValue");
 const denseWeight = document.querySelector("#denseWeight");
@@ -123,6 +123,16 @@ const BUILTIN_PROMPT_DEFINITIONS = [
   { id: "builtin-ucitel", name: "Učitel", style: "ucitel" },
   { id: "builtin-historik", name: "Historik", style: "historik" },
 ];
+const KNOWN_PROMPT_VARIABLES = new Set([
+  "question",
+  "context",
+  "custom_instructions",
+  "length",
+  "current_date",
+  "style",
+  "style_key",
+  "length_key",
+]);
 const LENGTH_LABELS = {
   short: "krátká",
   medium: "střední",
@@ -464,13 +474,18 @@ topK.addEventListener("input", () => {
 
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
 style.addEventListener("change", updatePromptDescriptionEditors);
-length.addEventListener("change", updatePromptDescriptionEditors);
 stylePromptDescription.addEventListener("input", () => {
   currentStylePrompts[style.value] = stylePromptDescription.value;
+  updatePromptTemplateWarning();
 });
-lengthPromptDescription.addEventListener("input", () => {
-  currentLengthPrompts[length.value] = lengthPromptDescription.value;
+lengthPromptInputs.forEach((input) => {
+  input.addEventListener("input", () => {
+    currentLengthPrompts[input.dataset.lengthPrompt] = input.value;
+    updatePromptTemplateWarning();
+  });
 });
+systemPrompt.addEventListener("input", updatePromptTemplateWarning);
+userPromptTemplate.addEventListener("input", updatePromptTemplateWarning);
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
 savePromptAsButton.addEventListener("click", async () => {
@@ -1345,9 +1360,55 @@ function refreshModelOptions(settings = appSettings) {
 
 function updatePromptDescriptionEditors() {
   stylePromptDescriptionLabel.textContent = `Popis kompatibilního profilu ${STYLE_LABELS[style.value] || style.value} místo {style}`;
-  lengthPromptDescriptionLabel.textContent = `Popis délky ${LENGTH_LABELS[length.value] || length.value} místo {length}`;
   stylePromptDescription.value = currentStylePrompts[style.value] || "";
-  lengthPromptDescription.value = currentLengthPrompts[length.value] || "";
+  syncLengthPromptEditors();
+  updatePromptTemplateWarning();
+}
+
+function syncLengthPromptEditors() {
+  lengthPromptInputs.forEach((input) => {
+    input.value = currentLengthPrompts[input.dataset.lengthPrompt] || "";
+  });
+}
+
+function updatePromptTemplateWarning() {
+  const unknownVariables = unknownPromptVariables([
+    systemPrompt.value,
+    stylePromptDescription.value,
+    userPromptTemplate.value,
+    ...lengthPromptInputs.map((input) => input.value),
+  ]);
+  if (!unknownVariables.length) {
+    promptTemplateWarning.hidden = true;
+    promptTemplateWarning.textContent = "";
+    return;
+  }
+  promptTemplateWarning.hidden = false;
+  promptTemplateWarning.textContent =
+    `Neznámé proměnné v promptu: ${unknownVariables.map((name) => `{${name}}`).join(", ")}. ` +
+    "Prompt lze uložit; neznámé proměnné zůstanou v odeslaném promptu beze změny.";
+}
+
+function unknownPromptVariables(templates) {
+  const unknown = new Set();
+  templates.forEach((template) => {
+    extractPromptVariables(template).forEach((name) => {
+      if (!KNOWN_PROMPT_VARIABLES.has(name)) {
+        unknown.add(name);
+      }
+    });
+  });
+  return Array.from(unknown).sort();
+}
+
+function extractPromptVariables(template) {
+  const variables = [];
+  const pattern = /\{([A-Za-z_][A-Za-z0-9_]*)(?:![rsa])?(?::[^{}]*)?\}/g;
+  let match;
+  while ((match = pattern.exec(template || "")) !== null) {
+    variables.push(match[1]);
+  }
+  return variables;
 }
 
 async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
@@ -2345,12 +2406,12 @@ async function submitConversationTurn() {
   let assistantText = "";
   let latestSources = [];
   let latestChunks = [];
-	  const payload = buildRequestPayload({
-	    question: prompt,
-	    conversation_summary: conversation.conversation_summary || null,
-	    conversation_history: conversation.messages.map((message) => ({
-	      role: message.role,
-	      content: message.content,
+  const payload = buildRequestPayload({
+    question: prompt,
+    conversation_summary: conversation.conversation_summary || null,
+    conversation_history: conversation.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
     })),
   });
   const sanitizedPayload = sanitizeHistorySettings(payload);
@@ -2374,11 +2435,11 @@ async function submitConversationTurn() {
             content: assistantText,
             settings: sanitizedPayload,
             sources: latestSources,
-	            retrieved_chunks: latestChunks,
-	            omitted_chunks: [],
-	            token_budget: null,
-	            chunk_budget_warnings: [],
-	            conversation_summary: liveConversation.conversation_summary || null,
+            retrieved_chunks: latestChunks,
+            omitted_chunks: [],
+            token_budget: null,
+            chunk_budget_warnings: [],
+            conversation_summary: liveConversation.conversation_summary || null,
             model_used: payload.model,
             upstream_model: null,
             response_time_seconds: null,
@@ -2411,11 +2472,11 @@ async function submitConversationTurn() {
             content: assistantText,
             settings: sanitizedPayload,
             sources: latestSources,
-	            retrieved_chunks: latestChunks,
-	            omitted_chunks: [],
-	            token_budget: null,
-	            chunk_budget_warnings: [],
-	            conversation_summary: liveConversation.conversation_summary || null,
+            retrieved_chunks: latestChunks,
+            omitted_chunks: [],
+            token_budget: null,
+            chunk_budget_warnings: [],
+            conversation_summary: liveConversation.conversation_summary || null,
             model_used: payload.model,
             upstream_model: null,
             response_time_seconds: null,
@@ -2433,13 +2494,13 @@ async function submitConversationTurn() {
           question: prompt,
           content: data.answer || assistantText,
           settings: sanitizedPayload,
-	          sources: data.sources || latestSources,
-	          retrieved_chunks: data.retrieved_chunks || latestChunks,
-	          omitted_chunks: data.omitted_chunks || [],
-	          token_budget: data.token_budget || null,
-	          chunk_budget_warnings: data.chunk_budget_warnings || [],
-	          conversation_summary: data.conversation_summary || null,
-	          model_used: data.model || payload.model,
+          sources: data.sources || latestSources,
+          retrieved_chunks: data.retrieved_chunks || latestChunks,
+          omitted_chunks: data.omitted_chunks || [],
+          token_budget: data.token_budget || null,
+          chunk_budget_warnings: data.chunk_budget_warnings || [],
+          conversation_summary: data.conversation_summary || null,
+          model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
           createdAt: new Date().toISOString(),
@@ -2449,12 +2510,12 @@ async function submitConversationTurn() {
         } else {
           messages.push(assistantMessage);
         }
-	        updateConversation({
-	          ...liveConversation,
-	          conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
-	          updatedAt: new Date().toISOString(),
-	          messages,
-	        });
+        updateConversation({
+          ...liveConversation,
+          conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
+          updatedAt: new Date().toISOString(),
+          messages,
+        });
         renderConversationWorkspace();
       },
     });
@@ -2509,12 +2570,12 @@ function saveHistoryEntry(entry) {
     answer: entry.answer,
     sourceCount: entry.sourceCount,
     settings: sanitizeHistorySettings(entry.settings || {}),
-	    retrieved_chunks: entry.retrieved_chunks || [],
-	    omitted_chunks: entry.omitted_chunks || [],
-	    token_budget: entry.token_budget || null,
-	    chunk_budget_warnings: entry.chunk_budget_warnings || [],
-	    conversation_summary: entry.conversation_summary || null,
-	    sources: entry.sources || [],
+    retrieved_chunks: entry.retrieved_chunks || [],
+    omitted_chunks: entry.omitted_chunks || [],
+    token_budget: entry.token_budget || null,
+    chunk_budget_warnings: entry.chunk_budget_warnings || [],
+    conversation_summary: entry.conversation_summary || null,
+    sources: entry.sources || [],
     model_used: entry.model_used || null,
     upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
