@@ -36,6 +36,7 @@ from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, sa
 from app.rag.placeholders import (
     DEFAULT_PLACEHOLDERS,
     delete_placeholder,
+    effective_global_placeholders,
     load_placeholders,
     placeholder_def_from_record,
     placeholder_defs_from_records,
@@ -214,7 +215,7 @@ def health() -> HealthResponse:
 def get_public_settings() -> dict[str, object]:
     _refresh_provider_state()
     return {
-        "placeholders": load_placeholders(settings.placeholders_path),
+        "placeholders": effective_global_placeholders(settings.placeholders_path),
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
         **_llm_settings_payload(),
@@ -440,11 +441,13 @@ def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, st
         shared_global_defs=shared_global,
         code_default_defs=DEFAULT_PLACEHOLDERS,
     )
-    selections: dict[str, str] = {}
-    if request.length is not None:
-        selections["length"] = request.length
-    if request.custom_instructions is not None:
-        selections["custom_instructions"] = request.custom_instructions
+    # The frontend sends a generic ``{placeholderName: value}`` map; the server is
+    # agnostic about which names exist (select option name or typed text string).
+    selections = {
+        str(name): str(value)
+        for name, value in (request.selections or {}).items()
+        if value is not None
+    }
     return defs, selections
 
 
@@ -489,10 +492,24 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     )
 
 
+def _output_budget_length(placeholder_defs: dict, selections: dict[str, str]) -> str:
+    """Pick the short/medium/long key used only for output-token budget sizing.
+
+    Output budget is the one place ``length`` stays slightly special: it keys on
+    short/medium/long regardless of what text the ``length`` placeholder renders.
+    Derive it from the ``length`` selection, falling back to the resolved
+    ``length`` def's default (then ``medium``).
+    """
+
+    length_def = placeholder_defs.get("length")
+    default = length_def.default if length_def is not None else "medium"
+    return selections.get("length") or default or "medium"
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    length = request.length or "medium"
     placeholder_defs, selections = _resolve_chat_placeholders(request)
+    length = _output_budget_length(placeholder_defs, selections)
     try:
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
         _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
@@ -537,8 +554,8 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest) -> StreamingResponse:
-    length = request.length or "medium"
     placeholder_defs, selections = _resolve_chat_placeholders(request)
+    length = _output_budget_length(placeholder_defs, selections)
 
     def event_stream():
         started = time.perf_counter()

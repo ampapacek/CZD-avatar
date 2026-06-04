@@ -54,6 +54,40 @@ DEFAULT_PLACEHOLDERS: dict[str, PlaceholderDef] = {
 }
 
 
+def _def_to_record(name: str, definition: PlaceholderDef) -> dict[str, Any]:
+    return {
+        "name": name,
+        "label": definition.label,
+        "kind": definition.kind,
+        "help": definition.help,
+        "default": definition.default,
+        "options": [
+            {"name": option.name, "label": option.label, "text": option.text}
+            for option in definition.options
+        ],
+    }
+
+
+def effective_global_placeholders(path: Path) -> list[dict[str, Any]]:
+    """Merged effective global placeholder defs as records for the frontend.
+
+    Starts from the ``DEFAULT_PLACEHOLDERS`` code floor and overlays the mutable
+    ``placeholders.json`` overlay wholesale per name (an overlaid name replaces the
+    code default entirely; options are never merged). Reused by ``GET /settings``
+    and by the chat resolver so both see the same effective global defaults.
+    """
+
+    merged: dict[str, dict[str, Any]] = {
+        name: _def_to_record(name, definition)
+        for name, definition in DEFAULT_PLACEHOLDERS.items()
+    }
+    for record in load_placeholders(path):
+        name = record.get("name")
+        if name:
+            merged[str(name)] = record
+    return list(merged.values())
+
+
 def placeholder_def_from_record(record: dict[str, Any]) -> PlaceholderDef:
     return PlaceholderDef(
         label=str(record.get("label") or record.get("name") or ""),

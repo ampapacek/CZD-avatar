@@ -39,11 +39,12 @@ class RetrieveRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     wp_id: str | None = None
-    length: AnswerLength | None = None
-    custom_instructions: str | None = None
+    # Generic {placeholderName: value} map for the parameter placeholders the
+    # selected prompt uses (select -> chosen option name; text -> typed string).
+    selections: dict[str, str] = Field(default_factory=dict)
     # Inline placeholder defs for the selected prompt (built-in or preset),
-    # highest-precedence source in resolution. 14c populates this from the
-    # frontend; absent/None for now is fine.
+    # highest-precedence source in resolution. Populated by the frontend from the
+    # selected prompt's inline ``placeholders`` map.
     placeholder_defs: dict[str, Any] | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None

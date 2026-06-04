@@ -390,6 +390,19 @@ select:focus {
   gap: 14px;
 }
 
+/* Data-driven parameter placeholder controls (length, custom_instructions, ...)
+   render here, one .field per resolved placeholder. */
+.placeholder-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.placeholder-controls:empty {
+  display: none;
+}
+
 .advanced {
   border: 1px solid var(--line);
   border-radius: 8px;

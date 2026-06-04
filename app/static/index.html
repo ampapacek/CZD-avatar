@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CZDEMOS4AI Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=local-prompts-1" />
+    <link rel="stylesheet" href="static/styles.css?v=placeholder-controls-1" />
   </head>
   <body>
     <main class="shell">
@@ -100,15 +100,7 @@
               <span>Prompt</span>
               <select id="activePromptPreset"></select>
             </label>
-            <input id="style" type="hidden" value="ucitel" />
-            <label class="field">
-              <span>Délka</span>
-              <select id="length">
-                <option value="short">krátká</option>
-                <option value="medium" selected>střední</option>
-                <option value="long">dlouhá</option>
-              </select>
-            </label>
+            <div id="placeholderControls" class="placeholder-controls"></div>
           </div>
 
           <label class="field inline-field retrieve-toggle">
@@ -190,11 +182,6 @@
               </label>
             </div>
           </details>
-
-          <label class="field">
-            <span>Vlastní instrukce</span>
-            <input id="customInstructions" type="text" placeholder="Vloží se do promptu místo {custom_instructions}." />
-          </label>
 
           <div class="form-actions">
             <button id="submitButton" class="primary" type="submit">Odpovědět</button>
@@ -422,27 +409,9 @@
             </label>
             <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
             <label class="field prompt-editor">
-              <span>Systémový prompt ({length})</span>
+              <span>Systémový prompt</span>
               <textarea id="systemPrompt" rows="12"></textarea>
             </label>
-            <label class="field prompt-editor" hidden>
-              <span id="stylePromptDescriptionLabel">Popis vybraného profilu</span>
-              <textarea id="stylePromptDescription" rows="4"></textarea>
-            </label>
-            <div class="length-prompt-editors">
-              <label class="field prompt-editor length-prompt-editor">
-                <span>Krátká délka ({length})</span>
-                <textarea id="lengthPromptShort" data-length-prompt="short" rows="3"></textarea>
-              </label>
-              <label class="field prompt-editor length-prompt-editor">
-                <span>Střední délka ({length})</span>
-                <textarea id="lengthPromptMedium" data-length-prompt="medium" rows="3"></textarea>
-              </label>
-              <label class="field prompt-editor length-prompt-editor">
-                <span>Dlouhá délka ({length})</span>
-                <textarea id="lengthPromptLong" data-length-prompt="long" rows="3"></textarea>
-              </label>
-            </div>
             <label class="field prompt-editor">
               <span>Plný prompt</span>
               <textarea id="userPromptTemplate" rows="8"></textarea>
@@ -524,6 +493,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=wp-selector-1"></script>
+  <script src="static/app.js?v=placeholder-controls-1"></script>
 </body>
 </html>
