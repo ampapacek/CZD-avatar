@@ -82,6 +82,8 @@ Expected commit:
 
 ## Task 3: Split Save Actions Into New, Save As, Update, And Delete
 
+Status: Done.
+
 Scope:
 
 - Replace the single ambiguous `Ulozit` behavior in Settings with explicit actions:

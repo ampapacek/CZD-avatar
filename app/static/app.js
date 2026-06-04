@@ -37,8 +37,9 @@ const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
-const savePromptButton = document.querySelector("#savePromptButton");
-const resetPromptButton = document.querySelector("#resetPromptButton");
+const newPromptButton = document.querySelector("#newPromptButton");
+const savePromptAsButton = document.querySelector("#savePromptAsButton");
+const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const systemPrompt = document.querySelector("#systemPrompt");
@@ -465,18 +466,32 @@ lengthPromptDescription.addEventListener("input", () => {
 });
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
-savePromptButton.addEventListener("click", async () => {
-  savePromptButton.disabled = true;
+savePromptAsButton.addEventListener("click", async () => {
+  savePromptAsButton.disabled = true;
   try {
-    await saveCurrentPromptPreset();
+    await saveCurrentPromptPreset({ mode: "create" });
   } catch (error) {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
   } finally {
-    savePromptButton.disabled = false;
+    savePromptAsButton.disabled = false;
   }
 });
-resetPromptButton.addEventListener("click", resetPromptEditors);
+updatePromptButton.addEventListener("click", async () => {
+  if (promptPreset.value === DEFAULT_PROMPT_PRESET_ID) {
+    return;
+  }
+  updatePromptButton.disabled = true;
+  try {
+    await saveCurrentPromptPreset({ mode: "update" });
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = error.message;
+  } finally {
+    updatePromptButton.disabled = promptPreset.value === DEFAULT_PROMPT_PRESET_ID;
+  }
+});
+newPromptButton.addEventListener("click", createBlankPromptDraft);
 deletePromptButton.addEventListener("click", async () => {
   deletePromptButton.disabled = true;
   try {
@@ -485,7 +500,7 @@ deletePromptButton.addEventListener("click", async () => {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
   } finally {
-    deletePromptButton.disabled = promptPreset.value === "default";
+    deletePromptButton.disabled = promptPreset.value === DEFAULT_PROMPT_PRESET_ID;
   }
 });
 
@@ -1350,6 +1365,7 @@ function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT
   renderPromptPresetSelect(promptPreset, resolvedId);
   activePromptPresetId = resolvedId;
   deletePromptButton.disabled = resolvedId === DEFAULT_PROMPT_PRESET_ID;
+  updatePromptButton.disabled = resolvedId === DEFAULT_PROMPT_PRESET_ID;
 }
 
 function renderPromptPresetSelect(selectEl, selectedId) {
@@ -1402,15 +1418,19 @@ function activePromptPresetMetadata() {
   };
 }
 
-async function saveCurrentPromptPreset() {
-  const currentPreset = promptPresets.find((item) => item.id === promptPreset.value);
+async function saveCurrentPromptPreset({ mode }) {
+  const isUpdate = mode === "update";
+  const currentPreset = isUpdate ? promptPresets.find((item) => item.id === promptPreset.value) : null;
+  if (isUpdate && !currentPreset) {
+    throw new Error("Vyber uložený prompt, který chceš aktualizovat.");
+  }
   const proposedName = currentPreset?.name || "";
   const name = window.prompt("Název promptu", proposedName);
   if (!name || !name.trim()) {
     return;
   }
   const payload = {
-    id: currentPreset?.id || null,
+    id: isUpdate ? currentPreset.id : null,
     name: name.trim(),
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
@@ -1427,6 +1447,17 @@ async function saveCurrentPromptPreset() {
     throw new Error(data.detail || "Prompt preset save failed");
   }
   await loadPromptPresets(data.id);
+}
+
+function createBlankPromptDraft() {
+  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
+  systemPrompt.value = "";
+  userPromptTemplate.value = "";
+  currentStylePrompts = {};
+  currentLengthPrompts = {};
+  updatePromptDescriptionEditors();
+  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  systemPrompt.focus();
 }
 
 function resetPromptEditors() {
