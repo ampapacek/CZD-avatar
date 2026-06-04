@@ -41,6 +41,10 @@ class ChatRequest(BaseModel):
     wp_id: str | None = None
     length: AnswerLength | None = None
     custom_instructions: str | None = None
+    # Inline placeholder defs for the selected prompt (built-in or preset),
+    # highest-precedence source in resolution. 14c populates this from the
+    # frontend; absent/None for now is fine.
+    placeholder_defs: dict[str, Any] | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
@@ -71,13 +75,27 @@ class ChatRequest(BaseModel):
     rerank_candidates: int | None = Field(default=None, ge=1, le=500)
 
 
+class OptionDef(BaseModel):
+    name: str
+    label: str
+    text: str = ""
+
+
+class InlinePlaceholderDef(BaseModel):
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
+
+
 class PromptPreset(BaseModel):
     id: str
     name: str
     wp_id: str
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = Field(default_factory=dict)
+    placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     owner_id: str | None = None
     updated_at: str | None = None
 
@@ -88,15 +106,9 @@ class PromptPresetSaveRequest(BaseModel):
     wp_id: str | None = None
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = Field(default_factory=dict)
+    placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     owner_id: str | None = None
     admin_password: str | None = None
-
-
-class OptionDef(BaseModel):
-    name: str
-    label: str
-    text: str = ""
 
 
 class Placeholder(BaseModel):

@@ -150,6 +150,52 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(defs["length"].default, "INLINE")
         self.assertEqual(defs["length"].kind, "text")
 
+    def _code(self) -> dict[str, PlaceholderDef]:
+        return {
+            "length": PlaceholderDef(
+                label="Délka",
+                kind="select",
+                default="medium",
+                options=[OptionDef(name="medium", label="Střední", text="CODE medium")],
+            )
+        }
+
+    def test_code_floor_used_when_no_higher_layer(self) -> None:
+        defs = resolve_placeholder_defs({"length"}, code_default_defs=self._code())
+        self.assertEqual(defs["length"].options[0].text, "CODE medium")
+
+    def test_full_four_layer_precedence_no_merging(self) -> None:
+        inline = {"length": PlaceholderDef(label="i", default="INLINE")}
+        local = {"length": PlaceholderDef(label="l", default="LOCAL")}
+        # inline wins
+        defs = resolve_placeholder_defs(
+            {"length"},
+            inline_defs=inline,
+            local_global_defs=local,
+            shared_global_defs=self._shared(),
+            code_default_defs=self._code(),
+        )
+        self.assertEqual(defs["length"].default, "INLINE")
+        self.assertEqual(defs["length"].options, [])
+        # without inline, local wins
+        defs = resolve_placeholder_defs(
+            {"length"},
+            local_global_defs=local,
+            shared_global_defs=self._shared(),
+            code_default_defs=self._code(),
+        )
+        self.assertEqual(defs["length"].default, "LOCAL")
+        # without inline/local, shared wins
+        defs = resolve_placeholder_defs(
+            {"length"},
+            shared_global_defs=self._shared(),
+            code_default_defs=self._code(),
+        )
+        self.assertEqual(defs["length"].options[0].text, "SHARED short")
+        # only code floor left
+        defs = resolve_placeholder_defs({"length"}, code_default_defs=self._code())
+        self.assertEqual(defs["length"].options[0].text, "CODE medium")
+
     def test_system_placeholders_are_never_resolved(self) -> None:
         defs = resolve_placeholder_defs(
             {"question", "context", "current_date"},

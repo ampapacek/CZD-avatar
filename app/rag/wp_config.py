@@ -1,8 +1,8 @@
 """Single source of truth for WP (work package) configuration.
 
 Each WP groups a set of built-in (read-only) prompts, the mSearch collections
-it may search, its own length definitions, and optional placeholder
-definitions. Shared and local prompt presets reference a WP through `wp_id`,
+it may search, and optional placeholder definitions. Shared and local prompt
+presets reference a WP through `wp_id`,
 so the UI can later show only the prompts and collections relevant to the
 selected WP.
 
@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.rag.prompts import (
+    PlaceholderDef,
     default_system_prompt_template,
     default_user_prompt_template,
 )
@@ -38,27 +39,22 @@ Piš přesně, formálně a opatrně. Primárně vycházej z relevantních nalez
 """.strip(),
 }
 
-_DEFAULT_LENGTHS = {
-    "short": "Odpověz stručně, přibližně 1-2 odstavce.",
-    "medium": "Odpověz středně dlouze, přibližně 3-5 kratších odstavců nebo několik přehledných bodů.",
-    "long": "Odpověz podrobněji, ale stále přehledně. Uveď hlavní nuance, pokud je podporuje kontext.",
-}
-
-
 @dataclass(frozen=True)
 class BuiltInPrompt:
     """A read-only prompt shipped with a WP.
 
     The body uses the same finalized preset shape as saved presets: a full
     ``system_prompt`` (style is already baked in, ``{length}`` stays as the one
-    orthogonal placeholder) and a ``user_prompt_template``.
+    orthogonal placeholder) and a ``user_prompt_template``. An optional inline
+    ``placeholders`` map overrides global placeholder defs wholesale (highest
+    precedence in resolution).
     """
 
     id: str
     name: str
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = field(default_factory=dict)
+    placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,8 +75,7 @@ class WPConfig:
     default_prompt_id: str
     collections: list[WPCollection]
     default_collection_id: str
-    length_prompts: dict[str, str]
-    placeholders: dict[str, str] = field(default_factory=dict)
+    placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
 
 
 def _wp1_prompt(persona_key: str) -> str:
@@ -148,7 +143,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp1-histoedu",
-        length_prompts=dict(_DEFAULT_LENGTHS),
     ),
     WPConfig(
         id="WP2-média",
@@ -171,7 +165,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp2-zaplavy",
-        length_prompts=dict(_DEFAULT_LENGTHS),
     ),
     WPConfig(
         id="WP3-právo",
@@ -194,7 +187,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp3-law",
-        length_prompts=dict(_DEFAULT_LENGTHS),
     ),
     WPConfig(
         id="WP4-adiktologie",
@@ -217,7 +209,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp4-default",
-        length_prompts=dict(_DEFAULT_LENGTHS),
     ),
 ]
 

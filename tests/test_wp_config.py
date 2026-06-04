@@ -30,7 +30,6 @@ class WPConfigTests(unittest.TestCase):
             self.assertIn(wp.default_prompt_id, prompt_ids, f"{wp.id} default prompt missing")
             collection_ids = {collection.id for collection in wp.collections}
             self.assertIn(wp.default_collection_id, collection_ids, f"{wp.id} default collection missing")
-            self.assertEqual(set(wp.length_prompts), {"short", "medium", "long"})
 
     def test_wp1_keeps_history_built_in_prompts(self) -> None:
         wp1 = get_wp_config("WP1-historie")
@@ -77,13 +76,12 @@ class WPConfigTests(unittest.TestCase):
                 "default_prompt_id",
                 "collections",
                 "default_collection_id",
-                "length_prompts",
                 "placeholders",
             },
         )
         self.assertEqual(
             set(first["builtin_prompts"][0]),
-            {"id", "name", "system_prompt", "user_prompt_template", "length_prompts"},
+            {"id", "name", "system_prompt", "user_prompt_template", "placeholders"},
         )
 
 

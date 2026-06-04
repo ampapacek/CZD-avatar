@@ -34,8 +34,10 @@ from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
 from app.rag.placeholders import (
+    DEFAULT_PLACEHOLDERS,
     delete_placeholder,
     load_placeholders,
+    placeholder_def_from_record,
     placeholder_defs_from_records,
     save_placeholder,
 )
@@ -326,7 +328,9 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
         system_prompt=request.system_prompt,
         user_prompt_template=request.user_prompt_template,
         wp_id=request.wp_id,
-        length_prompts=request.length_prompts,
+        placeholders={
+            name: definition.model_dump() for name, definition in request.placeholders.items()
+        },
         preset_id=request.id,
         owner_id=request.owner_id,
     )
@@ -414,16 +418,28 @@ def remove_placeholder(
 def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, str]]:
     """Resolve placeholder defs and selections for a chat request.
 
-    14a only wires the shared server global registry. Inline (preset) defs land
-    in 14b and browser-local global defs are carried via the request later.
-    Selections come from the dedicated request fields the frontend already sends.
+    Precedence (most specific wins, wholesale per name): prompt-inline (the
+    selected prompt's ``placeholder_defs``) -> shared server overlay
+    (``placeholders.json``) -> ``DEFAULT_PLACEHOLDERS`` code floor. Browser-local
+    global defs land in 14c via the same ``placeholder_defs`` request field.
+    Selections come from the dedicated request fields the frontend sends.
     """
 
     system_template = (request.system_prompt or "").strip() or default_system_prompt_template()
     user_template = (request.user_prompt_template or "").strip() or default_user_prompt_template()
     names = template_placeholder_names(system_template) | template_placeholder_names(user_template)
+    inline_defs = {
+        name: placeholder_def_from_record(definition)
+        for name, definition in (request.placeholder_defs or {}).items()
+        if isinstance(definition, dict)
+    }
     shared_global = placeholder_defs_from_records(load_placeholders(settings.placeholders_path))
-    defs = resolve_placeholder_defs(names, shared_global_defs=shared_global)
+    defs = resolve_placeholder_defs(
+        names,
+        inline_defs=inline_defs,
+        shared_global_defs=shared_global,
+        code_default_defs=DEFAULT_PLACEHOLDERS,
+    )
     selections: dict[str, str] = {}
     if request.length is not None:
         selections["length"] = request.length

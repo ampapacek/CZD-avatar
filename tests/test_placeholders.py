@@ -6,13 +6,15 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app import main
-from app.config import get_settings
 from app.rag.placeholders import (
+    DEFAULT_PLACEHOLDERS,
     delete_placeholder,
     load_placeholders,
+    placeholder_def_from_record,
     placeholder_defs_from_records,
     save_placeholder,
 )
+from app.rag.prompts import OptionDef, PlaceholderDef, resolve_placeholder_defs
 
 
 class PlaceholderStorageTests(unittest.TestCase):
@@ -83,32 +85,86 @@ class PlaceholderStorageTests(unittest.TestCase):
         self.assertEqual(defs["length"].options[0].text, "Stručně.")
 
 
-class SeededPlaceholderFileTests(unittest.TestCase):
-    def test_seed_file_shape(self) -> None:
-        path = Path(get_settings().placeholders_path)
-        self.assertTrue(path.exists(), "data/placeholders.json must be committed")
-        records = load_placeholders(path)
-        by_name = {item["name"]: item for item in records}
-        self.assertIn("length", by_name)
-        self.assertIn("custom_instructions", by_name)
+class DefaultPlaceholdersTests(unittest.TestCase):
+    def test_code_floor_contains_length_and_custom_instructions(self) -> None:
+        self.assertIn("length", DEFAULT_PLACEHOLDERS)
+        self.assertIn("custom_instructions", DEFAULT_PLACEHOLDERS)
 
-        length = by_name["length"]
-        self.assertEqual(length["kind"], "select")
-        self.assertEqual(length["label"], "Délka")
-        self.assertEqual(length["default"], "medium")
-        self.assertEqual(
-            {option["name"] for option in length["options"]},
-            {"short", "medium", "long"},
-        )
-        self.assertEqual(
-            {option["label"] for option in length["options"]},
-            {"Krátká", "Střední", "Dlouhá"},
-        )
+        length = DEFAULT_PLACEHOLDERS["length"]
+        self.assertEqual(length.kind, "select")
+        self.assertEqual(length.label, "Délka")
+        self.assertEqual(length.default, "medium")
+        self.assertEqual({option.name for option in length.options}, {"short", "medium", "long"})
+        self.assertEqual({option.label for option in length.options}, {"Krátká", "Střední", "Dlouhá"})
 
-        custom = by_name["custom_instructions"]
-        self.assertEqual(custom["kind"], "text")
-        self.assertEqual(custom["label"], "Vlastní instrukce")
-        self.assertEqual(custom["default"], "Žádné.")
+        custom = DEFAULT_PLACEHOLDERS["custom_instructions"]
+        self.assertEqual(custom.kind, "text")
+        self.assertEqual(custom.label, "Vlastní instrukce")
+        self.assertEqual(custom.default, "Žádné.")
+
+    def test_resolution_uses_code_floor_when_overlay_absent(self) -> None:
+        # No overlay (placeholders.json absent) and no higher layer: the code
+        # floor still provides length / custom_instructions.
+        defs = resolve_placeholder_defs(
+            {"length", "custom_instructions"},
+            code_default_defs=DEFAULT_PLACEHOLDERS,
+        )
+        self.assertEqual(defs["length"].default, "medium")
+        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+
+    def test_overlay_overrides_code_floor_wholesale(self) -> None:
+        overlay = {
+            "length": PlaceholderDef(
+                label="Délka",
+                kind="select",
+                default="short",
+                options=[OptionDef(name="short", label="Krátká", text="OVERLAY short")],
+            )
+        }
+        defs = resolve_placeholder_defs(
+            {"length"},
+            shared_global_defs=overlay,
+            code_default_defs=DEFAULT_PLACEHOLDERS,
+        )
+        # Whole def taken from overlay; code-floor options are NOT merged in.
+        self.assertEqual([o.text for o in defs["length"].options], ["OVERLAY short"])
+        self.assertEqual(defs["length"].default, "short")
+
+    def test_inline_overrides_everything(self) -> None:
+        inline = {"length": PlaceholderDef(label="Délka", kind="text", default="INLINE")}
+        defs = resolve_placeholder_defs(
+            {"length"},
+            inline_defs=inline,
+            shared_global_defs={"length": DEFAULT_PLACEHOLDERS["length"]},
+            code_default_defs=DEFAULT_PLACEHOLDERS,
+        )
+        self.assertEqual(defs["length"].kind, "text")
+        self.assertEqual(defs["length"].default, "INLINE")
+
+    def test_code_floor_def_applies_only_when_no_higher_layer(self) -> None:
+        # custom_instructions only in code; length overridden by overlay.
+        overlay = {"length": PlaceholderDef(label="x", kind="text", default="OVERLAY")}
+        defs = resolve_placeholder_defs(
+            {"length", "custom_instructions"},
+            shared_global_defs=overlay,
+            code_default_defs=DEFAULT_PLACEHOLDERS,
+        )
+        self.assertEqual(defs["length"].default, "OVERLAY")
+        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+
+
+class LoadPlaceholdersMissingFileTests(unittest.TestCase):
+    def test_missing_file_returns_empty_without_raising(self) -> None:
+        self.assertEqual(load_placeholders(Path("/nonexistent/placeholders.json")), [])
+
+    def test_round_trip_from_inline_record(self) -> None:
+        # placeholder_def_from_record bridges stored inline records to defs.
+        definition = placeholder_def_from_record(
+            {"name": "length", "label": "Délka", "kind": "select", "default": "short",
+             "options": [{"name": "short", "label": "Krátká", "text": "X"}]}
+        )
+        self.assertEqual(definition.kind, "select")
+        self.assertEqual(definition.options[0].text, "X")
 
 
 class PlaceholderEndpointTests(unittest.TestCase):

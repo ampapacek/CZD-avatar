@@ -34,18 +34,21 @@ def resolve_placeholder_defs(
     inline_defs: dict[str, PlaceholderDef] | None = None,
     local_global_defs: dict[str, PlaceholderDef] | None = None,
     shared_global_defs: dict[str, PlaceholderDef] | None = None,
+    code_default_defs: dict[str, PlaceholderDef] | None = None,
 ) -> dict[str, PlaceholderDef]:
     """Pick each placeholder def wholesale from the most specific source.
 
     Precedence per name: prompt-inline -> browser-local global -> shared server
-    global. Options are never merged across sources; a name is taken entirely
-    from the first source that declares it. Names not declared anywhere (and not
-    system placeholders) are simply absent from the result and render literally.
+    global -> built-in code default (``DEFAULT_PLACEHOLDERS``). Options are never
+    merged across sources; a name is taken entirely from the first source that
+    declares it. Names not declared anywhere (and not system placeholders) are
+    simply absent from the result and render literally.
     """
 
     inline = inline_defs or {}
     local = local_global_defs or {}
     shared = shared_global_defs or {}
+    code = code_default_defs or {}
     resolved: dict[str, PlaceholderDef] = {}
     for name in names:
         if name in SYSTEM_PLACEHOLDERS:
@@ -56,6 +59,8 @@ def resolve_placeholder_defs(
             resolved[name] = local[name]
         elif name in shared:
             resolved[name] = shared[name]
+        elif name in code:
+            resolved[name] = code[name]
     return resolved
 
 

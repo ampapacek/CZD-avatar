@@ -12,6 +12,48 @@ from app.rag.prompts import OptionDef, PlaceholderDef
 VALID_KINDS = {"select", "text"}
 
 
+# Built-in global placeholder defaults shipped in code. This is the lowest layer
+# in resolution (below the shared ``placeholders.json`` overlay): a prompt that
+# does not override ``length`` / ``custom_instructions`` anywhere still gets these.
+# They live here (not in a committed JSON seed) so upgrades always ship the current
+# defaults and the mutable overlay file can be absent on a fresh deploy.
+DEFAULT_PLACEHOLDERS: dict[str, PlaceholderDef] = {
+    "length": PlaceholderDef(
+        label="Délka",
+        kind="select",
+        default="medium",
+        options=[
+            OptionDef(
+                name="short",
+                label="Krátká",
+                text="Odpověz stručně, přibližně 1-2 odstavce.",
+            ),
+            OptionDef(
+                name="medium",
+                label="Střední",
+                text=(
+                    "Odpověz středně dlouze, přibližně 3-5 kratších odstavců "
+                    "nebo několik přehledných bodů."
+                ),
+            ),
+            OptionDef(
+                name="long",
+                label="Dlouhá",
+                text=(
+                    "Odpověz podrobněji, ale stále přehledně. Uveď hlavní nuance, "
+                    "pokud je podporuje kontext."
+                ),
+            ),
+        ],
+    ),
+    "custom_instructions": PlaceholderDef(
+        label="Vlastní instrukce",
+        kind="text",
+        default="Žádné.",
+    ),
+}
+
+
 def placeholder_def_from_record(record: dict[str, Any]) -> PlaceholderDef:
     return PlaceholderDef(
         label=str(record.get("label") or record.get("name") or ""),
