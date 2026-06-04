@@ -38,6 +38,7 @@ const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const newPromptButton = document.querySelector("#newPromptButton");
+const savePromptLocalButton = document.querySelector("#savePromptLocalButton");
 const savePromptAsButton = document.querySelector("#savePromptAsButton");
 const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
@@ -108,6 +109,7 @@ const HISTORY_STORAGE_KEY = "czdemos4ai-history";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
 const TOKEN_BUDGET_STORAGE_KEY = "czdemos4ai-token-budget";
+const LOCAL_PROMPT_PRESETS_STORAGE_KEY = "czdemos4ai-local-prompt-presets";
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const STYLE_LABELS = {
@@ -117,6 +119,7 @@ const STYLE_LABELS = {
 };
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
+const LOCAL_PROMPT_PREFIX = "local-";
 const DEFAULT_PROMPT_PRESET_ID = "builtin-ucitel";
 const BUILTIN_PROMPT_DEFINITIONS = [
   { id: "builtin-laik", name: "Laik", style: "laik" },
@@ -153,6 +156,7 @@ let currentTokenBudget = null;
 let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
+let localPromptPresets = [];
 let activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
 let currentStylePrompts = {};
 let currentLengthPrompts = {};
@@ -488,6 +492,17 @@ systemPrompt.addEventListener("input", updatePromptTemplateWarning);
 userPromptTemplate.addEventListener("input", updatePromptTemplateWarning);
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
+savePromptLocalButton.addEventListener("click", async () => {
+  savePromptLocalButton.disabled = true;
+  try {
+    await saveCurrentPromptPresetLocally({ mode: "create" });
+  } catch (error) {
+    statusEl.className = "status error";
+    statusEl.textContent = error.message;
+  } finally {
+    savePromptLocalButton.disabled = false;
+  }
+});
 savePromptAsButton.addEventListener("click", async () => {
   savePromptAsButton.disabled = true;
   try {
@@ -500,17 +515,21 @@ savePromptAsButton.addEventListener("click", async () => {
   }
 });
 updatePromptButton.addEventListener("click", async () => {
-  if (promptPreset.value === DEFAULT_PROMPT_PRESET_ID) {
+  if (!isEditablePromptPreset(promptPreset.value)) {
     return;
   }
   updatePromptButton.disabled = true;
   try {
-    await saveCurrentPromptPreset({ mode: "update" });
+    if (isLocalPromptPreset(promptPreset.value)) {
+      await saveCurrentPromptPresetLocally({ mode: "update" });
+    } else {
+      await saveCurrentPromptPreset({ mode: "update" });
+    }
   } catch (error) {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
   } finally {
-    updatePromptButton.disabled = promptPreset.value === DEFAULT_PROMPT_PRESET_ID;
+    updatePromptButton.disabled = !isEditablePromptPreset(promptPreset.value);
   }
 });
 newPromptButton.addEventListener("click", createBlankPromptDraft);
@@ -522,7 +541,7 @@ deletePromptButton.addEventListener("click", async () => {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
   } finally {
-    deletePromptButton.disabled = promptPreset.value === DEFAULT_PROMPT_PRESET_ID;
+    deletePromptButton.disabled = !isEditablePromptPreset(promptPreset.value);
   }
 });
 
@@ -1412,6 +1431,7 @@ function extractPromptVariables(template) {
 }
 
 async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+  localPromptPresets = loadLocalPromptPresets();
   try {
     const response = await fetch("prompt-presets");
     const data = await response.json();
@@ -1431,20 +1451,25 @@ function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT
   renderPromptPresetSelect(activePromptPreset, resolvedId);
   renderPromptPresetSelect(promptPreset, resolvedId);
   activePromptPresetId = resolvedId;
-  deletePromptButton.disabled = !isServerPromptPreset(resolvedId);
-  updatePromptButton.disabled = !isServerPromptPreset(resolvedId);
+  deletePromptButton.disabled = !isEditablePromptPreset(resolvedId);
+  updatePromptButton.disabled = !isEditablePromptPreset(resolvedId);
 }
 
 function renderPromptPresetSelect(selectEl, selectedId) {
   const builtinOptions = builtInPromptPresets()
     .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
     .join("");
-  const serverOptions = promptPresets.length
-    ? `<optgroup label="Uložené prompty">${promptPresets
-        .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+  const localOptions = localPromptPresets.length
+    ? `<optgroup label="Lokální prompty">${localPromptPresets
+        .map((preset) => `<option value="${escapeHtml(preset.id)}">Local - ${escapeHtml(preset.name)}</option>`)
         .join("")}</optgroup>`
     : "";
-  selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${serverOptions}`;
+  const serverOptions = promptPresets.length
+    ? `<optgroup label="Sdílené prompty">${promptPresets
+        .map((preset) => `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}</option>`)
+        .join("")}</optgroup>`
+    : "";
+  selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${localOptions}${serverOptions}`;
   selectEl.value = normalizePromptPresetId(selectedId);
 }
 
@@ -1463,8 +1488,19 @@ function isBuiltInPromptPreset(presetId) {
   return String(presetId || "").startsWith(BUILTIN_PROMPT_PREFIX);
 }
 
+function isLocalPromptPreset(presetId) {
+  return String(presetId || "").startsWith(LOCAL_PROMPT_PREFIX)
+    && localPromptPresets.some((preset) => preset.id === presetId);
+}
+
 function isServerPromptPreset(presetId) {
-  return !isBuiltInPromptPreset(presetId) && promptPresets.some((preset) => preset.id === presetId);
+  return !isBuiltInPromptPreset(presetId)
+    && !String(presetId || "").startsWith(LOCAL_PROMPT_PREFIX)
+    && promptPresets.some((preset) => preset.id === presetId);
+}
+
+function isEditablePromptPreset(presetId) {
+  return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
 }
 
 function builtInPromptPresets() {
@@ -1489,7 +1525,10 @@ function getPromptPresetById(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
     return getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
   }
-  return builtInPromptPresets().find((preset) => preset.id === presetId) || promptPresets.find((preset) => preset.id === presetId) || null;
+  return builtInPromptPresets().find((preset) => preset.id === presetId)
+    || localPromptPresets.find((preset) => preset.id === presetId)
+    || promptPresets.find((preset) => preset.id === presetId)
+    || null;
 }
 
 function applySelectedPromptPreset() {
@@ -1524,6 +1563,18 @@ function activePromptPresetMetadata() {
   };
 }
 
+function currentPromptDraft({ id = null, name }) {
+  return {
+    id,
+    name: name.trim(),
+    style: style.value,
+    system_prompt: systemPrompt.value,
+    user_prompt_template: userPromptTemplate.value,
+    style_prompts: currentStylePrompts,
+    length_prompts: currentLengthPrompts,
+  };
+}
+
 async function saveCurrentPromptPreset({ mode }) {
   const isUpdate = mode === "update";
   const currentPreset = isUpdate && isServerPromptPreset(promptPreset.value)
@@ -1537,14 +1588,7 @@ async function saveCurrentPromptPreset({ mode }) {
   if (!name || !name.trim()) {
     return;
   }
-  const payload = {
-    id: isUpdate ? currentPreset.id : null,
-    name: name.trim(),
-    system_prompt: systemPrompt.value,
-    user_prompt_template: userPromptTemplate.value,
-    style_prompts: currentStylePrompts,
-    length_prompts: currentLengthPrompts,
-  };
+  const payload = currentPromptDraft({ id: isUpdate ? currentPreset.id : null, name });
   const response = await fetch("prompt-presets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1555,6 +1599,77 @@ async function saveCurrentPromptPreset({ mode }) {
     throw new Error(data.detail || "Prompt preset save failed");
   }
   await loadPromptPresets(data.id);
+}
+
+async function saveCurrentPromptPresetLocally({ mode }) {
+  const isUpdate = mode === "update";
+  const currentPreset = isUpdate && isLocalPromptPreset(promptPreset.value)
+    ? localPromptPresets.find((item) => item.id === promptPreset.value)
+    : null;
+  if (isUpdate && !currentPreset) {
+    throw new Error("Vyber lokální prompt, který chceš aktualizovat.");
+  }
+  const proposedName = currentPreset?.name || "";
+  const name = window.prompt("Název lokálního promptu", proposedName);
+  if (!name || !name.trim()) {
+    return;
+  }
+  const id = isUpdate ? currentPreset.id : createLocalPromptPresetId();
+  const nextPreset = currentPromptDraft({ id, name });
+  localPromptPresets = isUpdate
+    ? localPromptPresets.map((preset) => (preset.id === id ? nextPreset : preset))
+    : [...localPromptPresets, nextPreset];
+  persistLocalPromptPresets();
+  applyPromptPresetById(id);
+}
+
+function createLocalPromptPresetId() {
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `${LOCAL_PROMPT_PREFIX}${Date.now().toString(36)}-${randomPart}`;
+}
+
+function loadLocalPromptPresets() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_PROMPT_PRESETS_STORAGE_KEY) || "[]");
+    return Array.isArray(raw) ? raw.map(normalizeLocalPromptPreset).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeLocalPromptPreset(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  const id = String(item.id || "");
+  const name = String(item.name || "").trim();
+  if (!id.startsWith(LOCAL_PROMPT_PREFIX) || !name) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    style: String(item.style || ""),
+    system_prompt: String(item.system_prompt || ""),
+    user_prompt_template: String(item.user_prompt_template || ""),
+    style_prompts: stringMap(item.style_prompts),
+    length_prompts: stringMap(item.length_prompts),
+  };
+}
+
+function stringMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [String(key), item])
+  );
+}
+
+function persistLocalPromptPresets() {
+  localStorage.setItem(LOCAL_PROMPT_PRESETS_STORAGE_KEY, JSON.stringify(localPromptPresets));
 }
 
 function createBlankPromptDraft() {
@@ -1587,6 +1702,12 @@ function resetPromptEditorValues() {
 }
 
 async function deleteSelectedPromptPreset() {
+  if (isLocalPromptPreset(promptPreset.value)) {
+    localPromptPresets = localPromptPresets.filter((preset) => preset.id !== promptPreset.value);
+    persistLocalPromptPresets();
+    resetPromptEditors();
+    return;
+  }
   if (!isServerPromptPreset(promptPreset.value)) {
     return;
   }
