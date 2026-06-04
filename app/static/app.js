@@ -1680,11 +1680,18 @@ function renderInlinePlaceholderDefs() {
   }
   const inline = activePromptInlinePlaceholderDefs();
   const names = Object.keys(inline).sort();
+  // Inline defs on a SERVER preset live only in memory until the prompt itself is
+  // saved, so an edit is lost if the user navigates away first. Local presets
+  // persist immediately and built-ins are not editable here, so only warn for
+  // server presets.
+  const unsavedNote = isServerPromptPreset(activePromptPresetId)
+    ? `<p class="field-note unsaved-note">Změny inline proměnných se uloží až po uložení promptu („Uložit jako nový“ / „Aktualizovat“).</p>`
+    : "";
   if (!names.length) {
-    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>`;
+    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>${unsavedNote}`;
     return;
   }
-  inlinePlaceholderDefsList.innerHTML = names
+  inlinePlaceholderDefsList.innerHTML = `${names
     .map((name) => {
       const def = inline[name] || {};
       const kindLabel = def.kind === "select" ? "výběr" : "text";
@@ -1701,7 +1708,7 @@ function renderInlinePlaceholderDefs() {
           </div>
         </div>`;
     })
-    .join("");
+    .join("")}${unsavedNote}`;
 }
 
 // --- shared dialog editor ---------------------------------------------------

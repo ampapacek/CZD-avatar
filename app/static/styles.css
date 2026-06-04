@@ -265,6 +265,10 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   line-height: 1.4;
 }
 
+.field-note.unsaved-note {
+  color: #b45309;
+}
+
 .unlock-status,
 #modelRefreshStatus {
   min-height: 17px;
