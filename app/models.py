@@ -80,6 +80,7 @@ class PromptPreset(BaseModel):
     user_prompt_template: str
     style_prompts: dict[str, str] = Field(default_factory=dict)
     length_prompts: dict[str, str] = Field(default_factory=dict)
+    owner_id: str | None = None
     updated_at: str | None = None
 
 
@@ -90,6 +91,8 @@ class PromptPresetSaveRequest(BaseModel):
     user_prompt_template: str
     style_prompts: dict[str, str] = Field(default_factory=dict)
     length_prompts: dict[str, str] = Field(default_factory=dict)
+    owner_id: str | None = None
+    unlock_password: str | None = None
 
 
 class UnlockRequest(BaseModel):

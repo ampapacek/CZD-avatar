@@ -271,6 +271,30 @@ def random_question() -> dict[str, str]:
     return {"question": random.choice(questions)}
 
 
+PROMPT_PRESET_FORBIDDEN_DETAIL = (
+    "Tento sdílený prompt patří jinému prohlížeči. Odemkni ho sdíleným heslem, abys ho mohl změnit."
+)
+
+
+def _find_prompt_preset(preset_id: str) -> dict[str, str] | None:
+    return next(
+        (preset for preset in load_prompt_presets(settings.prompt_presets_path) if preset["id"] == preset_id),
+        None,
+    )
+
+
+def _can_modify_prompt_preset(preset: dict[str, str], owner_id: str | None, password: str | None) -> bool:
+    owner = (preset.get("owner_id") or "").strip()
+    requester = (owner_id or "").strip()
+    if owner and requester and hmac.compare_digest(owner, requester):
+        return True
+    if settings.llm_unlock_password and hmac.compare_digest(
+        (password or "").strip(), settings.llm_unlock_password
+    ):
+        return True
+    return False
+
+
 @app.get("/prompt-presets", response_model=list[PromptPreset])
 def get_prompt_presets() -> list[PromptPreset]:
     return [PromptPreset(**preset) for preset in load_prompt_presets(settings.prompt_presets_path)]
@@ -289,6 +313,9 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Prompt preset name is required.")
+    existing = _find_prompt_preset(request.id) if request.id else None
+    if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.unlock_password):
+        raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     preset = save_prompt_preset(
         settings.prompt_presets_path,
         name=name,
@@ -297,14 +324,23 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
         style_prompts=request.style_prompts,
         length_prompts=request.length_prompts,
         preset_id=request.id,
+        owner_id=request.owner_id,
     )
     return PromptPreset(**preset)
 
 
 @app.delete("/prompt-presets/{preset_id}", status_code=204)
-def remove_prompt_preset(preset_id: str) -> Response:
-    if not delete_prompt_preset(settings.prompt_presets_path, preset_id):
+def remove_prompt_preset(
+    preset_id: str,
+    owner_id: str | None = None,
+    unlock_password: str | None = None,
+) -> Response:
+    existing = _find_prompt_preset(preset_id)
+    if existing is None:
         raise HTTPException(status_code=404, detail="Prompt preset not found.")
+    if not _can_modify_prompt_preset(existing, owner_id, unlock_password):
+        raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
+    delete_prompt_preset(settings.prompt_presets_path, preset_id)
     return Response(status_code=204)
 
 

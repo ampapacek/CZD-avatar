@@ -110,6 +110,7 @@ const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
 const TOKEN_BUDGET_STORAGE_KEY = "czdemos4ai-token-budget";
 const LOCAL_PROMPT_PRESETS_STORAGE_KEY = "czdemos4ai-local-prompt-presets";
+const BROWSER_OWNER_ID_STORAGE_KEY = "czdemos4ai-browser-owner-id";
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const STYLE_LABELS = {
@@ -1466,7 +1467,10 @@ function renderPromptPresetSelect(selectEl, selectedId) {
     : "";
   const serverOptions = promptPresets.length
     ? `<optgroup label="Sdílené prompty">${promptPresets
-        .map((preset) => `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}</option>`)
+        .map((preset) => {
+          const ownedSuffix = isOwnedServerPromptPreset(preset.id) ? " (tvůj)" : "";
+          return `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}${ownedSuffix}</option>`;
+        })
         .join("")}</optgroup>`
     : "";
   selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${localOptions}${serverOptions}`;
@@ -1588,7 +1592,11 @@ async function saveCurrentPromptPreset({ mode }) {
   if (!name || !name.trim()) {
     return;
   }
-  const payload = currentPromptDraft({ id: isUpdate ? currentPreset.id : null, name });
+  const payload = {
+    ...currentPromptDraft({ id: isUpdate ? currentPreset.id : null, name }),
+    owner_id: getBrowserOwnerId(),
+    unlock_password: llmUnlockPassword.value.trim() || null,
+  };
   const response = await fetch("prompt-presets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1626,6 +1634,40 @@ async function saveCurrentPromptPresetLocally({ mode }) {
 function createLocalPromptPresetId() {
   const randomPart = Math.random().toString(36).slice(2, 8);
   return `${LOCAL_PROMPT_PREFIX}${Date.now().toString(36)}-${randomPart}`;
+}
+
+function getBrowserOwnerId() {
+  let ownerId = "";
+  try {
+    ownerId = localStorage.getItem(BROWSER_OWNER_ID_STORAGE_KEY) || "";
+  } catch {
+    ownerId = "";
+  }
+  if (!ownerId) {
+    ownerId = generateBrowserOwnerId();
+    try {
+      localStorage.setItem(BROWSER_OWNER_ID_STORAGE_KEY, ownerId);
+    } catch {
+      // localStorage may be unavailable; fall back to an in-memory id for this session.
+    }
+  }
+  return ownerId;
+}
+
+function generateBrowserOwnerId() {
+  if (window.crypto?.randomUUID) {
+    return `owner-${window.crypto.randomUUID()}`;
+  }
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `owner-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function isOwnedServerPromptPreset(presetId) {
+  if (!isServerPromptPreset(presetId)) {
+    return false;
+  }
+  const preset = promptPresets.find((item) => item.id === presetId);
+  return Boolean(preset?.owner_id) && preset.owner_id === getBrowserOwnerId();
 }
 
 function loadLocalPromptPresets() {
@@ -1711,9 +1753,15 @@ async function deleteSelectedPromptPreset() {
   if (!isServerPromptPreset(promptPreset.value)) {
     return;
   }
-  const response = await fetch(`prompt-presets/${encodeURIComponent(promptPreset.value)}`, {
-    method: "DELETE",
-  });
+  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
+  const unlockPassword = llmUnlockPassword.value.trim();
+  if (unlockPassword) {
+    params.set("unlock_password", unlockPassword);
+  }
+  const response = await fetch(
+    `prompt-presets/${encodeURIComponent(promptPreset.value)}?${params.toString()}`,
+    { method: "DELETE" },
+  );
   if (!response.ok && response.status !== 404) {
     const data = await safeJson(response);
     throw new Error(data.detail || "Prompt preset delete failed");

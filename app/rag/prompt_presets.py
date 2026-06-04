@@ -28,8 +28,10 @@ def save_prompt_preset(
     style_prompts: dict[str, str] | None = None,
     length_prompts: dict[str, str] | None = None,
     preset_id: str | None = None,
+    owner_id: str | None = None,
 ) -> dict[str, str]:
     presets = load_prompt_presets(path)
+    existing = next((preset for preset in presets if preset["id"] == preset_id), None) if preset_id else None
     resolved_id = preset_id or _slugify(name)
     if any(preset["id"] != preset_id and preset["id"] == resolved_id for preset in presets):
         suffix = 2
@@ -37,6 +39,9 @@ def save_prompt_preset(
         while any(preset["id"] != preset_id and preset["id"] == f"{base_id}-{suffix}" for preset in presets):
             suffix += 1
         resolved_id = f"{base_id}-{suffix}"
+    # Keep ownership stable across updates; an authorized edit of an ownerless
+    # preset lets the editing browser claim it.
+    resolved_owner = (existing.get("owner_id") if existing else "") or (owner_id or "").strip()
     record = {
         "id": resolved_id,
         "name": name.strip(),
@@ -44,6 +49,7 @@ def save_prompt_preset(
         "user_prompt_template": user_prompt_template,
         "style_prompts": style_prompts or {},
         "length_prompts": length_prompts or {},
+        "owner_id": resolved_owner,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     next_presets = [record, *[preset for preset in presets if preset["id"] != resolved_id]]
@@ -75,6 +81,7 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, str]:
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
         "style_prompts": _string_dict(item.get("style_prompts")),
         "length_prompts": _string_dict(item.get("length_prompts")),
+        "owner_id": str(item.get("owner_id") or ""),
         "updated_at": str(item.get("updated_at") or ""),
     }
 
