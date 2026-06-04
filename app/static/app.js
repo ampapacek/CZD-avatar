@@ -38,8 +38,9 @@ const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const newPromptButton = document.querySelector("#newPromptButton");
-const savePromptLocalButton = document.querySelector("#savePromptLocalButton");
 const savePromptAsButton = document.querySelector("#savePromptAsButton");
+const sharePromptOnServer = document.querySelector("#sharePromptOnServer");
+const promptShareNote = document.querySelector("#promptShareNote");
 const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
@@ -493,21 +494,16 @@ systemPrompt.addEventListener("input", updatePromptTemplateWarning);
 userPromptTemplate.addEventListener("input", updatePromptTemplateWarning);
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
-savePromptLocalButton.addEventListener("click", async () => {
-  savePromptLocalButton.disabled = true;
-  try {
-    await saveCurrentPromptPresetLocally({ mode: "create" });
-  } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
-  } finally {
-    savePromptLocalButton.disabled = false;
-  }
-});
+sharePromptOnServer.addEventListener("change", updatePromptShareNote);
+updatePromptShareNote();
 savePromptAsButton.addEventListener("click", async () => {
   savePromptAsButton.disabled = true;
   try {
-    await saveCurrentPromptPreset({ mode: "create" });
+    if (sharePromptOnServer.checked) {
+      await saveCurrentPromptPreset({ mode: "create" });
+    } else {
+      await saveCurrentPromptPresetLocally({ mode: "create" });
+    }
   } catch (error) {
     statusEl.className = "status error";
     statusEl.textContent = error.message;
@@ -1634,6 +1630,12 @@ async function saveCurrentPromptPresetLocally({ mode }) {
     : [...localPromptPresets, nextPreset];
   persistLocalPromptPresets();
   applyPromptPresetById(id);
+}
+
+function updatePromptShareNote() {
+  promptShareNote.textContent = sharePromptOnServer.checked
+    ? "Uloží se na serveru a bude dostupný ostatním."
+    : "Uloží se jen v tomto prohlížeči.";
 }
 
 function createLocalPromptPresetId() {

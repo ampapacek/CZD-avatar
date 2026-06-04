@@ -409,12 +409,16 @@
               </label>
               <div class="prompt-actions">
                 <button id="newPromptButton" class="secondary" type="button">Nový prázdný</button>
-                <button id="savePromptLocalButton" class="secondary" type="button">Uložit lokálně</button>
                 <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
                 <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
                 <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
               </div>
             </div>
+            <label class="field inline-field prompt-share-toggle">
+              <input id="sharePromptOnServer" type="checkbox" />
+              <span>Sdílet s ostatními</span>
+            </label>
+            <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
             <label class="field prompt-editor">
               <span>Systémový prompt ({length})</span>
               <textarea id="systemPrompt" rows="12"></textarea>

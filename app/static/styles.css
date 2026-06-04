@@ -455,6 +455,14 @@ select:focus {
   justify-content: flex-end;
 }
 
+.prompt-share-toggle {
+  margin-top: 4px;
+}
+
+#promptShareNote {
+  margin: 2px 0 0;
+}
+
 .prompt-editor textarea {
   min-height: 180px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
