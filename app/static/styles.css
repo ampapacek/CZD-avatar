@@ -976,6 +976,7 @@ button:hover {
 .conversation-dialog-body {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -990,6 +991,7 @@ button:hover {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
 }
 
 .conversation-meta {
@@ -1159,6 +1161,7 @@ button:hover {
 .conversation-sources-panel {
   border-left: 1px solid var(--line);
   padding: 18px;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--surface-3);
