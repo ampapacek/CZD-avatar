@@ -177,8 +177,8 @@
               </label>
               <div class="rerank-options" id="rerankOptions" hidden>
                 <label class="field" id="rerankCandidatesField">
-                  <span>Kandidátů k re-rankingu</span>
-                  <input id="rerankCandidates" type="number" min="1" max="200" step="1" placeholder="Např. 40" />
+                  <span>Kandidátů k re-rankingu: <output id="rerankCandidatesValue">40</output></span>
+                  <input id="rerankCandidates" type="range" min="1" max="200" step="1" value="40" />
                 </label>
                 <label class="field" id="rerankField">
                   <span>Váha re-rankingu: <output id="rerankWeightValue">0.0</output></span>

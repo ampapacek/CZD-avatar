@@ -84,6 +84,7 @@ const rerankWeight = document.querySelector("#rerankWeight");
 const rerankWeightValue = document.querySelector("#rerankWeightValue");
 const rerankCandidatesField = document.querySelector("#rerankCandidatesField");
 const rerankCandidates = document.querySelector("#rerankCandidates");
+const rerankCandidatesValue = document.querySelector("#rerankCandidatesValue");
 let rerankAvailable = false;
 const minScore = document.querySelector("#minScore");
 const minScoreValue = document.querySelector("#minScoreValue");
@@ -2675,10 +2676,12 @@ function updateRerankControls() {
     rerankWeight.value = defaultWeight > 0 ? defaultWeight : 1;
   }
   rerankOptions.hidden = !rerankAvailable || !rerankEnabled.checked;
+  rerankCandidatesValue.value = Number(rerankCandidates.value).toFixed(0);
   rerankWeightValue.value = Number(rerankWeight.value).toFixed(1);
 }
 
 rerankEnabled.addEventListener("change", updateRerankControls);
+rerankCandidates.addEventListener("input", updateRerankControls);
 rerankWeight.addEventListener("input", updateRerankControls);
 
 denseWeight.addEventListener("input", () => {
