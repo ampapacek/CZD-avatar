@@ -394,7 +394,7 @@ A prompt is one concept to the UI (the dropdown merges built-ins + local + share
 
 Every user-facing template variable is a declared **placeholder**, written as `{name}` in a prompt. Two groups:
 
-- **System placeholders** — filled automatically by the server, no control: `{question}`, `{context}`, `{current_date}` (server-local date).
+- **System placeholders** — filled automatically by the server, no control: `{question}`, `{retrieved_snippets}`, `{current_date}` (server-local date).
 - **Parameter placeholders** — surfaced as a control on the main page, data-driven from the tokens the selected prompt uses. Each has a `kind`:
   - `select` — named options `{name, label, text}`; substitutes the chosen option's `text` (e.g. `{length}` → short/medium/long).
   - `text` — free text; substitutes the typed string, or a `default` when empty (e.g. `{custom_instructions}` → `Žádné.`). Omitted if the placeholder is absent from the template.

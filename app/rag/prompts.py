@@ -7,9 +7,9 @@ from typing import Any
 
 
 # System placeholders are filled automatically by the server and are never
-# surfaced as user-facing controls. ``{question}`` and ``{context}`` are filled
+# surfaced as user-facing controls. ``{question}`` and ``{retrieved_snippets}`` are filled
 # from request data; ``{current_date}`` is the server-local date.
-SYSTEM_PLACEHOLDERS = frozenset({"question", "context", "current_date"})
+SYSTEM_PLACEHOLDERS = frozenset({"question", "retrieved_snippets", "current_date"})
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ Vlastní instrukce uživatele (může být prázdné):
 {custom_instructions}
 
 Nalezený kontext:
-{context}
+{retrieved_snippets}
 """.strip()
 
 
@@ -134,8 +134,8 @@ def build_messages(
     system_template = (system_prompt or "").strip() or default_system_prompt_template()
     user_template = (user_prompt_template or "").strip() or default_user_prompt_template()
 
-    system_values = {"context": context_for_prompt}
-    user_values = {"question": question, "context": context_for_prompt}
+    system_values = {"retrieved_snippets": context_for_prompt}
+    user_values = {"question": question, "retrieved_snippets": context_for_prompt}
 
     system = _render_prompt_template(
         system_template,

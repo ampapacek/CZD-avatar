@@ -85,7 +85,7 @@ class PlaceholderEngineTests(unittest.TestCase):
             placeholder_defs={},
             selections={},
             system_prompt="Datum: {current_date}",
-            user_prompt_template="Otázka: {question}\nKontext: {context}",
+            user_prompt_template="Otázka: {question}\nKontext: {retrieved_snippets}",
             context_text="kontextový text",
         )
         self.assertEqual(f"Datum: {date.today().isoformat()}", messages[0]["content"])

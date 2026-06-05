@@ -1544,13 +1544,13 @@ const SYSTEM_PLACEHOLDERS = new Set(["question", "context", "current_date"]);
 // Surfaced read-only in the "Proměnné promptu" list for discoverability.
 const SYSTEM_PLACEHOLDER_INFO = [
   { name: "question", label: "Otázka uživatele", note: "doplní server z dotazu" },
-  { name: "context", label: "Nalezený kontext", note: "doplní server z nalezených pasáží" },
+  { name: "retrieved_snippets", label: "Nalezený kontext", note: "doplní server z nalezených pasáží" },
   { name: "current_date", label: "Aktuální datum", note: "doplní server (datum na serveru)" },
 ];
 
 // Minimal user template for a new blank prompt: keeps the {question} and
-// {context} system tokens so the draft works without manual setup.
-const BLANK_USER_PROMPT_TEMPLATE = "Otázka:\n{question}\n\nNalezený kontext:\n{context}";
+// {retrieved_snippets} system tokens so the draft works without manual setup.
+const BLANK_USER_PROMPT_TEMPLATE = "Otázka:\n{question}\n\nNalezený kontext:\n{retrieved_snippets}";
 
 // Merged effective global placeholder defs from /settings (DEFAULT_PLACEHOLDERS
 // overlaid by placeholders.json), keyed by name.
@@ -2753,7 +2753,7 @@ function createBlankPromptDraft() {
   }
   // Blank drafts are a Settings-editor action, scoped to the Settings WP.
   const draftId = `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  // A truly empty user template would drop {question}/{context}, leaving the
+  // A truly empty user template would drop {question}/{retrieved_snippets}, leaving the
   // model with no question and no retrieved passages. Seed the two system tokens
   // the server fills so the draft is functional out of the box.
   draftPromptPreset = {

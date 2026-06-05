@@ -193,7 +193,7 @@ uvicorn app.main:app --reload
 ### Placeholder model
 
 - Built-in global placeholder defaults (`length`, `custom_instructions`) live in `DEFAULT_PLACEHOLDERS` (`app/rag/placeholders.py`), the lowest resolution layer.
-- System placeholders (`{question}`, `{context}`, `{current_date}`) are filled by the server and never shown as controls. Parameter placeholders (`kind` `select` or `text`; `number` deferred) become data-driven main-page controls from the tokens the selected prompt uses.
+- System placeholders (`{question}`, `{retrieved_snippets}`, `{current_date}`) are filled by the server and never shown as controls. Parameter placeholders (`kind` `select` or `text`; `number` deferred) become data-driven main-page controls from the tokens the selected prompt uses.
 - Resolution per token, most specific wins, taken wholesale (no option merging): inline-on-prompt → browser-local global → shared overlay (`data/placeholders.json`) → `DEFAULT_PLACEHOLDERS` code floor → undeclared (render literally + warn, never crash).
 - The chat request carries `selections` (`{name: value}`) and `placeholder_defs` (frontend's fully-resolved effective defs), so the server stays stateless about `localStorage`.
 - Shared overlay edits (`data/placeholders.json`) need `owner_id` or `ADMIN_PASSWORD`; browser-local defs (`localStorage` key `czdemos4ai-local-placeholder-defs`) need none. Inline defs on a server preset persist only when the prompt is saved (UI warns).
