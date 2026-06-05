@@ -237,7 +237,7 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
-const WP2_MSEARCH_COLLECTION = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09";
+const WP2_MSEARCH_COLLECTION = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0";
 
 function isAiUfalBaseUrl(baseUrl) {
   try {

@@ -44,7 +44,7 @@ class WPConfigTests(unittest.TestCase):
     def test_wp_collections_map_by_number(self) -> None:
         expected = {
             "WP1-historie": "64d6f521-5044-4b02-8658-380b639801af",
-            "WP2-média": "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
+            "WP2-média": "ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
             "WP3-právo": "d4be44d5-689c-4bbe-a372-b959929cd511",
             "WP4-adiktologie": "3429956e-8a21-4502-ad21-a41fddc5ef99",
         }

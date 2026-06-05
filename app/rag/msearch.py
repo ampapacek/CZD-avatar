@@ -15,10 +15,10 @@ FALLBACK_COLLECTION_PRESETS = [
         "last_modified": "2026-02-23T14:23:48.294717",
     },
     {
-        "label": "WP2: zaplavy v2025-11",
-        "collection_id": "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
-        "collection_name": "wp2-zaplavy-v2025-11",
-        "last_modified": "2026-01-16T14:38:23.209440",
+        "label": "WP2: zaplavy v2026-6",
+        "collection_id": "ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
+        "collection_name": "wp2-zaplavy-v2026-6",
+        "last_modified": "2026-06-04T17:51:35.359767",
     },
     {
         "label": "WP3: law v2026-02",
@@ -34,7 +34,7 @@ FALLBACK_COLLECTION_PRESETS = [
     },
 ]
 
-WP2_COLLECTION_ID = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09"
+WP2_COLLECTION_ID = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0"
 
 
 class MSearchRetriever:
