@@ -68,6 +68,7 @@ class WPConfigTests(unittest.TestCase):
                 "collections",
                 "default_collection_id",
                 "questions_path",
+                "local_retrieval_enabled",
                 "placeholders",
                 "requires_aiufal",
             },

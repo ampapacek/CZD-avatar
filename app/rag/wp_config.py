@@ -81,6 +81,7 @@ class WPConfig:
     collections: list[WPCollection]
     default_collection_id: str
     questions_path: str | None = None
+    local_retrieval_enabled: bool = False
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
     # When true, every collection in this WP is only retrievable through the AI
     # Ufal provider. The backend policy and the frontend selector both read this
@@ -155,6 +156,7 @@ WP_CONFIGS: list[WPConfig] = [
         ],
         default_collection_id="wp1-histoedu",
         questions_path="data/questions/wp1-historie.txt",
+        local_retrieval_enabled=True,
     ),
     WPConfig(
         id="WP2-média",

@@ -181,6 +181,18 @@ def _enforce_msearch_collection_policy(
         )
 
 
+def _enforce_retrieval_backend_policy(wp_id: str | None, retrieval_backend: str | None) -> None:
+    if retrieval_backend != "local":
+        return
+    resolved_wp_id = resolve_wp_id(wp_id)
+    wp = get_wp_config(resolved_wp_id)
+    if not wp or not wp.local_retrieval_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Local retrieval is available only for {default_wp_id()}. Use mSearch for {resolved_wp_id}.",
+        )
+
+
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, str | None]:
     resolved_provider = resolve_llm_provider(request.llm_provider, provider_presets, request.llm_base_url)
     provider_config = provider_preset(resolved_provider, provider_presets, request.llm_base_url)
@@ -562,6 +574,7 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             request.msearch_collection or settings.msearch_collection,
             default_provider_preset["base_url"],
         )
+        _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
         chunks, baseline_chunks = pipeline.retrieve_with_baseline(
             request.question,
             request.top_k,
@@ -612,6 +625,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         _enforce_msearch_collection_policy(
             request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
         )
+        _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
         return pipeline.chat(
             question=request.question,
             length=length,
@@ -666,6 +680,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             _enforce_msearch_collection_policy(
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
+            _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
             candidates = pipeline.retrieve_candidates(
                 request.question,
                 request.top_k,

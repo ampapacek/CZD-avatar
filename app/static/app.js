@@ -267,6 +267,7 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
   wpSelect.value = activeWpId;
   const wp = getWpConfig(activeWpId);
   populateMsearchCollections(collectionId || wpDefaultCollectionMsearchId(wp));
+  updateRetrievalControls({ resetValues: false });
   const targetPrompt = promptId && promptPresetExists(promptId)
     ? promptId
     : defaultPromptPresetId(activeWpId);
@@ -280,6 +281,14 @@ const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
 // which change as new collection versions are published.
 function wpRequiresAiufal(wp) {
   return Boolean(wp?.requires_aiufal);
+}
+
+function wpAllowsLocalRetrieval(wp) {
+  return Boolean(wp?.local_retrieval_enabled);
+}
+
+function localRetrievalAllowedForActiveWp() {
+  return wpAllowsLocalRetrieval(getWpConfig(activeWpId));
 }
 
 function isAiUfalBaseUrl(baseUrl) {
@@ -2852,6 +2861,14 @@ function populateMsearchCollections(currentCollection) {
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
+  const localAllowed = localRetrievalAllowedForActiveWp();
+  for (const option of Array.from(retrievalBackend.options)) {
+    option.disabled = option.value === "local" && !localAllowed;
+  }
+  if (!localAllowed && retrievalBackend.value === "local") {
+    retrievalBackend.value = "msearch";
+    resetValues = true;
+  }
   const isMsearch = retrievalBackend.value === "msearch";
   if (resetValues) {
     if (isMsearch) {
@@ -4071,6 +4088,7 @@ function applyHistoryEntryToForm(entry) {
   persistLlmSettings();
   retrieveOnly.checked = entry.mode === "retrieve";
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;
+  updateRetrievalControls({ resetValues: false });
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;
   msearchMode.value = entry.settings?.msearch_mode || msearchMode.value;
   msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? msearchMinConfidence.value;

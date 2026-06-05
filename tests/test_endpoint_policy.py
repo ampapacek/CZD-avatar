@@ -30,6 +30,18 @@ class PolicyErrorStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("AI Ufal", response.json()["detail"])
 
+    def test_retrieve_rejects_local_backend_for_non_wp1(self) -> None:
+        response = self.client.post(
+            "/retrieve",
+            json={
+                "question": "Cokoliv?",
+                "wp_id": "WP3-právo",
+                "retrieval_backend": "local",
+            },
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("Local retrieval", response.json()["detail"])
+
     def test_chat_policy_violation_returns_400_not_500(self) -> None:
         response = self.client.post(
             "/chat",
@@ -41,6 +53,18 @@ class PolicyErrorStatusTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("AI Ufal", response.json()["detail"])
+
+    def test_chat_rejects_local_backend_for_non_wp1(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={
+                "question": "Cokoliv?",
+                "wp_id": "WP4-adiktologie",
+                "retrieval_backend": "local",
+            },
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("Local retrieval", response.json()["detail"])
 
 
 if __name__ == "__main__":
