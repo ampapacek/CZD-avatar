@@ -33,6 +33,7 @@ const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
+const msearchMinConfidenceValue = document.querySelector("#msearchMinConfidenceValue");
 const wpSelect = document.querySelector("#wpSelect");
 const settingsWpSelect = document.querySelector("#settingsWpSelect");
 const activePromptPreset = document.querySelector("#activePromptPreset");
@@ -75,15 +76,19 @@ const denseWeight = document.querySelector("#denseWeight");
 const denseWeightValue = document.querySelector("#denseWeightValue");
 const bm25Weight = document.querySelector("#bm25Weight");
 const bm25WeightValue = document.querySelector("#bm25WeightValue");
+const rerankEnabled = document.querySelector("#rerankEnabled");
+const rerankToggleField = document.querySelector("#rerankToggleField");
+const rerankOptions = document.querySelector("#rerankOptions");
 const rerankField = document.querySelector("#rerankField");
 const rerankWeight = document.querySelector("#rerankWeight");
 const rerankWeightValue = document.querySelector("#rerankWeightValue");
 const rerankCandidatesField = document.querySelector("#rerankCandidatesField");
 const rerankCandidates = document.querySelector("#rerankCandidates");
-const rerankNote = document.querySelector("#rerankNote");
 let rerankAvailable = false;
 const minScore = document.querySelector("#minScore");
+const minScoreValue = document.querySelector("#minScoreValue");
 const minRelativeScore = document.querySelector("#minRelativeScore");
+const minRelativeScoreValue = document.querySelector("#minRelativeScoreValue");
 const embeddingModel = document.querySelector("#embeddingModel");
 const submitButton = document.querySelector("#submitButton");
 const randomQuestionButton = document.querySelector("#randomQuestionButton");
@@ -301,7 +306,7 @@ async function loadSettings() {
   populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
-  msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? "";
+  msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? 0;
   topK.value = settings.msearch_defaults?.max_results ?? settings.top_k ?? 10;
   systemPrompt.value = settings.prompt_defaults?.system_prompt || "";
   userPromptTemplate.value = settings.prompt_defaults?.user_prompt_template || "";
@@ -314,7 +319,9 @@ async function loadSettings() {
   rerankAvailable = settings.retrieval_defaults?.rerank_available ?? false;
   rerankWeight.value = settings.retrieval_defaults?.rerank_weight ?? 0;
   rerankCandidates.value = settings.retrieval_defaults?.rerank_candidates ?? 40;
+  updateMsearchConfidenceLabel();
   updateWeightLabels();
+  updateThresholdLabels();
   updateRerankControls();
   updateRetrievalControls({ resetValues: false });
   applyTheme(localStorage.getItem("theme") || "light");
@@ -580,6 +587,19 @@ topK.addEventListener("input", () => {
   topKValue.value = topK.value;
 });
 
+function updateMsearchConfidenceLabel() {
+  msearchMinConfidenceValue.value = Number(msearchMinConfidence.value).toFixed(2);
+}
+
+function updateThresholdLabels() {
+  minScoreValue.value = Number(minScore.value).toFixed(2);
+  minRelativeScoreValue.value = Number(minRelativeScore.value).toFixed(2);
+}
+
+msearchMinConfidence.addEventListener("input", updateMsearchConfidenceLabel);
+minScore.addEventListener("input", updateThresholdLabels);
+minRelativeScore.addEventListener("input", updateThresholdLabels);
+
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
 // Editing the prompt text can change which {tokens} are used, so re-render the
 // main-page controls (resetting values to the resolved defaults) and refresh the
@@ -794,7 +814,7 @@ function buildRequestPayload(overrides = {}) {
     min_score: nullableNumber(minScore.value),
     min_relative_score: nullableNumber(minRelativeScore.value),
     rerank_weight: Number(rerankWeight.value),
-    rerank_enabled: rerankAvailable && Number(rerankWeight.value) > 0,
+    rerank_enabled: rerankAvailable && rerankEnabled.checked,
     rerank_candidates: nullableNumber(rerankCandidates.value),
     ...overrides,
   };
@@ -817,7 +837,7 @@ function buildRetrievePayload(overrides = {}) {
     min_score: nullableNumber(minScore.value),
     min_relative_score: nullableNumber(minRelativeScore.value),
     rerank_weight: Number(rerankWeight.value),
-    rerank_enabled: rerankAvailable && Number(rerankWeight.value) > 0,
+    rerank_enabled: rerankAvailable && rerankEnabled.checked,
     rerank_candidates: nullableNumber(rerankCandidates.value),
     ...overrides,
   };
@@ -2611,7 +2631,8 @@ function updateRetrievalControls({ resetValues = false } = {}) {
     if (isMsearch) {
       topK.value = appSettings.msearch_defaults?.max_results ?? 10;
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
-      msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
+      msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? 0;
+      updateMsearchConfidenceLabel();
       populateMsearchCollections(msearchCollection.value || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
     } else {
       topK.value = appSettings.top_k ?? 10;
@@ -2620,6 +2641,7 @@ function updateRetrievalControls({ resetValues = false } = {}) {
       minScore.value = appSettings.retrieval_defaults?.min_score ?? 0.2;
       minRelativeScore.value = appSettings.retrieval_defaults?.min_relative_score ?? 0.3;
       updateWeightLabels();
+      updateThresholdLabels();
     }
     topKValue.value = topK.value;
   }
@@ -2644,12 +2666,19 @@ function updateWeightLabels() {
 }
 
 function updateRerankControls() {
-  rerankField.hidden = !rerankAvailable;
-  rerankCandidatesField.hidden = !rerankAvailable;
+  rerankToggleField.hidden = !rerankAvailable;
+  if (!rerankAvailable) {
+    rerankEnabled.checked = false;
+  }
+  if (rerankAvailable && rerankEnabled.checked && Number(rerankWeight.value) <= 0) {
+    const defaultWeight = Number(appSettings.retrieval_defaults?.rerank_weight ?? 0);
+    rerankWeight.value = defaultWeight > 0 ? defaultWeight : 1;
+  }
+  rerankOptions.hidden = !rerankAvailable || !rerankEnabled.checked;
   rerankWeightValue.value = Number(rerankWeight.value).toFixed(1);
-  rerankNote.hidden = !rerankAvailable || Number(rerankWeight.value) <= 0;
 }
 
+rerankEnabled.addEventListener("change", updateRerankControls);
 rerankWeight.addEventListener("input", updateRerankControls);
 
 denseWeight.addEventListener("input", () => {
@@ -3816,14 +3845,20 @@ function applyHistoryEntryToForm(entry) {
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;
   msearchMode.value = entry.settings?.msearch_mode || msearchMode.value;
-  msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? "";
+  msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? msearchMinConfidence.value;
   topK.value = entry.settings?.top_k ?? topK.value;
   topKValue.value = topK.value;
   denseWeight.value = entry.settings?.dense_weight ?? denseWeight.value;
   bm25Weight.value = entry.settings?.bm25_weight ?? bm25Weight.value;
-  minScore.value = entry.settings?.min_score ?? "";
-  minRelativeScore.value = entry.settings?.min_relative_score ?? "";
+  minScore.value = entry.settings?.min_score ?? minScore.value;
+  minRelativeScore.value = entry.settings?.min_relative_score ?? minRelativeScore.value;
+  rerankEnabled.checked = Boolean(entry.settings?.rerank_enabled);
+  rerankWeight.value = entry.settings?.rerank_weight ?? rerankWeight.value;
+  rerankCandidates.value = entry.settings?.rerank_candidates ?? rerankCandidates.value;
+  updateMsearchConfidenceLabel();
   updateWeightLabels();
+  updateThresholdLabels();
+  updateRerankControls();
   updateRetrievalControls({ resetValues: false });
   question.focus();
 }

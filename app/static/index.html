@@ -142,16 +142,14 @@
                   <option value="keyword">keyword</option>
                 </select>
               </label>
-              <label class="field msearch-control">
-                <span>Min. confidence</span>
-                <input id="msearchMinConfidence" type="number" min="0" max="1" step="0.05" placeholder="Volitelné" />
-              </label>
-              <p class="field-note retrieval-threshold-note">
-                `Min. confidence` platí pro mSearch, `Min. skóre` a `Min. vůči nejlepšímu` se používají v aplikaci po seřazení výsledků.
-              </p>
-              <label class="field">
+              <label class="field top-k-control">
                 <span>Dokumentů: <output id="topKValue">10</output></span>
                 <input id="topK" type="range" min="0" max="50" step="1" value="10" />
+              </label>
+              <label class="field msearch-control">
+                <span>Min. confidence: <output id="msearchMinConfidenceValue">0.00</output></span>
+                <input id="msearchMinConfidence" type="range" min="0" max="1" step="0.05" value="0" />
+                <span class="field-note">Platí jen pro mSearch a filtruje výsledky podle confidence vrácené mSearchem.</span>
               </label>
               <label class="field local-control">
                 <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
@@ -161,25 +159,32 @@
                 <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
                 <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
               </label>
-              <label class="field rerank-control" id="rerankField" hidden>
-                <span>Váha re-rankingu: <output id="rerankWeightValue">0.0</output></span>
-                <input id="rerankWeight" type="range" min="0" max="1" step="0.1" value="0" />
+              <div class="score-thresholds">
+                <label class="field">
+                  <span>Min. skóre: <output id="minScoreValue">0.20</output></span>
+                  <input id="minScore" type="range" min="0" max="1" step="0.05" value="0.20" />
+                  <span class="field-note">Filtruje výsledky podle skóre po seřazení v aplikaci.</span>
+                </label>
+                <label class="field">
+                  <span>Min. vůči nejlepšímu: <output id="minRelativeScoreValue">0.30</output></span>
+                  <input id="minRelativeScore" type="range" min="0" max="1" step="0.05" value="0.30" />
+                  <span class="field-note">Ponechá jen výsledky dostatečně blízké nejlepšímu nalezenému dokumentu.</span>
+                </label>
+              </div>
+              <label class="field inline-field rerank-toggle" id="rerankToggleField">
+                <input id="rerankEnabled" type="checkbox" />
+                <span>Re-ranking (cross-encoder) zpřesní pořadí dokumentů, ale prodlouží dobu vyhledávání.</span>
               </label>
-              <label class="field rerank-control" id="rerankCandidatesField" hidden>
-                <span>Kandidátů k re-rankingu</span>
-                <input id="rerankCandidates" type="number" min="1" max="200" step="1" placeholder="Např. 40" />
-              </label>
-              <p id="rerankNote" class="field-note" hidden>
-                Re-ranking (cross-encoder) zpřesní pořadí dokumentů, ale prodlouží dobu vyhledávání.
-              </p>
-              <label class="field">
-                <span>Min. skóre</span>
-                <input id="minScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.30" />
-              </label>
-              <label class="field">
-                <span>Min. vůči nejlepšímu</span>
-                <input id="minRelativeScore" type="number" min="0" max="1" step="0.05" placeholder="Např. 0.50" />
-              </label>
+              <div class="rerank-options" id="rerankOptions" hidden>
+                <label class="field" id="rerankCandidatesField">
+                  <span>Kandidátů k re-rankingu</span>
+                  <input id="rerankCandidates" type="number" min="1" max="200" step="1" placeholder="Např. 40" />
+                </label>
+                <label class="field" id="rerankField">
+                  <span>Váha re-rankingu: <output id="rerankWeightValue">0.0</output></span>
+                  <input id="rerankWeight" type="range" min="0" max="1" step="0.1" value="0" />
+                </label>
+              </div>
             </div>
           </details>
 
