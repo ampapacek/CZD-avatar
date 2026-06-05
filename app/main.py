@@ -486,6 +486,9 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
         )
+    except HTTPException:
+        # Intended 4xx from policy enforcement must keep its status, not become 500.
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return RetrieveResponse(
@@ -551,6 +554,9 @@ def chat(request: ChatRequest) -> ChatResponse:
         )
     except PromptBudgetError as exc:
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
+    except HTTPException:
+        # Intended 4xx from policy/model enforcement must keep its status, not become 500.
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

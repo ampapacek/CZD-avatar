@@ -47,8 +47,6 @@ class Settings(BaseSettings):
     msearch_min_confidence: float | None = Field(default=None, alias="MSEARCH_MIN_CONFIDENCE")
     msearch_timeout: float = Field(default=60.0, alias="MSEARCH_TIMEOUT")
 
-    default_style: str = Field(default="ucitel", alias="DEFAULT_STYLE")
-    default_length: str = Field(default="medium", alias="DEFAULT_LENGTH")
     context_window_tokens: int = Field(default=32768, alias="CONTEXT_WINDOW_TOKENS")
     output_token_budget_short: int = Field(default=384, alias="OUTPUT_TOKEN_BUDGET_SHORT")
     output_token_budget_medium: int = Field(default=768, alias="OUTPUT_TOKEN_BUDGET_MEDIUM")

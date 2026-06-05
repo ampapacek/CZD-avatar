@@ -3,7 +3,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AnswerLength = Literal["short", "medium", "long"]
 RetrievalBackend = Literal["msearch", "local"]
 MSearchMode = Literal["hybrid", "semantic", "keyword"]
 

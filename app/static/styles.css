@@ -535,16 +535,6 @@ select:focus {
   line-height: 1.45;
 }
 
-.length-prompt-editors {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.length-prompt-editor textarea {
-  min-height: 96px;
-}
-
 .prompt-template-warning {
   margin: 0;
   padding: 10px 12px;
@@ -1620,7 +1610,6 @@ body[data-theme="dark"] .source-highlight {
 @media (max-width: 560px) {
   .controls,
   .advanced-grid,
-  .length-prompt-editors,
   .prompt-controls,
   .provider-key-list,
   .settings-grid,
