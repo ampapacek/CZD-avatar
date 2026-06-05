@@ -311,10 +311,10 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
 @app.post("/llm-providers/refresh")
 def refresh_llm_providers() -> dict[str, object]:
     _refresh_provider_state(force_model_refresh=True)
-    # Drop the cached mSearch collection list too, so the next /settings re-fetches
-    # the live collections instead of waiting out the 1h TTL.
+    # Drop the cached mSearch collection list and re-fetch it now, so the refresh
+    # button updates the per-WP collection options too (not just on next load).
     clear_collections_cache()
-    return _llm_settings_payload()
+    return {**_llm_settings_payload(), "wps": _wps_payload_with_live_collections()}
 
 
 @app.get("/questions/random")

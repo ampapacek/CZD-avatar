@@ -1205,7 +1205,7 @@ async function refreshProviderModels() {
   });
   refreshModelsButton.disabled = true;
   refreshModelsButton.textContent = "Obnovuji...";
-  setModelRefreshStatus("Obnovuji seznam modelů...");
+  setModelRefreshStatus("Obnovuji modely a kolekce...");
   try {
     const response = await fetch("llm-providers/refresh", { method: "POST" });
     const data = await safeJson(response);
@@ -1215,13 +1215,23 @@ async function refreshProviderModels() {
     logLlmModelRefresh("manual-refresh", data);
     applyLlmSettingsUpdate(data, previousProvider);
     refreshModelOptions(appSettings);
+    if (Array.isArray(data.wps)) {
+      // Live mSearch collections came back too; refresh the selector in place,
+      // keeping the current collection selected when it still exists.
+      appSettings.wps = data.wps;
+      populateMsearchCollections(msearchCollection.value);
+    }
     if (previousModel && Array.from(model.options).some((option) => option.value === previousModel)) {
       model.value = previousModel;
     }
     renderProviderApiKeyFields();
     const provider = selectedProviderConfig(appSettings);
     const modelCount = Array.isArray(provider?.model_presets) ? provider.model_presets.length : 0;
-    setModelRefreshStatus(`Seznam modelů aktualizován (${modelCount} modelů).`, "success");
+    const collectionCount = getWpConfig(activeWpId)?.collections?.length ?? 0;
+    setModelRefreshStatus(
+      `Aktualizováno: ${modelCount} modelů, ${collectionCount} kolekcí v této WP.`,
+      "success",
+    );
   } catch (error) {
     console.error("[rag-avatar] LLM model refresh failed", {
       trigger: "manual-refresh",
