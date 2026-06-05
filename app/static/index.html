@@ -488,11 +488,6 @@
             <span>Nápověda (volitelné)</span>
             <input id="placeholderDefHelp" type="text" autocomplete="off" />
           </label>
-          <label class="field inline-field" id="placeholderDefShareField" hidden>
-            <input id="placeholderDefShareOnServer" type="checkbox" />
-            <span>Sdílet na serveru</span>
-          </label>
-          <p id="placeholderDefShareNote" class="field-note" hidden></p>
           <label class="field">
             <span>Typ</span>
             <select id="placeholderDefKind">
@@ -515,7 +510,16 @@
             <button id="addPlaceholderOptionButton" class="secondary" type="button">Přidat možnost</button>
           </div>
           <p id="placeholderDefError" class="prompt-template-warning" hidden></p>
-          <div class="prompt-actions" id="placeholderDefActions"></div>
+          <div class="placeholder-def-footer">
+            <div class="placeholder-def-footer-row">
+              <label class="field inline-field" id="placeholderDefShareField" hidden>
+                <input id="placeholderDefShareOnServer" type="checkbox" />
+                <span>Sdílet na serveru</span>
+              </label>
+              <div class="prompt-actions" id="placeholderDefActions"></div>
+            </div>
+            <p id="placeholderDefShareNote" class="field-note" hidden></p>
+          </div>
         </div>
       </form>
     </dialog>

@@ -434,6 +434,11 @@ select:focus {
   background: var(--surface-3);
 }
 
+.placeholder-def-row--system {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+
 .placeholder-def-details {
   flex-basis: 100%;
   color: var(--muted);
@@ -493,6 +498,36 @@ select:focus {
 
 .placeholder-def-dialog .settings-body {
   max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.placeholder-def-footer {
+  display: grid;
+  gap: 8px;
+}
+
+.placeholder-def-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.placeholder-def-footer-row .inline-field {
+  display: flex;
+  grid-template-columns: none;
+  gap: 10px;
+}
+
+.placeholder-def-footer-row .prompt-actions {
+  margin-left: auto;
+}
+
+.placeholder-def-footer .field-note {
+  margin: 0;
+  text-align: right;
 }
 
 .advanced {

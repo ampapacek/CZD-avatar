@@ -1526,6 +1526,18 @@ function refreshModelOptions(settings = appSettings) {
 // System placeholders are filled by the server and never surfaced as a control.
 const SYSTEM_PLACEHOLDERS = new Set(["question", "context", "current_date"]);
 
+// System placeholders are filled by the server and cannot be edited or deleted.
+// Surfaced read-only in the "Proměnné promptu" list for discoverability.
+const SYSTEM_PLACEHOLDER_INFO = [
+  { name: "question", label: "Otázka uživatele", note: "doplní server z dotazu" },
+  { name: "context", label: "Nalezený kontext", note: "doplní server z nalezených pasáží" },
+  { name: "current_date", label: "Aktuální datum", note: "doplní server (datum na serveru)" },
+];
+
+// Minimal user template for a new blank prompt: keeps the {question} and
+// {context} system tokens so the draft works without manual setup.
+const BLANK_USER_PROMPT_TEMPLATE = "Otázka:\n{question}\n\nNalezený kontext:\n{context}";
+
 // Merged effective global placeholder defs from /settings (DEFAULT_PLACEHOLDERS
 // overlaid by placeholders.json), keyed by name.
 function globalPlaceholderDefs() {
@@ -1778,7 +1790,17 @@ function renderGlobalPlaceholderDefs() {
     ...Object.keys(localGlobalPlaceholderDefs()),
   ]);
   const sorted = Array.from(names).sort();
-  globalPlaceholderDefsList.innerHTML = sorted
+  const systemRows = SYSTEM_PLACEHOLDER_INFO
+    .map((info) => `
+        <div class="placeholder-def-row placeholder-def-row--system" data-system-placeholder="${escapeHtml(info.name)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(info.label)}</strong>
+            <code>{${escapeHtml(info.name)}}</code>
+            <span class="field-note">systémová · ${escapeHtml(info.note)}</span>
+          </div>
+        </div>`)
+    .join("");
+  globalPlaceholderDefsList.innerHTML = systemRows + sorted
     .map((name) => {
       const source = globalPlaceholderDefSource(name);
       const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || {};
@@ -2664,7 +2686,10 @@ function createBlankPromptDraft() {
   // Blank drafts are a Settings-editor action, scoped to the Settings WP.
   activePromptPresetId = defaultPromptPresetId(settingsWpScope());
   systemPrompt.value = "";
-  userPromptTemplate.value = "";
+  // A truly empty user template would drop {question}/{context}, leaving the
+  // model with no question and no retrieved passages. Seed the two system tokens
+  // the server fills so the draft is functional out of the box.
+  userPromptTemplate.value = BLANK_USER_PROMPT_TEMPLATE;
   renderPlaceholderControls();
   updatePromptTemplateWarning();
   renderPromptPresets(defaultPromptPresetId(settingsWpScope()));
