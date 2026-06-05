@@ -58,7 +58,7 @@ from app.rag.prompts import (
     template_placeholder_names,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
-from app.rag.wp_config import default_wp_id, wp_public_payload
+from app.rag.wp_config import default_wp_id, gated_msearch_collection_ids, wp_public_payload
 
 
 log_path = configure_logging("api")
@@ -144,7 +144,6 @@ questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 AI_UFAL_HOST = "ai.ufal.mff.cuni.cz"
-WP2_MSEARCH_COLLECTION = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0"
 
 
 def _is_ai_ufal_base_url(base_url: str | None) -> bool:
@@ -153,10 +152,10 @@ def _is_ai_ufal_base_url(base_url: str | None) -> bool:
 
 
 def _enforce_msearch_collection_policy(msearch_collection: str | None, llm_base_url: str | None) -> None:
-    if (msearch_collection or "").strip() == WP2_MSEARCH_COLLECTION and not _is_ai_ufal_base_url(llm_base_url):
+    if (msearch_collection or "").strip() in gated_msearch_collection_ids() and not _is_ai_ufal_base_url(llm_base_url):
         raise HTTPException(
             status_code=400,
-            detail="WP2 mSearch collection is available only with the AI Ufal provider.",
+            detail="This mSearch collection is available only with the AI Ufal provider.",
         )
 
 

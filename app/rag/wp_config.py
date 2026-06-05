@@ -64,6 +64,10 @@ class WPCollection:
     id: str
     label: str
     msearch_collection_id: str
+    # Some collections are only retrievable through the AI Ufal provider; the
+    # backend policy and the frontend collection selector both read this flag so
+    # the restriction lives in one place (no duplicated collection-id literals).
+    requires_aiufal: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,7 @@ WP_CONFIGS: list[WPConfig] = [
                 id="wp2-zaplavy",
                 label="wp2-zaplavy-v2026-6",
                 msearch_collection_id="ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
+                requires_aiufal=True,
             ),
         ],
         default_collection_id="wp2-zaplavy",
@@ -240,3 +245,33 @@ def wp_public_payload() -> list[dict[str, Any]]:
     """Serialize WP configs for the API (and the future WP selector)."""
 
     return [asdict(wp) for wp in WP_CONFIGS]
+
+
+def gated_msearch_collection_ids() -> set[str]:
+    """mSearch collection ids that are only retrievable via the AI Ufal provider."""
+
+    return {
+        collection.msearch_collection_id
+        for wp in WP_CONFIGS
+        for collection in wp.collections
+        if collection.requires_aiufal
+    }
+
+
+def msearch_collection_presets() -> list[dict[str, str]]:
+    """Collection presets derived from the WP config.
+
+    Single source of truth for the collection ids/names so they cannot drift from
+    the WP config. Used as the offline fallback when the live mSearch collection
+    list is unavailable.
+    """
+
+    return [
+        {
+            "label": f"{wp.label}: {collection.label}",
+            "collection_id": collection.msearch_collection_id,
+            "collection_name": collection.label,
+        }
+        for wp in WP_CONFIGS
+        for collection in wp.collections
+    ]

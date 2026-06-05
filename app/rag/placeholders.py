@@ -49,7 +49,7 @@ DEFAULT_PLACEHOLDERS: dict[str, PlaceholderDef] = {
     "custom_instructions": PlaceholderDef(
         label="Vlastní instrukce",
         kind="text",
-        default="Žádné.",
+        default="",
     ),
 }
 

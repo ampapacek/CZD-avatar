@@ -91,7 +91,7 @@ Jsi pečlivý asistent pro RAG systém.
 - Nejdřív posuď relevanci dodaného kontextu vůči otázce.
 - Používej jen pasáže, které otázku skutečně podporují; slabé, okrajové nebo zavádějící pasáže vynech.
 - Nepředstírej, že nepodložené tvrzení pochází ze zdrojů.
-- Pokud relevantní kontext nestačí, řekni to jasně a postupuj podle zvoleného profilu.
+- Pokud relevantní kontext nestačí, řekni to jasně a odpověz opatrně z obecné znalosti.
 - Nevymýšlej bibliografické údaje ani citace.
 
 Délka: {length}
@@ -111,7 +111,7 @@ def default_user_prompt_template() -> str:
 Otázka:
 {question}
 
-Vlastní instrukce uživatele:
+Vlastní instrukce uživatele (může být prázdné):
 {custom_instructions}
 
 Nalezený kontext:

@@ -100,7 +100,7 @@ class DefaultPlaceholdersTests(unittest.TestCase):
         custom = DEFAULT_PLACEHOLDERS["custom_instructions"]
         self.assertEqual(custom.kind, "text")
         self.assertEqual(custom.label, "Vlastní instrukce")
-        self.assertEqual(custom.default, "Žádné.")
+        self.assertEqual(custom.default, "")
 
     def test_resolution_uses_code_floor_when_overlay_absent(self) -> None:
         # No overlay (placeholders.json absent) and no higher layer: the code
@@ -110,7 +110,7 @@ class DefaultPlaceholdersTests(unittest.TestCase):
             code_default_defs=DEFAULT_PLACEHOLDERS,
         )
         self.assertEqual(defs["length"].default, "medium")
-        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+        self.assertEqual(defs["custom_instructions"].default, "")
 
     def test_code_floor_def_applies_only_when_no_higher_layer(self) -> None:
         # custom_instructions only in code; length overridden by overlay.
@@ -121,7 +121,7 @@ class DefaultPlaceholdersTests(unittest.TestCase):
             code_default_defs=DEFAULT_PLACEHOLDERS,
         )
         self.assertEqual(defs["length"].default, "OVERLAY")
-        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+        self.assertEqual(defs["custom_instructions"].default, "")
 
 
 class PlaceholderRecordConversionTests(unittest.TestCase):
@@ -322,7 +322,7 @@ class ResolveChatPlaceholdersTests(unittest.TestCase):
         request.user_prompt_template = "Otázka: {question} {custom_instructions}"
         defs, _ = main._resolve_chat_placeholders(request)
         self.assertEqual(defs["length"].options[0].text, "OVERLAY short")
-        self.assertEqual(defs["custom_instructions"].default, "Žádné.")
+        self.assertEqual(defs["custom_instructions"].default, "")
 
 
 if __name__ == "__main__":

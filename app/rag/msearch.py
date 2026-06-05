@@ -5,36 +5,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-
-
-FALLBACK_COLLECTION_PRESETS = [
-    {
-        "label": "WP1: histoedu v2026-02",
-        "collection_id": "64d6f521-5044-4b02-8658-380b639801af",
-        "collection_name": "wp1-histoedu-v2026-02",
-        "last_modified": "2026-02-23T14:23:48.294717",
-    },
-    {
-        "label": "WP2: zaplavy v2026-6",
-        "collection_id": "ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
-        "collection_name": "wp2-zaplavy-v2026-6",
-        "last_modified": "2026-06-04T17:51:35.359767",
-    },
-    {
-        "label": "WP3: law v2026-02",
-        "collection_id": "d4be44d5-689c-4bbe-a372-b959929cd511",
-        "collection_name": "wp3-law-v2026-02",
-        "last_modified": "2026-03-06T16:05:12.481649",
-    },
-    {
-        "label": "WP4: v2026-03",
-        "collection_id": "3429956e-8a21-4502-ad21-a41fddc5ef99",
-        "collection_name": "wp4-v2026-03",
-        "last_modified": "2026-03-19T08:32:09.851531",
-    },
-]
-
-WP2_COLLECTION_ID = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0"
+from app.rag.wp_config import msearch_collection_presets
 
 
 class MSearchRetriever:
@@ -44,8 +15,9 @@ class MSearchRetriever:
         self.settings = settings
 
     def collection_presets(self) -> list[dict[str, str]]:
+        fallback = msearch_collection_presets()
         if not self.settings.msearch_username or not self.settings.msearch_password:
-            return FALLBACK_COLLECTION_PRESETS
+            return fallback
         try:
             with httpx.Client(timeout=min(self.settings.msearch_timeout, 10.0)) as client:
                 response = client.get(
@@ -56,13 +28,13 @@ class MSearchRetriever:
                 response.raise_for_status()
                 data = response.json()
         except Exception:
-            return FALLBACK_COLLECTION_PRESETS
+            return fallback
 
         collections = data.get("collections") if isinstance(data, dict) else None
         if not isinstance(collections, list):
-            return FALLBACK_COLLECTION_PRESETS
+            return fallback
         presets = _newest_wp_presets(collections)
-        return presets or FALLBACK_COLLECTION_PRESETS
+        return presets or fallback
 
     def retrieve(
         self,

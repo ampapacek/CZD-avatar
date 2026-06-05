@@ -271,7 +271,21 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
-const WP2_MSEARCH_COLLECTION = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0";
+
+// mSearch collection ids that are only retrievable via the AI Ufal provider.
+// Derived from the WP config (collections flagged requires_aiufal) so the
+// restriction is not duplicated as a literal here.
+function gatedMsearchCollectionIds() {
+  const ids = new Set();
+  for (const wp of getWpConfigs()) {
+    for (const collection of wp.collections || []) {
+      if (collection.requires_aiufal && collection.msearch_collection_id) {
+        ids.add(collection.msearch_collection_id);
+      }
+    }
+  }
+  return ids;
+}
 
 function isAiUfalBaseUrl(baseUrl) {
   try {
@@ -794,6 +808,9 @@ function buildRequestPayload(overrides = {}) {
   const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
+    // wp_id / prompt_preset_id / prompt_preset_name are carried for the saved
+    // history entry's labels (rendered client-side); the server ignores them and
+    // resolves prompts/collections from system_prompt + msearch_collection.
     wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
@@ -2353,6 +2370,10 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   activePromptPresetId = resolvedId;
   deletePromptButton.disabled = !isEditablePromptPreset(resolvedId);
   updatePromptButton.disabled = !isEditablePromptPreset(resolvedId);
+  // Built-ins are read-only (shipped in code); explain why Update is disabled.
+  updatePromptButton.title = isBuiltInPromptPreset(resolvedId)
+    ? "Vestavěný prompt nelze přepsat. Použij „Uložit jako nový“."
+    : "";
 }
 
 function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
@@ -2514,8 +2535,8 @@ async function saveCurrentPromptPreset({ mode }) {
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber uložený prompt, který chceš aktualizovat.");
   }
-  const proposedName = currentPreset?.name || "";
-  const name = window.prompt("Název promptu", proposedName);
+  // Update keeps the existing name; only "Save as new" asks for one.
+  const name = isUpdate ? currentPreset.name : window.prompt("Název promptu", "");
   if (!name || !name.trim()) {
     return;
   }
@@ -2544,8 +2565,8 @@ async function saveCurrentPromptPresetLocally({ mode }) {
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber lokální prompt, který chceš aktualizovat.");
   }
-  const proposedName = currentPreset?.name || "";
-  const name = window.prompt("Název lokálního promptu", proposedName);
+  // Update keeps the existing name; only "Save as new" asks for one.
+  const name = isUpdate ? currentPreset.name : window.prompt("Název lokálního promptu", "");
   if (!name || !name.trim()) {
     return;
   }
@@ -2698,11 +2719,12 @@ async function deleteSelectedPromptPreset() {
 function populateMsearchCollections(currentCollection) {
   const collections = getWpConfig(activeWpId)?.collections || [];
   const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
+  const gatedCollections = gatedMsearchCollectionIds();
   msearchCollection.innerHTML = collections
     .map((collection) => {
       const value = collection.msearch_collection_id || "";
       const label = collection.label || value;
-      const disabled = value === WP2_MSEARCH_COLLECTION && !aiUfalSelected ? " disabled" : "";
+      const disabled = gatedCollections.has(value) && !aiUfalSelected ? " disabled" : "";
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");

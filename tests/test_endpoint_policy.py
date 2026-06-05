@@ -11,9 +11,10 @@ class PolicyErrorStatusTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._orig_preset = main.default_provider_preset
-        # Force a non-AI-Ufal provider base URL so the WP2 collection policy fires.
+        # Force a non-AI-Ufal provider base URL so the gated collection policy fires.
         main.default_provider_preset = {**main.default_provider_preset, "base_url": "https://example.com/api"}
         self.client = TestClient(main.app, raise_server_exceptions=False)
+        self.gated_collection = next(iter(main.gated_msearch_collection_ids()))
 
     def tearDown(self) -> None:
         main.default_provider_preset = self._orig_preset
@@ -23,23 +24,23 @@ class PolicyErrorStatusTests(unittest.TestCase):
             "/retrieve",
             json={
                 "question": "Cokoliv?",
-                "msearch_collection": main.WP2_MSEARCH_COLLECTION,
+                "msearch_collection": self.gated_collection,
             },
         )
         self.assertEqual(response.status_code, 400, response.text)
-        self.assertIn("WP2", response.json()["detail"])
+        self.assertIn("AI Ufal", response.json()["detail"])
 
     def test_chat_policy_violation_returns_400_not_500(self) -> None:
         response = self.client.post(
             "/chat",
             json={
                 "question": "Cokoliv?",
-                "msearch_collection": main.WP2_MSEARCH_COLLECTION,
+                "msearch_collection": self.gated_collection,
                 "llm_base_url": "https://example.com/api",
             },
         )
         self.assertEqual(response.status_code, 400, response.text)
-        self.assertIn("WP2", response.json()["detail"])
+        self.assertIn("AI Ufal", response.json()["detail"])
 
 
 if __name__ == "__main__":
