@@ -140,8 +140,10 @@ def save_placeholder(
     placeholders = load_placeholders(path)
     resolved_name = _slugify(name)
     existing = next((item for item in placeholders if item["name"] == resolved_name), None)
-    # Keep ownership stable across updates; an authorized edit of an ownerless
-    # placeholder lets the editing browser claim it.
+    # Keep ownership stable across updates. An ownerless placeholder has no owner_id
+    # to match, so reaching this point for one requires the admin password (see
+    # _can_modify_placeholder); that admin-authorized edit claims it for the editing
+    # browser.
     resolved_owner = (existing.get("owner_id") if existing else "") or (owner_id or "").strip()
     record = _normalize_placeholder(
         {
