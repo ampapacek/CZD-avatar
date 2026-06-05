@@ -578,11 +578,11 @@ def ingest(request: IngestRequest) -> IngestResponse:
 @app.post("/retrieve", response_model=RetrieveResponse)
 def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     try:
-        _enforce_msearch_collection_policy(
-            request.wp_id,
-            request.msearch_collection or settings.msearch_collection,
-            default_provider_preset["base_url"],
-        )
+        # No mSearch provider gate here: retrieve-only returns chunks to the
+        # browser and never sends them to an LLM. The gate exists solely to keep
+        # gated (e.g. WP2) content from reaching a provider outside AI Ufal, so
+        # the selected provider is irrelevant for retrieval and must not cause a
+        # spurious accept/reject based on the server's default provider.
         _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
         chunks, baseline_chunks = pipeline.retrieve_with_baseline(
             request.question,
@@ -790,7 +790,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             generation_seconds = time.perf_counter() - generation_started
             answer = "".join(answer_parts).strip()
             elapsed = time.perf_counter() - started
-            upstream_model = stream.upstream_model or resolved_model
+            upstream_model = getattr(stream, "upstream_model", None) or resolved_model
             response = {
                 "answer": answer,
                 "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],

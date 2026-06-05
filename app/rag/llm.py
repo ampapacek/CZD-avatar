@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from collections.abc import Iterator
+from typing import Protocol, runtime_checkable
 
 import httpx
 
@@ -11,6 +12,21 @@ import httpx
 class LLMGeneration:
     answer: str
     model: str | None = None
+
+
+@runtime_checkable
+class TokenStream(Protocol):
+    """Contract for ``stream_generate`` return values.
+
+    Callers iterate the stream to receive token strings, then read
+    ``upstream_model`` (populated as a side effect of iteration) to learn the
+    model the upstream provider actually served. Implementations and test
+    doubles must expose both; a bare generator does not satisfy this.
+    """
+
+    upstream_model: str | None
+
+    def __iter__(self) -> Iterator[str]: ...
 
 
 class LLMClient:
@@ -33,7 +49,7 @@ class LLMClient:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-    ) -> Iterator[str]:
+    ) -> TokenStream:
         raise NotImplementedError
 
 
@@ -91,7 +107,7 @@ class OpenAICompatibleLLM(LLMClient):
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-    ) -> Iterator[str]:
+    ) -> TokenStream:
         return _OpenAICompatibleStream(
             api_key=api_key or self.api_key,
             model=model or self.model,
