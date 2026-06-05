@@ -192,7 +192,7 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
     use_server_api_key = not requested_base_url or requested_base_url == provider_base_url
     server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
     browser_admin_password = request.admin_password.strip() if request.admin_password else ""
-    unlock_enabled = bool(settings.admin_password) and hmac.compare_digest(
+    unlock_enabled = bool(settings.admin_password) and _secure_eq(
         browser_admin_password,
         settings.admin_password,
     )
@@ -332,6 +332,15 @@ PROMPT_PRESET_FORBIDDEN_DETAIL = (
 )
 
 
+def _secure_eq(a: str, b: str) -> bool:
+    """Constant-time string compare that tolerates non-ASCII input.
+
+    hmac.compare_digest raises TypeError on str args containing non-ASCII
+    characters, so compare the UTF-8 encoded bytes instead.
+    """
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
 def _find_prompt_preset(preset_id: str) -> dict[str, str] | None:
     return next(
         (preset for preset in load_prompt_presets(settings.prompt_presets_path) if preset["id"] == preset_id),
@@ -342,9 +351,9 @@ def _find_prompt_preset(preset_id: str) -> dict[str, str] | None:
 def _can_modify_prompt_preset(preset: dict[str, str], owner_id: str | None, password: str | None) -> bool:
     owner = (preset.get("owner_id") or "").strip()
     requester = (owner_id or "").strip()
-    if owner and requester and hmac.compare_digest(owner, requester):
+    if owner and requester and _secure_eq(owner, requester):
         return True
-    if settings.admin_password and hmac.compare_digest(
+    if settings.admin_password and _secure_eq(
         (password or "").strip(), settings.admin_password
     ):
         return True
@@ -360,7 +369,7 @@ def get_prompt_presets() -> list[PromptPreset]:
 def unlock_models(request: UnlockRequest) -> UnlockResponse:
     if not settings.admin_password:
         return UnlockResponse(unlocked=False)
-    unlocked = hmac.compare_digest(request.password.strip(), settings.admin_password)
+    unlocked = _secure_eq(request.password.strip(), settings.admin_password)
     return UnlockResponse(unlocked=unlocked)
 
 
@@ -419,15 +428,15 @@ def _find_placeholder(name: str) -> dict[str, object] | None:
 
 def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None, password: str | None) -> bool:
     if str(placeholder.get("name") or "") in DEFAULT_PLACEHOLDERS:
-        return bool(settings.admin_password) and hmac.compare_digest(
+        return bool(settings.admin_password) and _secure_eq(
             (password or "").strip(),
             settings.admin_password,
         )
     owner = (str(placeholder.get("owner_id") or "")).strip()
     requester = (owner_id or "").strip()
-    if owner and requester and hmac.compare_digest(owner, requester):
+    if owner and requester and _secure_eq(owner, requester):
         return True
-    if settings.admin_password and hmac.compare_digest((password or "").strip(), settings.admin_password):
+    if settings.admin_password and _secure_eq((password or "").strip(), settings.admin_password):
         return True
     return False
 
@@ -445,7 +454,7 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
     existing = _find_placeholder(name)
     if existing is None and name in DEFAULT_PLACEHOLDERS and not (
         settings.admin_password
-        and hmac.compare_digest((request.admin_password or "").strip(), settings.admin_password)
+        and _secure_eq((request.admin_password or "").strip(), settings.admin_password)
     ):
         raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
     if existing is not None and not _can_modify_placeholder(existing, request.owner_id, request.admin_password):
