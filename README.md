@@ -2,7 +2,7 @@
 
 `rag-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
 
-The current default setup is a Czech-history avatar. A few places are still hardcoded for the historical agent and Czech-history collection, especially default prompts, random questions, UI text, collection assets, and helper scripts. The underlying RAG pipeline is topic-agnostic, though: with different documents, retrieval settings, and prompts it can be used for other domains.
+The app is organized around a top-level **WP (work package) selector** (`WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`). Each WP scopes its own built-in prompts and document collections. WP1 carries the Czech-history setup; the other WPs ship neutral starter prompts. A few places are still hardcoded for the Czech-history collection (random questions, some collection assets, helper scripts). The underlying RAG pipeline is topic-agnostic.
 
 ## Quick Start
 
@@ -114,10 +114,12 @@ From the CLI:
 uv run python scripts/ask.py "Jaký byl význam husitských válek?"
 ```
 
-Optional controls:
+Optional controls. Parameter placeholders are set generically with `--selection name=value` (repeatable); `--length` is a shortcut for `--selection length=value`:
 
 ```bash
-uv run python scripts/ask.py "Co znamenala bitva na Bílé hoře pro české země?" --style historik --length long --custom-instructions "Zaměř se na příčiny a důsledky."
+uv run python scripts/ask.py "Co znamenala bitva na Bílé hoře pro české země?" \
+  --length long \
+  --selection custom_instructions="Zaměř se na příčiny a důsledky."
 ```
 
 ## Use A Local Database Instead
@@ -198,22 +200,42 @@ API endpoints:
 - `GET /prompt-presets`
 - `POST /prompt-presets`
 - `DELETE /prompt-presets/{preset_id}`
+- `GET /placeholders`
+- `POST /placeholders`
+- `DELETE /placeholders/{name}`
+- `POST /unlock`
 - `POST /ingest`
 - `POST /retrieve`
 - `POST /chat`
 - `POST /chat/stream`
 
-Example `/chat` body:
+Example `/chat` body. Parameter placeholders (e.g. `length`, `custom_instructions`) travel as a generic `selections` map; `placeholder_defs` carries the frontend's fully-resolved effective definitions for the placeholders the selected prompt uses (so the server substitutes exactly what the browser configured):
 
 ```json
 {
   "question": "Jaký byl význam husitských válek?",
-  "style": "ucitel",
-  "length": "medium",
+  "wp_id": "WP1-historie",
   "retrieval_backend": "msearch",
-  "custom_instructions": "Focus mainly on causes and consequences."
+  "selections": {
+    "length": "medium",
+    "custom_instructions": "Focus mainly on causes and consequences."
+  },
+  "placeholder_defs": {
+    "length": {
+      "label": "Délka",
+      "kind": "select",
+      "default": "medium",
+      "options": [
+        {"name": "short", "label": "Krátká", "text": "Odpověz stručně."},
+        {"name": "medium", "label": "Střední", "text": "Odpověz středně dlouze."},
+        {"name": "long", "label": "Dlouhá", "text": "Odpověz podrobněji."}
+      ]
+    }
+  }
 }
 ```
+
+`selections` and `placeholder_defs` may be omitted; the server then falls back to the shared `data/placeholders.json` overlay and the `DEFAULT_PLACEHOLDERS` code floor.
 
 ## Answer Grounding
 
@@ -241,7 +263,7 @@ The web UI lets you tune retrieval while testing:
 - retrieve-only mode, which shows chunks without calling the LLM
 - LLM model preset or custom model id
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
-- editable prompt presets stored in `data/prompt_presets.json`
+- editable prompts (see [Prompts And Placeholders](#prompts-and-placeholders))
 
 ## Reranking
 
@@ -316,11 +338,10 @@ Important `.env` variables:
 - `MSEARCH_MODE`
 - `MSEARCH_MIN_CONFIDENCE`
 - `MSEARCH_TIMEOUT`
-- `DEFAULT_STYLE`
-- `DEFAULT_LENGTH`
 - `RAW_DATA_DIR`
 - `CHUNK_CATALOG_PATH`
-- `PROMPT_PRESETS_PATH`
+- `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
+- `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
 
 ## Basic Test Run
 
@@ -333,7 +354,7 @@ uvicorn app.main:app --reload
 
 Then test in the browser:
 
-- style `učitel`, length `medium`
+- WP `WP1-historie`, prompt `Učitel`, length `Střední`
 - question `Jaký byl význam husitských válek?`
 - confirm the answer is Czech and shows citations
 - ask a question weakly covered by the indexed files and confirm the answer marks limited evidence
@@ -357,9 +378,44 @@ logs/download-wikipedia-20260424-104900.log
 
 Console output stays shorter, while the file logs persist questions, retrieval metadata, selected model, response timing, and generated answers.
 
+## Prompts And Placeholders
+
+The app picks a **WP** first; that scopes which prompts and collections you see. Selecting a WP loads its default prompt and collection.
+
+### Prompts: local vs shared
+
+A prompt is one concept to the UI (the dropdown merges built-ins + local + shared), but has two storage lifecycles:
+
+- **Built-in prompts** ship read-only in code (`app/rag/wp_config.py`), including the WP1 personas (`Učitel`/`Historik`/`Laik`). Editing one is a **save as new** — the default save action.
+- **Local prompts** live in browser `localStorage` (key `czdemos4ai-local-prompt-presets`). They are private to that browser and need no password to edit or delete.
+- **Shared/server prompts** live in `data/prompt_presets.json` (gitignored mutable overlay; may be absent). Creating one is open. Updating or deleting one requires either an `owner_id` match (the browser that created it) or the shared `ADMIN_PASSWORD`.
+
+### Placeholders
+
+Every user-facing template variable is a declared **placeholder**, written as `{name}` in a prompt. Two groups:
+
+- **System placeholders** — filled automatically by the server, no control: `{question}`, `{context}`, `{current_date}` (server-local date).
+- **Parameter placeholders** — surfaced as a control on the main page, data-driven from the tokens the selected prompt uses. Each has a `kind`:
+  - `select` — named options `{name, label, text}`; substitutes the chosen option's `text` (e.g. `{length}` → short/medium/long).
+  - `text` — free text; substitutes the typed string, or a `default` when empty (e.g. `{custom_instructions}` → `Žádné.`). Omitted if the placeholder is absent from the template.
+
+A placeholder definition is taken **wholesale** from the most specific source that declares it (options are never merged across sources). Resolution order, most specific first:
+
+1. **inline on the selected prompt** (a preset's or built-in's inline `placeholders` map)
+2. **browser-local global defs** (`localStorage` key `czdemos4ai-local-placeholder-defs`)
+3. **shared overlay** (`data/placeholders.json`, gitignored mutable overlay; may be absent; edits need `owner_id` or `ADMIN_PASSWORD`)
+4. **code-default floor** (`DEFAULT_PLACEHOLDERS` in `app/rag/placeholders.py`, ships `length` + `custom_instructions`)
+5. otherwise the token is **undeclared**: it renders literally and the UI warns — it never crashes.
+
+The chat request carries `selections` (a generic `{name: value}` map) and `placeholder_defs` (the frontend's fully-resolved effective defs for the placeholders the prompt uses), so the server is stateless about `localStorage` and substitutes exactly what the browser configured.
+
+> Inline placeholder defs edited on a **server** preset persist only when the prompt is saved; the UI shows an amber warning until then.
+
+Browser state lives under three `localStorage` keys: `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, and `czdemos4ai-history-v2` (history).
+
 ## Collections And Prompts
 
-For now, `data/raw/` acts as the active indexed document collection and `app/rag/prompts.py` contains the built-in default prompts. Saved prompt presets are stored in `data/prompt_presets.json`. The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
+For now, `data/raw/` acts as the active indexed document collection for local retrieval. Built-in prompts and placeholder defaults ship in code (`app/rag/wp_config.py`, `app/rag/placeholders.py`). The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
 
 Collection-specific app assets currently live under `data/collections/czech_history/`:
 

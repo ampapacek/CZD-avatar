@@ -33,9 +33,11 @@ This file is a practical handoff for future agents working in this repo.
 - `app/config.py` - settings loading
 - `app/logging_config.py` - timestamped logging into `logs/`
 - `app/rag/` - ingestion, chunking, retrieval, prompting, vector store, pipeline
-- `app/rag/wp_config.py` - single source of WP (work package) configuration: labels, built-in prompts, collections, defaults, and length definitions
+- `app/rag/wp_config.py` - single source of WP (work package) configuration: labels, built-in prompts, collections, and defaults
+- `app/rag/placeholders.py` - placeholder engine, `DEFAULT_PLACEHOLDERS` code floor, shared-overlay store
 - `app/static/` - frontend HTML/CSS/JS
-- `data/prompt_presets.json` - saved shared prompt presets for the UI if present
+- `data/prompt_presets.json` - shared prompt presets overlay (gitignored; may be absent)
+- `data/placeholders.json` - shared global placeholder overlay (gitignored; may be absent)
 - `scripts/ingest.py` - CLI ingestion
 - `scripts/ask.py` - CLI ask
 - `scripts/batch_answers.py` - batch question/answer runner
@@ -164,13 +166,13 @@ uvicorn app.main:app --reload
   - mention it is primarily a historical assistant
   - do not force citations if they are not relevant
 
-## WP configuration and prompt preset schema
+## WP configuration, prompts, and placeholders
 
-- WP (work package) configuration is centralized in `app/rag/wp_config.py` as typed dataclasses, not env or JSON. It is the single source for WP labels, descriptions, built-in (read-only) prompts, the default prompt, collections, the default collection, length definitions, and optional placeholder definitions.
-- Defined WPs: `WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`. WP1 carries the existing history prompts (`Učitel`/`Historik`/`Laik`); WP2–WP4 ship neutral starter prompts to refine later.
+- WP (work package) configuration is centralized in `app/rag/wp_config.py` as typed dataclasses, not env or JSON. It is the single source for WP labels, descriptions, built-in (read-only) prompts, the default prompt, collections, the default collection, and optional inline placeholder definitions.
+- Defined WPs: `WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`. WP1 carries the existing history prompts (`Učitel`/`Historik`/`Laik`) — these are the old personas, now just built-in WP1 prompts (the separate style/profile axis is gone). WP2–WP4 ship neutral starter prompts to refine later.
 - WP collections map by number to existing mSearch collections: WP1→histoedu, WP2→zaplavy, WP3→law, WP4→v2026-03.
-- The config is exposed to the frontend via `GET /settings` under `wps` (full WP list) and `default_wp`. Built-in WP prompts come from this config and appear even when `data/prompt_presets.json` is empty.
-- Finalized prompt preset JSON shape (one record per shared preset in `data/prompt_presets.json`, and the same shape for browser-local presets in `localStorage`):
+- The config is exposed to the frontend via `GET /settings` under `wps` (full WP list) and `default_wp`. Built-in WP prompts come from this config and appear even when `data/prompt_presets.json` is absent.
+- Finalized prompt preset JSON shape (one record per shared preset in `data/prompt_presets.json`, same shape for browser-local presets in `localStorage`):
 
 ```json
 {
@@ -179,14 +181,23 @@ uvicorn app.main:app --reload
   "wp_id": "WP1-historie",
   "system_prompt": "string",
   "user_prompt_template": "string",
-  "length_prompts": {"short": "...", "medium": "...", "long": "..."},
+  "placeholders": {"length": {"label": "Délka", "kind": "select", "default": "medium", "options": []}},
   "owner_id": "string",
   "updated_at": "ISO-8601"
 }
 ```
 
+- `placeholders` is an optional inline map of `{name: PlaceholderDef}` (highest-precedence override). The legacy `style_prompts` / `length_prompts` fields were removed from the schema; the loader normalizes older records and tolerates missing/empty/malformed files.
 - Every shared and local preset stores `wp_id`. Unknown or missing `wp_id` falls back to the default WP on load/save.
-- The legacy `style_prompts` field was removed from the preset schema; the loader stays tolerant of older records (and missing/empty/malformed files) by normalizing them to the new shape. The orthogonal length placeholder `{length}` is the only style/length variable kept inside a preset's `system_prompt`.
+
+### Placeholder model
+
+- Built-in global placeholder defaults (`length`, `custom_instructions`) live in `DEFAULT_PLACEHOLDERS` (`app/rag/placeholders.py`), the lowest resolution layer.
+- System placeholders (`{question}`, `{context}`, `{current_date}`) are filled by the server and never shown as controls. Parameter placeholders (`kind` `select` or `text`; `number` deferred) become data-driven main-page controls from the tokens the selected prompt uses.
+- Resolution per token, most specific wins, taken wholesale (no option merging): inline-on-prompt → browser-local global → shared overlay (`data/placeholders.json`) → `DEFAULT_PLACEHOLDERS` code floor → undeclared (render literally + warn, never crash).
+- The chat request carries `selections` (`{name: value}`) and `placeholder_defs` (frontend's fully-resolved effective defs), so the server stays stateless about `localStorage`.
+- Shared overlay edits (`data/placeholders.json`) need `owner_id` or `ADMIN_PASSWORD`; browser-local defs (`localStorage` key `czdemos4ai-local-placeholder-defs`) need none. Inline defs on a server preset persist only when the prompt is saved (UI warns).
+- `ADMIN_PASSWORD` replaced `LLM_UNLOCK_PASSWORD` with no back-compat.
 
 ## Special data handling: WP1 subset
 
@@ -263,7 +274,7 @@ Do not mix vectors from different embedding models in one collection.
 
 ## Known review findings
 
-- `/chat` and `/retrieve` in `app/main.py` wrap intended `HTTPException` 400 errors as 500s because the broad `except Exception` handlers catch them. Add `except HTTPException: raise` before generic exception handling so user/config errors such as a locked model or disallowed WP2 collection keep their original status code.
+- FIXED: `/chat` and `/retrieve` in `app/main.py` now re-raise `HTTPException` before the broad `except Exception`, so intended 4xx (locked model, disallowed WP2 collection) keep their status instead of becoming 500. Covered by `tests/test_endpoint_policy.py`.
 - The frontend currently cannot persist or send non-custom provider base URL overrides even though the UI/API shape suggests it can. `app/static/app.js` has listeners for `llmBaseUrl`, but `persistLlmSettings()` does not store `base_url` for normal providers and `selectedProviderBaseUrl()` returns only the provider preset base URL outside the custom provider path.
 - Streaming chat assumes the LLM stream object has an `upstream_model` attribute. `pipeline.llm.stream_generate()` is typed as returning `Iterator[str]`, so a future LLM client or test double that returns a plain generator could stream tokens successfully and then fail before the final `done` event when `app/main.py` reads `stream.upstream_model`.
 - Last review verification: `./.venv/bin/python -m unittest discover -s tests -v` passed, and `./.venv/bin/python -m compileall -q app scripts tests` passed. `./.venv/bin/python -m pytest -q` could not run because `pytest` was not installed in the venv.
