@@ -14,11 +14,13 @@ logs/
 answers_avatar*.txt
 notes.md
 prompt_preset_refactor_plan.md
+task14_wp_lengths_placeholders_notes.md
 ignored
 
 data/qdrant/
 data/processed/
 data/prompt_presets.json
+data/placeholders.json
 data/raw/*
 !data/raw/agent.md
 !data/raw/.gitkeep

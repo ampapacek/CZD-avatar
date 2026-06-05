@@ -115,7 +115,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "wp_id",
                 "system_prompt",
                 "user_prompt_template",
-                "length_prompts",
+                "placeholders",
                 "owner_id",
                 "updated_at",
             },

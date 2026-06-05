@@ -3,8 +3,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AnswerStyle = Literal["laik", "ucitel", "historik"]
-AnswerLength = Literal["short", "medium", "long"]
 RetrievalBackend = Literal["msearch", "local"]
 MSearchMode = Literal["hybrid", "semantic", "keyword"]
 
@@ -22,6 +20,7 @@ class IngestResponse(BaseModel):
 
 class RetrieveRequest(BaseModel):
     question: str
+    wp_id: str | None = None
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     msearch_collection: str | None = None
@@ -38,13 +37,16 @@ class RetrieveRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    style: AnswerStyle | None = None
-    length: AnswerLength | None = None
-    custom_instructions: str | None = None
+    wp_id: str | None = None
+    # Generic {placeholderName: value} map for the parameter placeholders the
+    # selected prompt uses (select -> chosen option name; text -> typed string).
+    selections: dict[str, str] = Field(default_factory=dict)
+    # Inline placeholder defs for the selected prompt (built-in or preset),
+    # highest-precedence source in resolution. Populated by the frontend from the
+    # selected prompt's inline ``placeholders`` map.
+    placeholder_defs: dict[str, Any] | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None
-    style_prompts: dict[str, str] | None = None
-    length_prompts: dict[str, str] | None = None
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     conversation_summary: str | None = None
     admin_password: str | None = None
@@ -73,13 +75,27 @@ class ChatRequest(BaseModel):
     rerank_candidates: int | None = Field(default=None, ge=1, le=500)
 
 
+class OptionDef(BaseModel):
+    name: str
+    label: str
+    text: str = ""
+
+
+class InlinePlaceholderDef(BaseModel):
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
+
+
 class PromptPreset(BaseModel):
     id: str
     name: str
     wp_id: str
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = Field(default_factory=dict)
+    placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     owner_id: str | None = None
     updated_at: str | None = None
 
@@ -90,7 +106,29 @@ class PromptPresetSaveRequest(BaseModel):
     wp_id: str | None = None
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = Field(default_factory=dict)
+    placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
+    owner_id: str | None = None
+    admin_password: str | None = None
+
+
+class Placeholder(BaseModel):
+    name: str
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
+    owner_id: str | None = None
+    updated_at: str | None = None
+
+
+class PlaceholderSaveRequest(BaseModel):
+    name: str
+    label: str
+    kind: Literal["select", "text"] = "text"
+    help: str | None = None
+    default: str = ""
+    options: list[OptionDef] = Field(default_factory=list)
     owner_id: str | None = None
     admin_password: str | None = None
 

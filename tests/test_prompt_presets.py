@@ -83,6 +83,33 @@ class PromptPresetStorageTests(unittest.TestCase):
         record = self._save("Bad scope", wp_id="WP9-nope")
         self.assertEqual(record["wp_id"], "WP1-historie")
 
+    def test_save_round_trips_inline_placeholders(self) -> None:
+        record = save_prompt_preset(
+            self.path,
+            name="Inline",
+            system_prompt="Délka: {length}",
+            user_prompt_template="{question}",
+            placeholders={
+                "length": {
+                    "label": "Délka",
+                    "kind": "select",
+                    "default": "short",
+                    "options": [{"name": "short", "label": "Krátká", "text": "INLINE short"}],
+                }
+            },
+            owner_id="owner-a",
+        )
+        self.assertIn("length", record["placeholders"])
+        loaded = load_prompt_presets(self.path)[0]
+        self.assertEqual(loaded["placeholders"]["length"]["options"][0]["text"], "INLINE short")
+        self.assertEqual(loaded["placeholders"]["length"]["kind"], "select")
+
+    def test_save_drops_legacy_length_prompts_field(self) -> None:
+        record = self._save("Clean")
+        self.assertNotIn("length_prompts", record)
+        self.assertIn("placeholders", record)
+        self.assertNotIn("length_prompts", load_prompt_presets(self.path)[0])
+
     def test_saved_record_drops_legacy_style_prompts(self) -> None:
         record = self._save("Clean")
         self.assertNotIn("style_prompts", record)

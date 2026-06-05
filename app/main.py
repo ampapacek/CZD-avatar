@@ -21,6 +21,8 @@ from app.models import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    Placeholder,
+    PlaceholderSaveRequest,
     PromptPreset,
     PromptPresetSaveRequest,
     RetrieveRequest,
@@ -31,6 +33,15 @@ from app.models import (
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
+from app.rag.placeholders import (
+    DEFAULT_PLACEHOLDERS,
+    delete_placeholder,
+    effective_global_placeholders,
+    load_placeholders,
+    placeholder_def_from_record,
+    placeholder_defs_from_records,
+    save_placeholder,
+)
 from app.rag.llm_providers import (
     available_llm_providers,
     provider_default_model,
@@ -41,12 +52,10 @@ from app.rag.llm_providers import (
 )
 from app.rag.llm import validate_api_key
 from app.rag.prompts import (
-    LENGTH_PROMPTS,
-    STYLE_PROMPTS,
-    available_lengths,
-    available_styles,
     default_system_prompt_template,
     default_user_prompt_template,
+    resolve_placeholder_defs,
+    template_placeholder_names,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
 from app.rag.wp_config import default_wp_id, wp_public_payload
@@ -206,10 +215,7 @@ def health() -> HealthResponse:
 def get_public_settings() -> dict[str, object]:
     _refresh_provider_state()
     return {
-        "styles": available_styles(),
-        "lengths": available_lengths(),
-        "default_style": settings.default_style,
-        "default_length": settings.default_length,
+        "placeholders": effective_global_placeholders(settings.placeholders_path),
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
         **_llm_settings_payload(),
@@ -250,8 +256,6 @@ def get_public_settings() -> dict[str, object]:
         "prompt_defaults": {
             "system_prompt": default_system_prompt_template(),
             "user_prompt_template": default_user_prompt_template(),
-            "style_prompts": STYLE_PROMPTS,
-            "length_prompts": LENGTH_PROMPTS,
         },
         "wps": wp_public_payload(),
         "default_wp": default_wp_id(),
@@ -325,7 +329,9 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
         system_prompt=request.system_prompt,
         user_prompt_template=request.user_prompt_template,
         wp_id=request.wp_id,
-        length_prompts=request.length_prompts,
+        placeholders={
+            name: definition.model_dump() for name, definition in request.placeholders.items()
+        },
         preset_id=request.id,
         owner_id=request.owner_id,
     )
@@ -345,6 +351,107 @@ def remove_prompt_preset(
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     delete_prompt_preset(settings.prompt_presets_path, preset_id)
     return Response(status_code=204)
+
+
+PLACEHOLDER_FORBIDDEN_DETAIL = (
+    "Tato sdílená proměnná patří jinému prohlížeči. Odemkni ji sdíleným heslem, abys ji mohl změnit."
+)
+
+
+def _find_placeholder(name: str) -> dict[str, object] | None:
+    return next(
+        (item for item in load_placeholders(settings.placeholders_path) if item["name"] == name),
+        None,
+    )
+
+
+def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None, password: str | None) -> bool:
+    owner = (str(placeholder.get("owner_id") or "")).strip()
+    requester = (owner_id or "").strip()
+    if owner and requester and hmac.compare_digest(owner, requester):
+        return True
+    if settings.admin_password and hmac.compare_digest((password or "").strip(), settings.admin_password):
+        return True
+    return False
+
+
+@app.get("/placeholders", response_model=list[Placeholder])
+def get_placeholders() -> list[Placeholder]:
+    return [Placeholder(**item) for item in load_placeholders(settings.placeholders_path)]
+
+
+@app.post("/placeholders", response_model=Placeholder)
+def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Placeholder name is required.")
+    existing = _find_placeholder(name)
+    if existing is not None and not _can_modify_placeholder(existing, request.owner_id, request.admin_password):
+        raise HTTPException(status_code=403, detail=PLACEHOLDER_FORBIDDEN_DETAIL)
+    record = save_placeholder(
+        settings.placeholders_path,
+        name=name,
+        label=request.label,
+        kind=request.kind,
+        help=request.help,
+        default=request.default,
+        options=[option.model_dump() for option in request.options],
+        owner_id=request.owner_id,
+    )
+    return Placeholder(**record)
+
+
+@app.delete("/placeholders/{name}", status_code=204)
+def remove_placeholder(
+    name: str,
+    owner_id: str | None = None,
+    admin_password: str | None = None,
+) -> Response:
+    existing = _find_placeholder(name)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Placeholder not found.")
+    if not _can_modify_placeholder(existing, owner_id, admin_password):
+        raise HTTPException(status_code=403, detail=PLACEHOLDER_FORBIDDEN_DETAIL)
+    delete_placeholder(settings.placeholders_path, name)
+    return Response(status_code=204)
+
+
+def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, str]]:
+    """Resolve placeholder defs and selections for a chat request.
+
+    As of 14d, ``placeholder_defs`` carries the FULLY RESOLVED effective def for
+    each placeholder the prompt uses, already collapsed by the frontend in the
+    order inline -> browser-local global -> shared overlay. The server is stateless
+    about ``localStorage``, so it treats ``placeholder_defs`` as the highest
+    precedence source: this lets browser-local globals (which the server cannot
+    see) take effect. The shared overlay (``placeholders.json``) and the
+    ``DEFAULT_PLACEHOLDERS`` code floor below it are a harmless fallback for any
+    name the request omits. Selections come from the dedicated request fields.
+    """
+
+    system_template = (request.system_prompt or "").strip() or default_system_prompt_template()
+    user_template = (request.user_prompt_template or "").strip() or default_user_prompt_template()
+    names = template_placeholder_names(system_template) | template_placeholder_names(user_template)
+    inline_defs = {
+        name: placeholder_def_from_record(definition)
+        for name, definition in (request.placeholder_defs or {}).items()
+        if isinstance(definition, dict)
+    }
+    shared_global = placeholder_defs_from_records(load_placeholders(settings.placeholders_path))
+    defs = resolve_placeholder_defs(
+        names,
+        inline_defs=inline_defs,
+        shared_global_defs=shared_global,
+        code_default_defs=DEFAULT_PLACEHOLDERS,
+    )
+    # The frontend sends a generic ``{placeholderName: value}`` map; the server is
+    # agnostic about which names exist (select option name or typed text string).
+    selections = {
+        str(name): str(value)
+        for name, value in (request.selections or {}).items()
+        if value is not None
+    }
+    return defs, selections
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -379,6 +486,9 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
         )
+    except HTTPException:
+        # Intended 4xx from policy enforcement must keep its status, not become 500.
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return RetrieveResponse(
@@ -388,26 +498,34 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     )
 
 
+def _output_budget_length(placeholder_defs: dict, selections: dict[str, str]) -> str:
+    """Pick the short/medium/long key used only for output-token budget sizing.
+
+    Output budget is the one place ``length`` stays slightly special: it keys on
+    short/medium/long regardless of what text the ``length`` placeholder renders.
+    Derive it from the ``length`` selection, falling back to the resolved
+    ``length`` def's default (then ``medium``).
+    """
+
+    length_def = placeholder_defs.get("length")
+    default = length_def.default if length_def is not None else "medium"
+    return selections.get("length") or default or "medium"
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    style = request.style or settings.default_style
-    length = request.length or settings.default_length
-    if style not in available_styles():
-        raise HTTPException(status_code=400, detail=f"Unknown style: {style}")
-    if length not in available_lengths():
-        raise HTTPException(status_code=400, detail=f"Unknown length: {length}")
+    placeholder_defs, selections = _resolve_chat_placeholders(request)
+    length = _output_budget_length(placeholder_defs, selections)
     try:
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
         _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
         return pipeline.chat(
             question=request.question,
-            style=style,
             length=length,
-            custom_instructions=request.custom_instructions,
+            placeholder_defs=placeholder_defs,
+            selections=selections,
             system_prompt=request.system_prompt,
             user_prompt_template=request.user_prompt_template,
-            style_prompts=request.style_prompts,
-            length_prompts=request.length_prompts,
             conversation_history=request.conversation_history,
             conversation_summary=request.conversation_summary,
             top_k=request.top_k,
@@ -436,18 +554,17 @@ def chat(request: ChatRequest) -> ChatResponse:
         )
     except PromptBudgetError as exc:
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
+    except HTTPException:
+        # Intended 4xx from policy/model enforcement must keep its status, not become 500.
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest) -> StreamingResponse:
-    style = request.style or settings.default_style
-    length = request.length or settings.default_length
-    if style not in available_styles():
-        raise HTTPException(status_code=400, detail=f"Unknown style: {style}")
-    if length not in available_lengths():
-        raise HTTPException(status_code=400, detail=f"Unknown length: {length}")
+    placeholder_defs, selections = _resolve_chat_placeholders(request)
+    length = _output_budget_length(placeholder_defs, selections)
 
     def event_stream():
         started = time.perf_counter()
@@ -513,14 +630,12 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             budget, conversation_summary = pipeline.build_chat_prompt(
                 question=request.question,
                 retrieved=retrieved,
-                style=style,
                 length=length,
                 model=resolved_model,
-                custom_instructions=request.custom_instructions,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
                 system_prompt=request.system_prompt,
                 user_prompt_template=request.user_prompt_template,
-                style_prompts=request.style_prompts,
-                length_prompts=request.length_prompts,
                 conversation_history=request.conversation_history,
                 conversation_summary=request.conversation_summary,
                 llm_api_key=resolved_api_key,
@@ -574,9 +689,8 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "generation_time_seconds": round(generation_seconds, 3),
             }
             logger.info(
-                "Streamed answer question=%r style=%s length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
+                "Streamed answer question=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
                 request.question,
-                style,
                 length,
                 resolved_model,
                 elapsed,

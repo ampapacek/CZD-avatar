@@ -47,8 +47,6 @@ class Settings(BaseSettings):
     msearch_min_confidence: float | None = Field(default=None, alias="MSEARCH_MIN_CONFIDENCE")
     msearch_timeout: float = Field(default=60.0, alias="MSEARCH_TIMEOUT")
 
-    default_style: str = Field(default="ucitel", alias="DEFAULT_STYLE")
-    default_length: str = Field(default="medium", alias="DEFAULT_LENGTH")
     context_window_tokens: int = Field(default=32768, alias="CONTEXT_WINDOW_TOKENS")
     output_token_budget_short: int = Field(default=384, alias="OUTPUT_TOKEN_BUDGET_SHORT")
     output_token_budget_medium: int = Field(default=768, alias="OUTPUT_TOKEN_BUDGET_MEDIUM")
@@ -63,6 +61,7 @@ class Settings(BaseSettings):
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
+    placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")
 
 @lru_cache
 def load_env_values() -> dict[str, str]:

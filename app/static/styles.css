@@ -265,6 +265,10 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   line-height: 1.4;
 }
 
+.field-note.unsaved-note {
+  color: #b45309;
+}
+
 .unlock-status,
 #modelRefreshStatus {
   min-height: 17px;
@@ -390,6 +394,67 @@ select:focus {
   gap: 14px;
 }
 
+/* Data-driven parameter placeholder controls (length, custom_instructions, ...)
+   render here, one .field per resolved placeholder. */
+.placeholder-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.placeholder-controls:empty {
+  display: none;
+}
+
+.placeholder-defs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.placeholder-def-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.placeholder-def-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.placeholder-defs-inline {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.placeholder-def-options {
+  margin-top: 8px;
+}
+
+.placeholder-def-option-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr auto;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.placeholder-def-dialog .settings-body {
+  max-width: 640px;
+}
+
 .advanced {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -468,16 +533,6 @@ select:focus {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.45;
-}
-
-.length-prompt-editors {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.length-prompt-editor textarea {
-  min-height: 96px;
 }
 
 .prompt-template-warning {
@@ -1555,7 +1610,6 @@ body[data-theme="dark"] .source-highlight {
 @media (max-width: 560px) {
   .controls,
   .advanced-grid,
-  .length-prompt-editors,
   .prompt-controls,
   .provider-key-list,
   .settings-grid,

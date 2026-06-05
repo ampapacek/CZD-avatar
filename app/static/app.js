@@ -1,8 +1,6 @@
 const form = document.querySelector("#chatForm");
 const question = document.querySelector("#question");
-const style = document.querySelector("#style");
-const length = document.querySelector("#length");
-const customInstructions = document.querySelector("#customInstructions");
+const placeholderControls = document.querySelector("#placeholderControls");
 const llmProvider = document.querySelector("#llmProvider");
 const model = document.querySelector("#model");
 const customModelField = document.querySelector("#customModelField");
@@ -35,6 +33,7 @@ const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
+const wpSelect = document.querySelector("#wpSelect");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const newPromptButton = document.querySelector("#newPromptButton");
@@ -45,11 +44,30 @@ const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const systemPrompt = document.querySelector("#systemPrompt");
-const stylePromptDescriptionLabel = document.querySelector("#stylePromptDescriptionLabel");
-const stylePromptDescription = document.querySelector("#stylePromptDescription");
-const lengthPromptInputs = Array.from(document.querySelectorAll("[data-length-prompt]"));
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
+const globalPlaceholderDefsList = document.querySelector("#globalPlaceholderDefsList");
+const newGlobalPlaceholderButton = document.querySelector("#newGlobalPlaceholderButton");
+const inlinePlaceholderDefsList = document.querySelector("#inlinePlaceholderDefsList");
+const newInlinePlaceholderButton = document.querySelector("#newInlinePlaceholderButton");
+const placeholderDefDialog = document.querySelector("#placeholderDefDialog");
+const placeholderDefForm = document.querySelector("#placeholderDefForm");
+const placeholderDefTitle = document.querySelector("#placeholderDefTitle");
+const placeholderDefScopeNote = document.querySelector("#placeholderDefScopeNote");
+const closePlaceholderDefButton = document.querySelector("#closePlaceholderDefButton");
+const placeholderDefName = document.querySelector("#placeholderDefName");
+const placeholderDefLabel = document.querySelector("#placeholderDefLabel");
+const placeholderDefHelp = document.querySelector("#placeholderDefHelp");
+const placeholderDefKind = document.querySelector("#placeholderDefKind");
+const placeholderDefDefaultTextField = document.querySelector("#placeholderDefDefaultTextField");
+const placeholderDefDefaultText = document.querySelector("#placeholderDefDefaultText");
+const placeholderDefDefaultSelectField = document.querySelector("#placeholderDefDefaultSelectField");
+const placeholderDefDefaultSelect = document.querySelector("#placeholderDefDefaultSelect");
+const placeholderDefOptionsBlock = document.querySelector("#placeholderDefOptionsBlock");
+const placeholderDefOptionsList = document.querySelector("#placeholderDefOptionsList");
+const addPlaceholderOptionButton = document.querySelector("#addPlaceholderOptionButton");
+const placeholderDefError = document.querySelector("#placeholderDefError");
+const placeholderDefActions = document.querySelector("#placeholderDefActions");
 const topK = document.querySelector("#topK");
 const topKValue = document.querySelector("#topKValue");
 const denseWeight = document.querySelector("#denseWeight");
@@ -106,43 +124,34 @@ const helpDialog = document.querySelector("#helpDialog");
 const closeHelpButton = document.querySelector("#closeHelpButton");
 const themeToggle = document.querySelector("#themeToggle");
 const themeToggleLabel = document.querySelector("#themeToggleLabel");
-const HISTORY_STORAGE_KEY = "czdemos4ai-history";
+// Bumped for Task 14c: history entries now store a generic placeholder
+// `selections` map instead of the old `style`/`length`/`custom_instructions`
+// fields. Stale entries in the old key are simply dropped (no migration).
+const HISTORY_STORAGE_KEY = "czdemos4ai-history-v2";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
 const LLM_SETTINGS_STORAGE_KEY = "czdemos4ai-llm-settings";
 const TOKEN_BUDGET_STORAGE_KEY = "czdemos4ai-token-budget";
 const LOCAL_PROMPT_PRESETS_STORAGE_KEY = "czdemos4ai-local-prompt-presets";
+// Browser-local global placeholder defs (name -> def). Private to this browser,
+// no password. In resolution they sit between inline (on the selected prompt) and
+// the shared server overlay: inline -> browser-local -> shared overlay -> code floor.
+const LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY = "czdemos4ai-local-placeholder-defs";
 const BROWSER_OWNER_ID_STORAGE_KEY = "czdemos4ai-browser-owner-id";
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
-const STYLE_LABELS = {
-  laik: "laik",
-  ucitel: "učitel",
-  historik: "historik",
-};
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
-const DEFAULT_PROMPT_PRESET_ID = "builtin-ucitel";
-const BUILTIN_PROMPT_DEFINITIONS = [
-  { id: "builtin-laik", name: "Laik", style: "laik" },
-  { id: "builtin-ucitel", name: "Učitel", style: "ucitel" },
-  { id: "builtin-historik", name: "Historik", style: "historik" },
-];
+// System placeholders are filled by the server and never warned about; the two
+// parameter placeholders shipped in the code floor (length, custom_instructions)
+// are also "known" so they do not trigger the unknown-variable warning.
 const KNOWN_PROMPT_VARIABLES = new Set([
   "question",
   "context",
-  "custom_instructions",
-  "length",
   "current_date",
-  "style",
-  "style_key",
-  "length_key",
+  "length",
+  "custom_instructions",
 ]);
-const LENGTH_LABELS = {
-  short: "krátká",
-  medium: "střední",
-  long: "dlouhá",
-};
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
@@ -159,9 +168,14 @@ let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
-let activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
-let currentStylePrompts = {};
-let currentLengthPrompts = {};
+let activePromptPresetId = "";
+let activeWpId = "";
+// Resolved parameter placeholder defs for the active prompt (name -> def) and the
+// current control values (name -> value). Both are rebuilt on every prompt switch.
+let activePlaceholderDefs = {};
+let placeholderSelections = {};
+// Browser-local global placeholder defs (name -> def), loaded from localStorage.
+let localPlaceholderDefs = {};
 let llmModelsUnlocked = false;
 let llmSettingsState = {
   selected_provider: "",
@@ -171,6 +185,55 @@ let llmSettingsState = {
 
 function normalizeProviderId(providerId) {
   return String(providerId || "").trim().toLowerCase();
+}
+
+function getWpConfigs() {
+  return Array.isArray(appSettings.wps) ? appSettings.wps : [];
+}
+
+function getWpConfig(wpId) {
+  return getWpConfigs().find((wp) => wp.id === wpId) || null;
+}
+
+function resolveWpId(wpId) {
+  const configs = getWpConfigs();
+  if (configs.some((wp) => wp.id === wpId)) {
+    return wpId;
+  }
+  if (appSettings.default_wp && configs.some((wp) => wp.id === appSettings.default_wp)) {
+    return appSettings.default_wp;
+  }
+  return configs[0]?.id || "";
+}
+
+function wpDefaultCollectionMsearchId(wp) {
+  if (!wp) {
+    return "";
+  }
+  const collections = wp.collections || [];
+  const preferred = collections.find((collection) => collection.id === wp.default_collection_id);
+  return (preferred || collections[0])?.msearch_collection_id || "";
+}
+
+function populateWpSelect() {
+  wpSelect.innerHTML = getWpConfigs()
+    .map((wp) => `<option value="${escapeHtml(wp.id)}">${escapeHtml(wp.label || wp.id)}</option>`)
+    .join("");
+  wpSelect.value = activeWpId;
+}
+
+// Switch the active work package: pick its default collection and prompt, which
+// in turn loads the WP's length definitions and re-renders the WP-filtered
+// prompt options. Pass explicit ids when restoring a saved conversation.
+function selectWp(wpId, { promptId, collectionId } = {}) {
+  activeWpId = resolveWpId(wpId);
+  wpSelect.value = activeWpId;
+  const wp = getWpConfig(activeWpId);
+  populateMsearchCollections(collectionId || wpDefaultCollectionMsearchId(wp));
+  const targetPrompt = promptId && promptPresetExists(promptId)
+    ? promptId
+    : defaultPromptPresetId(activeWpId);
+  applyPromptPresetById(targetPrompt);
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
@@ -194,8 +257,7 @@ async function loadSettings() {
   const settings = await response.json();
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
-  style.value = settings.default_style || "ucitel";
-  length.value = settings.default_length || "medium";
+  localPlaceholderDefs = loadLocalPlaceholderDefs();
   embeddingModel.value = settings.embedding_model || "";
   llmSettingsState = loadLlmSettings();
   const providers = getLlmProviders(settings);
@@ -211,16 +273,16 @@ async function loadSettings() {
     await verifyUnlockPassword({ silent: true });
   }
   refreshModelOptions(settings);
-  populateMsearchCollections(settings.msearch_defaults?.collection_presets || [], settings.msearch_defaults?.collection);
+  activeWpId = resolveWpId(settings.default_wp);
+  populateWpSelect();
+  populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   retrievalBackend.value = settings.retrieval_backend || "msearch";
   msearchMode.value = settings.msearch_defaults?.mode || "hybrid";
   msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? "";
   topK.value = settings.msearch_defaults?.max_results ?? settings.top_k ?? 10;
   systemPrompt.value = settings.prompt_defaults?.system_prompt || "";
   userPromptTemplate.value = settings.prompt_defaults?.user_prompt_template || "";
-  currentStylePrompts = { ...(settings.prompt_defaults?.style_prompts || {}) };
-  currentLengthPrompts = { ...(settings.prompt_defaults?.length_prompts || {}) };
-  updatePromptDescriptionEditors();
+  updatePromptTemplateWarning();
   topKValue.value = topK.value;
   denseWeight.value = settings.retrieval_defaults?.dense_weight ?? 0.7;
   bm25Weight.value = (1 - Number(denseWeight.value)).toFixed(2);
@@ -406,6 +468,8 @@ helpDialog.addEventListener("click", (event) => {
 settingsButton.addEventListener("click", () => {
   renderProviderApiKeyFields();
   populateCustomProviderFields();
+  renderGlobalPlaceholderDefs();
+  renderInlinePlaceholderDefs();
   settingsDialog.showModal();
 });
 closeSettingsButton.addEventListener("click", () => {
@@ -479,19 +543,18 @@ topK.addEventListener("input", () => {
 });
 
 retrievalBackend.addEventListener("change", () => updateRetrievalControls({ resetValues: true }));
-style.addEventListener("change", updatePromptDescriptionEditors);
-stylePromptDescription.addEventListener("input", () => {
-  currentStylePrompts[style.value] = stylePromptDescription.value;
+// Editing the prompt text can change which {tokens} are used, so re-render the
+// main-page controls (resetting values to the resolved defaults) and refresh the
+// unknown-variable warning.
+systemPrompt.addEventListener("input", () => {
+  renderPlaceholderControls();
   updatePromptTemplateWarning();
 });
-lengthPromptInputs.forEach((input) => {
-  input.addEventListener("input", () => {
-    currentLengthPrompts[input.dataset.lengthPrompt] = input.value;
-    updatePromptTemplateWarning();
-  });
+userPromptTemplate.addEventListener("input", () => {
+  renderPlaceholderControls();
+  updatePromptTemplateWarning();
 });
-systemPrompt.addEventListener("input", updatePromptTemplateWarning);
-userPromptTemplate.addEventListener("input", updatePromptTemplateWarning);
+wpSelect.addEventListener("change", () => selectWp(wpSelect.value));
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
 sharePromptOnServer.addEventListener("change", updatePromptShareNote);
@@ -551,13 +614,13 @@ llmProvider.addEventListener("change", () => {
   const providerId = normalizeProviderId(llmProvider.value);
   loadProviderValues(providerId, { preferStored: true });
   refreshModelOptions(appSettings);
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
   updateRetrievalControls({ resetValues: false });
   persistLlmSettings();
 });
 llmBaseUrl.addEventListener("input", () => {
   persistLlmSettings();
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
 });
 llmApiKey.addEventListener("input", () => {
   persistLlmSettings();
@@ -618,7 +681,7 @@ customProviderName.addEventListener("input", () => {
 customProviderBaseUrl.addEventListener("input", () => {
   persistLlmSettings();
   loadProviderValues(llmProvider.value, { preferStored: true });
-  populateMsearchCollections(appSettings.msearch_defaults?.collection_presets || [], msearchCollection.value);
+  populateMsearchCollections(msearchCollection.value);
 });
 saveCustomProviderApiKeyButton.addEventListener("click", () => {
   if (!customProviderApiKey.value.trim()) {
@@ -665,14 +728,16 @@ function buildRequestPayload(overrides = {}) {
   const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
-    style: style.value,
-    length: length.value,
+    wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
-    custom_instructions: customInstructions.value,
+    // Generic placeholder values + the FULLY RESOLVED effective defs (inline ->
+    // browser-local global -> shared overlay) so the server substitutes exactly
+    // what the user configured, including browser-local globals it cannot see.
+    selections: { ...placeholderSelections },
+    placeholder_defs: effectivePlaceholderDefsForRequest(),
     system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
     user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
-    length_prompts: promptMapOverride(currentLengthPrompts, appSettings.prompt_defaults?.length_prompts),
     conversation_history: [],
     ...currentTokenBudgetSettings(),
     model: selectedModelValue(),
@@ -700,6 +765,7 @@ function buildRetrievePayload(overrides = {}) {
   const activePrompt = activePromptPresetMetadata();
   return {
     question: question.value,
+    wp_id: activeWpId,
     prompt_preset_id: activePrompt.id,
     prompt_preset_name: activePrompt.name,
     top_k: Number(topK.value),
@@ -1374,25 +1440,692 @@ function refreshModelOptions(settings = appSettings) {
   updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);
 }
 
-function updatePromptDescriptionEditors() {
-  stylePromptDescriptionLabel.textContent = `Popis kompatibilního profilu ${STYLE_LABELS[style.value] || style.value} místo {style}`;
-  stylePromptDescription.value = currentStylePrompts[style.value] || "";
-  syncLengthPromptEditors();
-  updatePromptTemplateWarning();
+// System placeholders are filled by the server and never surfaced as a control.
+const SYSTEM_PLACEHOLDERS = new Set(["question", "context", "current_date"]);
+
+// Merged effective global placeholder defs from /settings (DEFAULT_PLACEHOLDERS
+// overlaid by placeholders.json), keyed by name.
+function globalPlaceholderDefs() {
+  const records = Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [];
+  const defs = {};
+  for (const record of records) {
+    if (record && record.name) {
+      defs[String(record.name)] = record;
+    }
+  }
+  return defs;
 }
 
-function syncLengthPromptEditors() {
-  lengthPromptInputs.forEach((input) => {
-    input.value = currentLengthPrompts[input.dataset.lengthPrompt] || "";
+// Browser-local global placeholder defs (name -> def). These sit between the
+// selected prompt's inline defs and the shared server overlay in resolution.
+function localGlobalPlaceholderDefs() {
+  return localPlaceholderDefs && typeof localPlaceholderDefs === "object" ? localPlaceholderDefs : {};
+}
+
+// Inline placeholder defs declared on the currently selected prompt; these
+// override the global defs wholesale.
+function activePromptInlinePlaceholderDefs() {
+  const preset = getPromptPresetById(activePromptPresetId);
+  const inline = preset && preset.placeholders;
+  return inline && typeof inline === "object" && !Array.isArray(inline) ? inline : {};
+}
+
+// Resolve the parameter placeholders used by the current prompt text: parse the
+// {tokens} from the system + user templates, drop system placeholders, and for
+// each remaining token take its def wholesale from the most specific scope:
+// inline (selected prompt) -> browser-local global -> shared server overlay
+// (DEFAULT_PLACEHOLDERS already merged into appSettings.placeholders). Tokens with
+// no def anywhere get no control (they render literally).
+function resolveActivePlaceholderDefs() {
+  const tokens = new Set([
+    ...extractPromptVariables(systemPrompt.value),
+    ...extractPromptVariables(userPromptTemplate.value),
+  ]);
+  const inline = activePromptInlinePlaceholderDefs();
+  const local = localGlobalPlaceholderDefs();
+  const globals = globalPlaceholderDefs();
+  const resolved = {};
+  for (const token of tokens) {
+    if (SYSTEM_PLACEHOLDERS.has(token)) {
+      continue;
+    }
+    const def = inline[token] || local[token] || globals[token];
+    if (def) {
+      resolved[token] = def;
+    }
+  }
+  return resolved;
+}
+
+// Effective resolved def for a single placeholder name (inline -> local -> shared
+// overlay). Used to build the chat request's effective placeholder_defs.
+function effectivePlaceholderDef(name) {
+  return activePromptInlinePlaceholderDefs()[name]
+    || localGlobalPlaceholderDefs()[name]
+    || globalPlaceholderDefs()[name]
+    || null;
+}
+
+// Build the placeholder_defs map sent on a chat request. Carries the FULLY
+// RESOLVED effective def (inline -> browser-local global -> shared overlay) for
+// each parameter placeholder the prompt uses, not just inline defs. The server is
+// stateless about localStorage, so it treats placeholder_defs as the highest
+// precedence source; sending effective defs makes it substitute exactly what the
+// user configured here (its own overlay + code floor remain a harmless fallback).
+function effectivePlaceholderDefsForRequest() {
+  const defs = {};
+  for (const name of Object.keys(activePlaceholderDefs)) {
+    const def = effectivePlaceholderDef(name);
+    if (def) {
+      defs[name] = def;
+    }
+  }
+  return defs;
+}
+
+function placeholderDefaultValue(def) {
+  return typeof def?.default === "string" ? def.default : "";
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder definition editor (Task 14d)
+//
+// Manages placeholder DEFINITIONS (not the per-question selections) at two
+// scopes: global (shared server overlay via /placeholders + browser-local in
+// localStorage) and inline (on the selected prompt preset). Reuses one dialog
+// editor for every scope.
+// ---------------------------------------------------------------------------
+
+function loadLocalPlaceholderDefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY) || "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+    const defs = {};
+    for (const [name, def] of Object.entries(raw)) {
+      const normalized = normalizePlaceholderDef(name, def);
+      if (normalized) {
+        defs[normalized.name] = normalized.def;
+      }
+    }
+    return defs;
+  } catch {
+    return {};
+  }
+}
+
+function persistLocalPlaceholderDefs() {
+  localStorage.setItem(LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY, JSON.stringify(localPlaceholderDefs));
+}
+
+// Coerce an arbitrary stored object into a clean {name, def} pair, or null.
+function normalizePlaceholderDef(name, def) {
+  const slug = slugifyPlaceholderName(name);
+  if (!slug || !def || typeof def !== "object") {
+    return null;
+  }
+  const kind = def.kind === "select" ? "select" : "text";
+  const options = kind === "select" && Array.isArray(def.options)
+    ? def.options
+        .map((option) => {
+          const optionName = String(option?.name || "").trim();
+          if (!optionName) {
+            return null;
+          }
+          return {
+            name: optionName,
+            label: String(option?.label || optionName).trim(),
+            text: String(option?.text || ""),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  const help = def.help != null && String(def.help).trim() ? String(def.help).trim() : null;
+  return {
+    name: slug,
+    def: {
+      label: String(def.label || slug).trim(),
+      kind,
+      help,
+      default: String(def.default || ""),
+      options,
+    },
+  };
+}
+
+function slugifyPlaceholderName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// After any def change (global or inline) re-fetch the merged globals from the
+// server, then re-render the lists and the active main-page controls so changes
+// show immediately.
+async function refreshAfterPlaceholderDefChange() {
+  try {
+    const response = await fetch("settings");
+    if (response.ok) {
+      const settings = await response.json();
+      appSettings = { ...appSettings, placeholders: settings.placeholders };
+    }
+  } catch (error) {
+    console.warn("Could not refresh settings after placeholder def change", error);
+  }
+  renderPlaceholderControls();
+  renderGlobalPlaceholderDefs();
+  renderInlinePlaceholderDefs();
+}
+
+// Describe where an effective global def currently comes from, for the list.
+function globalPlaceholderDefSource(name) {
+  if (Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)) {
+    return "local";
+  }
+  const record = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+    .find((item) => item && item.name === name);
+  if (record && (record.owner_id || record.updated_at)) {
+    return "shared";
+  }
+  return "builtin";
+}
+
+const PLACEHOLDER_SOURCE_LABELS = {
+  local: "lokální (jen tento prohlížeč)",
+  shared: "sdílená (server)",
+  builtin: "vestavěná",
+};
+
+function renderGlobalPlaceholderDefs() {
+  if (!globalPlaceholderDefsList) {
+    return;
+  }
+  // Union of merged server globals + browser-local globals, deduped by name.
+  const names = new Set([
+    ...Object.keys(globalPlaceholderDefs()),
+    ...Object.keys(localGlobalPlaceholderDefs()),
+  ]);
+  const sorted = Array.from(names).sort();
+  globalPlaceholderDefsList.innerHTML = sorted
+    .map((name) => {
+      const source = globalPlaceholderDefSource(name);
+      const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || {};
+      const sourceLabel = PLACEHOLDER_SOURCE_LABELS[source] || source;
+      const kindLabel = def.kind === "select" ? "výběr" : "text";
+      return `
+        <div class="placeholder-def-row" data-global-placeholder="${escapeHtml(name)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(def.label || name)}</strong>
+            <code>{${escapeHtml(name)}}</code>
+            <span class="field-note">${escapeHtml(kindLabel)} · ${escapeHtml(sourceLabel)}</span>
+          </div>
+          <div class="inline-actions">
+            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="local">Upravit lokálně</button>
+            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="shared">Upravit sdíleně</button>
+            ${source === "builtin"
+              ? ""
+              : `<button class="secondary danger-lite" type="button" data-delete-global="${escapeHtml(name)}" data-delete-scope="${source}">Smazat</button>`}
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderInlinePlaceholderDefs() {
+  if (!inlinePlaceholderDefsList) {
+    return;
+  }
+  const inline = activePromptInlinePlaceholderDefs();
+  const names = Object.keys(inline).sort();
+  // Inline defs on a SERVER preset live only in memory until the prompt itself is
+  // saved, so an edit is lost if the user navigates away first. Local presets
+  // persist immediately and built-ins are not editable here, so only warn for
+  // server presets.
+  const unsavedNote = isServerPromptPreset(activePromptPresetId)
+    ? `<p class="field-note unsaved-note">Změny inline proměnných se uloží až po uložení promptu („Uložit jako nový“ / „Aktualizovat“).</p>`
+    : "";
+  if (!names.length) {
+    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>${unsavedNote}`;
+    return;
+  }
+  inlinePlaceholderDefsList.innerHTML = `${names
+    .map((name) => {
+      const def = inline[name] || {};
+      const kindLabel = def.kind === "select" ? "výběr" : "text";
+      return `
+        <div class="placeholder-def-row" data-inline-placeholder="${escapeHtml(name)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(def.label || name)}</strong>
+            <code>{${escapeHtml(name)}}</code>
+            <span class="field-note">${escapeHtml(kindLabel)} · inline</span>
+          </div>
+          <div class="inline-actions">
+            <button class="secondary" type="button" data-edit-inline="${escapeHtml(name)}">Upravit</button>
+            <button class="secondary danger-lite" type="button" data-delete-inline="${escapeHtml(name)}">Smazat</button>
+          </div>
+        </div>`;
+    })
+    .join("")}${unsavedNote}`;
+}
+
+// --- shared dialog editor ---------------------------------------------------
+// editorContext describes where the result is saved:
+//   { scope: "global-local" | "global-shared" | "inline", originalName }
+let placeholderEditorContext = null;
+
+function openPlaceholderDefEditor(context, def) {
+  placeholderEditorContext = context;
+  const isNew = !context.originalName;
+  placeholderDefName.value = context.originalName || "";
+  placeholderDefLabel.value = def?.label || "";
+  placeholderDefHelp.value = def?.help || "";
+  placeholderDefKind.value = def?.kind === "select" ? "select" : "text";
+  placeholderDefDefaultText.value = def?.kind === "select" ? "" : (def?.default || "");
+  placeholderDefDefaultSelect.value = def?.kind === "select" ? (def?.default || "") : "";
+  renderPlaceholderOptionRows(def?.kind === "select" && Array.isArray(def.options) ? def.options : []);
+  updatePlaceholderKindVisibility();
+  setPlaceholderDefError("");
+  placeholderDefTitle.textContent = isNew ? "Nová proměnná" : "Upravit proměnnou";
+  placeholderDefScopeNote.textContent = placeholderScopeNote(context.scope);
+  renderPlaceholderDefActions(context.scope, isNew);
+  placeholderDefDialog.showModal();
+  placeholderDefName.focus();
+}
+
+function placeholderScopeNote(scope) {
+  if (scope === "global-local") {
+    return "Globální proměnná uložená jen v tomto prohlížeči.";
+  }
+  if (scope === "global-shared") {
+    return "Globální proměnná sdílená přes server (vyžaduje vlastnictví nebo admin heslo).";
+  }
+  return "Inline proměnná tohoto promptu (přebije globální). Uloží se až při uložení promptu.";
+}
+
+// Default action is "save as new" so editing does not silently shadow a shared
+// def; updating an existing name is the explicit secondary action.
+function renderPlaceholderDefActions(scope, isNew) {
+  const saveLabel = scope === "inline" ? "Uložit jako novou inline" : "Uložit jako novou";
+  const updateLabel = "Aktualizovat tuto";
+  const actions = [`<button class="secondary" type="button" data-def-action="save-new">${escapeHtml(saveLabel)}</button>`];
+  if (!isNew) {
+    actions.push(`<button class="secondary" type="button" data-def-action="update">${escapeHtml(updateLabel)}</button>`);
+  }
+  placeholderDefActions.innerHTML = actions.join("");
+}
+
+function updatePlaceholderKindVisibility() {
+  const isSelect = placeholderDefKind.value === "select";
+  placeholderDefDefaultTextField.hidden = isSelect;
+  placeholderDefDefaultSelectField.hidden = !isSelect;
+  placeholderDefOptionsBlock.hidden = !isSelect;
+}
+
+function renderPlaceholderOptionRows(options) {
+  placeholderDefOptionsList.innerHTML = (options.length ? options : [{ name: "", label: "", text: "" }])
+    .map((option) => placeholderOptionRowHtml(option))
+    .join("");
+}
+
+function placeholderOptionRowHtml(option) {
+  return `
+    <div class="placeholder-def-option-row">
+      <input type="text" data-option-field="name" placeholder="název" value="${escapeHtml(option?.name || "")}" autocomplete="off" />
+      <input type="text" data-option-field="label" placeholder="popisek" value="${escapeHtml(option?.label || "")}" autocomplete="off" />
+      <textarea data-option-field="text" rows="2" placeholder="vložený text">${escapeHtml(option?.text || "")}</textarea>
+      <button class="secondary danger-lite" type="button" data-remove-option>×</button>
+    </div>`;
+}
+
+function collectPlaceholderOptionRows() {
+  return Array.from(placeholderDefOptionsList.querySelectorAll(".placeholder-def-option-row"))
+    .map((row) => ({
+      name: row.querySelector('[data-option-field="name"]')?.value || "",
+      label: row.querySelector('[data-option-field="label"]')?.value || "",
+      text: row.querySelector('[data-option-field="text"]')?.value || "",
+    }))
+    .filter((option) => option.name.trim());
+}
+
+function setPlaceholderDefError(message) {
+  if (!placeholderDefError) {
+    return;
+  }
+  placeholderDefError.hidden = !message;
+  placeholderDefError.textContent = message || "";
+}
+
+// Build a {name, def} from the dialog inputs, or null with an error shown.
+function readPlaceholderDefFromEditor() {
+  const slug = slugifyPlaceholderName(placeholderDefName.value);
+  if (!slug) {
+    setPlaceholderDefError("Zadej platný název (písmena, číslice, podtržítka).");
+    return null;
+  }
+  const kind = placeholderDefKind.value === "select" ? "select" : "text";
+  const options = kind === "select" ? collectPlaceholderOptionRows() : [];
+  if (kind === "select" && !options.length) {
+    setPlaceholderDefError("Výběr potřebuje aspoň jednu možnost.");
+    return null;
+  }
+  const help = placeholderDefHelp.value.trim() ? placeholderDefHelp.value.trim() : null;
+  const def = {
+    label: placeholderDefLabel.value.trim() || slug,
+    kind,
+    help,
+    default: kind === "select" ? placeholderDefDefaultSelect.value.trim() : placeholderDefDefaultText.value,
+    options,
+  };
+  return { name: slug, def };
+}
+
+async function submitPlaceholderDefEditor(action) {
+  const result = readPlaceholderDefFromEditor();
+  if (!result) {
+    return;
+  }
+  const context = placeholderEditorContext || {};
+  // "update" keeps the original name; "save-new" uses the typed name and refuses
+  // to silently overwrite an existing entry in the same scope.
+  const targetName = action === "update" && context.originalName ? context.originalName : result.name;
+  try {
+    if (context.scope === "global-local") {
+      saveLocalGlobalPlaceholderDef(targetName, result.def, action);
+    } else if (context.scope === "global-shared") {
+      await saveSharedGlobalPlaceholderDef(targetName, result.def, action);
+    } else {
+      saveInlinePlaceholderDef(targetName, result.def, action);
+    }
+  } catch (error) {
+    setPlaceholderDefError(error.message);
+    return;
+  }
+  placeholderDefDialog.close();
+  await refreshAfterPlaceholderDefChange();
+}
+
+function saveLocalGlobalPlaceholderDef(name, def, action) {
+  if (action === "save-new" && Object.prototype.hasOwnProperty.call(localPlaceholderDefs, name)) {
+    throw new Error(`Lokální proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const normalized = normalizePlaceholderDef(name, def);
+  if (!normalized) {
+    throw new Error("Proměnnou se nepodařilo uložit.");
+  }
+  localPlaceholderDefs = { ...localPlaceholderDefs, [normalized.name]: normalized.def };
+  persistLocalPlaceholderDefs();
+}
+
+async function saveSharedGlobalPlaceholderDef(name, def, action) {
+  const existing = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+    .find((item) => item && item.name === name && (item.owner_id || item.updated_at));
+  if (action === "save-new" && existing) {
+    throw new Error(`Sdílená proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const payload = {
+    name,
+    label: def.label,
+    kind: def.kind,
+    help: def.help,
+    default: def.default,
+    options: def.options,
+    owner_id: getBrowserOwnerId(),
+    admin_password: llmUnlockPassword.value.trim() || null,
+  };
+  const response = await fetch("placeholders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(data.detail || "Uložení sdílené proměnné selhalo.");
+  }
+}
+
+// Inline defs live on the selected prompt preset. We mutate the in-memory preset's
+// placeholders map; the change persists when the user saves the prompt (save-as-new
+// / update), matching how the rest of the prompt editor works.
+function saveInlinePlaceholderDef(name, def, action) {
+  const preset = getPromptPresetById(activePromptPresetId);
+  if (!preset) {
+    throw new Error("Nejdřív vyber prompt.");
+  }
+  if (isBuiltInPromptPreset(activePromptPresetId)) {
+    throw new Error("Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.");
+  }
+  if (!preset.placeholders || typeof preset.placeholders !== "object" || Array.isArray(preset.placeholders)) {
+    preset.placeholders = {};
+  }
+  if (action === "save-new" && Object.prototype.hasOwnProperty.call(preset.placeholders, name)) {
+    throw new Error(`Inline proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
+  }
+  const normalized = normalizePlaceholderDef(name, def);
+  if (!normalized) {
+    throw new Error("Proměnnou se nepodařilo uložit.");
+  }
+  preset.placeholders[normalized.name] = normalized.def;
+  // Persist immediately for editable local presets so an inline def is not lost if
+  // the user forgets to re-save; server presets persist on the next prompt save.
+  if (isLocalPromptPreset(activePromptPresetId)) {
+    persistLocalPromptPresets();
+  }
+}
+
+function deleteLocalGlobalPlaceholderDef(name) {
+  if (!Object.prototype.hasOwnProperty.call(localPlaceholderDefs, name)) {
+    return;
+  }
+  const next = { ...localPlaceholderDefs };
+  delete next[name];
+  localPlaceholderDefs = next;
+  persistLocalPlaceholderDefs();
+}
+
+async function deleteSharedGlobalPlaceholderDef(name) {
+  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
+  const adminPassword = llmUnlockPassword.value.trim();
+  if (adminPassword) {
+    params.set("admin_password", adminPassword);
+  }
+  const response = await fetch(`placeholders/${encodeURIComponent(name)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!response.ok && response.status !== 404) {
+    const data = await safeJson(response);
+    throw new Error(data.detail || "Smazání sdílené proměnné selhalo.");
+  }
+}
+
+function deleteInlinePlaceholderDef(name) {
+  const preset = getPromptPresetById(activePromptPresetId);
+  if (!preset || !preset.placeholders) {
+    return;
+  }
+  delete preset.placeholders[name];
+  if (isLocalPromptPreset(activePromptPresetId)) {
+    persistLocalPromptPresets();
+  }
+}
+
+// --- editor event wiring ----------------------------------------------------
+newGlobalPlaceholderButton?.addEventListener("click", () => {
+  openPlaceholderDefEditor({ scope: "global-local", originalName: "" }, null);
+});
+newInlinePlaceholderButton?.addEventListener("click", () => {
+  if (isBuiltInPromptPreset(activePromptPresetId)) {
+    statusEl.className = "status error";
+    statusEl.textContent = "Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.";
+    return;
+  }
+  openPlaceholderDefEditor({ scope: "inline", originalName: "" }, null);
+});
+
+globalPlaceholderDefsList?.addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-global]");
+  if (editButton) {
+    const name = editButton.dataset.editGlobal;
+    const scope = editButton.dataset.editScope === "shared" ? "global-shared" : "global-local";
+    const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || null;
+    // Editing a built-in/shared into local scope starts from its current def but
+    // creates a NEW browser-local entry (so default action is still save-as-new
+    // unless the name already exists in that scope).
+    const existsInScope = scope === "global-local"
+      ? Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)
+      : Boolean((Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+          .find((item) => item && item.name === name && (item.owner_id || item.updated_at)));
+    openPlaceholderDefEditor({ scope, originalName: existsInScope ? name : "" }, def);
+    if (!existsInScope) {
+      placeholderDefName.value = name;
+    }
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-global]");
+  if (deleteButton) {
+    const name = deleteButton.dataset.deleteGlobal;
+    const scope = deleteButton.dataset.deleteScope;
+    if (!window.confirm(`Smazat proměnnou "${name}"?`)) {
+      return;
+    }
+    try {
+      if (scope === "local") {
+        deleteLocalGlobalPlaceholderDef(name);
+      } else {
+        await deleteSharedGlobalPlaceholderDef(name);
+      }
+      await refreshAfterPlaceholderDefChange();
+    } catch (error) {
+      statusEl.className = "status error";
+      statusEl.textContent = error.message;
+    }
+  }
+});
+
+inlinePlaceholderDefsList?.addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-inline]");
+  if (editButton) {
+    const name = editButton.dataset.editInline;
+    const def = activePromptInlinePlaceholderDefs()[name] || null;
+    openPlaceholderDefEditor({ scope: "inline", originalName: name }, def);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-inline]");
+  if (deleteButton) {
+    const name = deleteButton.dataset.deleteInline;
+    if (!window.confirm(`Smazat inline proměnnou "${name}"?`)) {
+      return;
+    }
+    deleteInlinePlaceholderDef(name);
+    await refreshAfterPlaceholderDefChange();
+  }
+});
+
+placeholderDefKind?.addEventListener("change", updatePlaceholderKindVisibility);
+addPlaceholderOptionButton?.addEventListener("click", () => {
+  placeholderDefOptionsList.insertAdjacentHTML("beforeend", placeholderOptionRowHtml({}));
+});
+placeholderDefOptionsList?.addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-option]");
+  if (removeButton) {
+    removeButton.closest(".placeholder-def-option-row")?.remove();
+  }
+});
+placeholderDefActions?.addEventListener("click", (event) => {
+  const actionButton = event.target.closest("[data-def-action]");
+  if (actionButton) {
+    submitPlaceholderDefEditor(actionButton.dataset.defAction);
+  }
+});
+closePlaceholderDefButton?.addEventListener("click", () => placeholderDefDialog.close());
+placeholderDefForm?.addEventListener("submit", (event) => event.preventDefault());
+
+// Re-render the main-page controls for the active prompt and reset every value to
+// its resolved def default. Called on every prompt switch and on prompt-text edits.
+function renderPlaceholderControls() {
+  activePlaceholderDefs = resolveActivePlaceholderDefs();
+  placeholderSelections = {};
+  if (!placeholderControls) {
+    return;
+  }
+  const entries = Object.entries(activePlaceholderDefs);
+  placeholderControls.innerHTML = entries
+    .map(([name, def]) => renderPlaceholderControl(name, def))
+    .join("");
+  for (const [name, def] of entries) {
+    placeholderSelections[name] = placeholderDefaultValue(def);
+    const control = placeholderControls.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
+    if (!control) {
+      continue;
+    }
+    control.value = placeholderSelections[name];
+    if (def.kind === "select") {
+      // If the def default option name is unknown, the browser keeps the first
+      // option selected; sync the stored value to whatever is actually selected.
+      placeholderSelections[name] = control.value;
+    }
+    control.addEventListener(def.kind === "select" ? "change" : "input", () => {
+      placeholderSelections[name] = control.value;
+    });
+  }
+}
+
+function renderPlaceholderControl(name, def) {
+  const label = escapeHtml(def.label || name);
+  const help = def.help ? `<small class="field-note">${escapeHtml(def.help)}</small>` : "";
+  if (def.kind === "select") {
+    const options = (Array.isArray(def.options) ? def.options : [])
+      .map((option) => `<option value="${escapeHtml(option.name)}">${escapeHtml(option.label || option.name)}</option>`)
+      .join("");
+    return `
+      <label class="field placeholder-control-field">
+        <span>${label}</span>
+        <select data-placeholder="${escapeHtml(name)}">${options}</select>
+        ${help}
+      </label>`;
+  }
+  return `
+    <label class="field placeholder-control-field">
+      <span>${label}</span>
+      <textarea data-placeholder="${escapeHtml(name)}" rows="2"></textarea>
+      ${help}
+    </label>`;
+}
+
+function cssAttrEscape(value) {
+  return String(value).replace(/["\\]/g, "\\$&");
+}
+
+// Apply saved history selections on top of freshly rendered controls: keep values
+// for placeholders that still exist, ignore those whose placeholder is gone, and
+// leave the def default where a saved value is missing.
+function applyPlaceholderSelections(savedSelections) {
+  const saved = savedSelections && typeof savedSelections === "object" ? savedSelections : {};
+  for (const [name, def] of Object.entries(activePlaceholderDefs)) {
+    if (!Object.prototype.hasOwnProperty.call(saved, name)) {
+      continue;
+    }
+    const value = String(saved[name] ?? "");
+    const control = placeholderControls?.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
+    if (def.kind === "select") {
+      const allowed = (Array.isArray(def.options) ? def.options : []).some((option) => option.name === value);
+      if (!allowed) {
+        continue;
+      }
+    }
+    placeholderSelections[name] = value;
+    if (control) {
+      control.value = value;
+    }
+  }
 }
 
 function updatePromptTemplateWarning() {
   const unknownVariables = unknownPromptVariables([
     systemPrompt.value,
-    stylePromptDescription.value,
     userPromptTemplate.value,
-    ...lengthPromptInputs.map((input) => input.value),
   ]);
   if (!unknownVariables.length) {
     promptTemplateWarning.hidden = true;
@@ -1407,9 +2140,17 @@ function updatePromptTemplateWarning() {
 
 function unknownPromptVariables(templates) {
   const unknown = new Set();
+  const inline = activePromptInlinePlaceholderDefs();
+  const local = localGlobalPlaceholderDefs();
+  const globals = globalPlaceholderDefs();
   templates.forEach((template) => {
     extractPromptVariables(template).forEach((name) => {
-      if (!KNOWN_PROMPT_VARIABLES.has(name)) {
+      // Known if it is a system/code-floor placeholder, or resolves to any def.
+      const known = KNOWN_PROMPT_VARIABLES.has(name)
+        || Object.prototype.hasOwnProperty.call(inline, name)
+        || Object.prototype.hasOwnProperty.call(local, name)
+        || Object.prototype.hasOwnProperty.call(globals, name);
+      if (!known) {
         unknown.add(name);
       }
     });
@@ -1427,7 +2168,7 @@ function extractPromptVariables(template) {
   return variables;
 }
 
-async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+async function loadPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   localPromptPresets = loadLocalPromptPresets();
   try {
     const response = await fetch("prompt-presets");
@@ -1443,7 +2184,7 @@ async function loadPromptPresets(selectedId = activePromptPresetId || DEFAULT_PR
   applyPromptPresetById(selectedId);
 }
 
-function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT_PRESET_ID) {
+function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   const resolvedId = normalizePromptPresetId(selectedId);
   renderPromptPresetSelect(activePromptPreset, resolvedId);
   renderPromptPresetSelect(promptPreset, resolvedId);
@@ -1453,16 +2194,18 @@ function renderPromptPresets(selectedId = activePromptPresetId || DEFAULT_PROMPT
 }
 
 function renderPromptPresetSelect(selectEl, selectedId) {
+  const wpLocal = localPromptPresets.filter((preset) => presetWpId(preset) === activeWpId);
+  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === activeWpId);
   const builtinOptions = builtInPromptPresets()
     .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
     .join("");
-  const localOptions = localPromptPresets.length
-    ? `<optgroup label="Lokální prompty">${localPromptPresets
+  const localOptions = wpLocal.length
+    ? `<optgroup label="Lokální prompty">${wpLocal
         .map((preset) => `<option value="${escapeHtml(preset.id)}">Local - ${escapeHtml(preset.name)}</option>`)
         .join("")}</optgroup>`
     : "";
-  const serverOptions = promptPresets.length
-    ? `<optgroup label="Sdílené prompty">${promptPresets
+  const serverOptions = wpServer.length
+    ? `<optgroup label="Sdílené prompty">${wpServer
         .map((preset) => {
           const ownedSuffix = isOwnedServerPromptPreset(preset.id) ? " (tvůj)" : "";
           return `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}${ownedSuffix}</option>`;
@@ -1473,19 +2216,23 @@ function renderPromptPresetSelect(selectEl, selectedId) {
   selectEl.value = normalizePromptPresetId(selectedId);
 }
 
+function presetWpId(preset) {
+  return resolveWpId(preset?.wp_id);
+}
+
 function promptPresetExists(presetId) {
   return Boolean(getPromptPresetById(presetId));
 }
 
 function normalizePromptPresetId(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
-    return DEFAULT_PROMPT_PRESET_ID;
+    return defaultPromptPresetId();
   }
-  return promptPresetExists(presetId) ? presetId : DEFAULT_PROMPT_PRESET_ID;
+  return promptPresetExists(presetId) ? presetId : defaultPromptPresetId();
 }
 
 function isBuiltInPromptPreset(presetId) {
-  return String(presetId || "").startsWith(BUILTIN_PROMPT_PREFIX);
+  return allBuiltInPromptPresets().some((preset) => preset.id === presetId);
 }
 
 function isLocalPromptPreset(presetId) {
@@ -1503,29 +2250,40 @@ function isEditablePromptPreset(presetId) {
   return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
 }
 
-function builtInPromptPresets() {
-  const stylePrompts = appSettings.prompt_defaults?.style_prompts || {};
-  return BUILTIN_PROMPT_DEFINITIONS.map((definition) => ({
-    id: definition.id,
-    name: definition.name,
-    style: definition.style,
-    system_prompt: renderBuiltInSystemPrompt(stylePrompts[definition.style] || ""),
-    user_prompt_template: appSettings.prompt_defaults?.user_prompt_template || "",
-    style_prompts: {},
-    length_prompts: { ...(appSettings.prompt_defaults?.length_prompts || {}) },
+// Built-in prompts are shipped per WP by the backend (appSettings.wps). Each may
+// carry an inline `placeholders` map that overrides the global defs wholesale.
+function wpBuiltInPromptPresets(wp) {
+  if (!wp) {
+    return [];
+  }
+  return (wp.builtin_prompts || []).map((preset) => ({
+    id: preset.id,
+    name: preset.name,
+    wp_id: wp.id,
+    system_prompt: preset.system_prompt || "",
+    user_prompt_template: preset.user_prompt_template || "",
+    placeholders: preset.placeholders && typeof preset.placeholders === "object" ? preset.placeholders : {},
   }));
 }
 
-function renderBuiltInSystemPrompt(stylePrompt) {
-  const template = appSettings.prompt_defaults?.system_prompt || "";
-  return template.replaceAll("{style}", stylePrompt);
+function builtInPromptPresets(wpId = activeWpId) {
+  return wpBuiltInPromptPresets(getWpConfig(wpId));
+}
+
+function allBuiltInPromptPresets() {
+  return getWpConfigs().flatMap((wp) => wpBuiltInPromptPresets(wp));
+}
+
+function defaultPromptPresetId(wpId = activeWpId) {
+  const wp = getWpConfig(wpId);
+  return wp?.default_prompt_id || wpBuiltInPromptPresets(wp)[0]?.id || "";
 }
 
 function getPromptPresetById(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
-    return getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+    return getPromptPresetById(defaultPromptPresetId());
   }
-  return builtInPromptPresets().find((preset) => preset.id === presetId)
+  return allBuiltInPromptPresets().find((preset) => preset.id === presetId)
     || localPromptPresets.find((preset) => preset.id === presetId)
     || promptPresets.find((preset) => preset.id === presetId)
     || null;
@@ -1541,25 +2299,24 @@ function applyPromptPresetById(presetId) {
   const preset = getPromptPresetById(resolvedId);
   if (!preset) {
     resetPromptEditorValues();
-    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+    renderPromptPresets(defaultPromptPresetId());
     return;
-  }
-  if (preset.style) {
-    style.value = preset.style;
   }
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
-  currentStylePrompts = { ...(preset.style_prompts || {}) };
-  currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(preset.length_prompts || {}) };
-  updatePromptDescriptionEditors();
+  // Switching prompts resets controls to the new prompt's resolved defaults; no
+  // prior values (including text placeholders) are preserved across the switch.
+  renderPlaceholderControls();
+  updatePromptTemplateWarning();
+  renderInlinePlaceholderDefs();
   renderPromptPresets(resolvedId);
 }
 
 function activePromptPresetMetadata() {
   const preset = getPromptPresetById(activePromptPresetId);
   return {
-    id: preset?.id || activePromptPresetId || DEFAULT_PROMPT_PRESET_ID,
-    name: preset?.name || activePromptPresetId || "Učitel",
+    id: preset?.id || activePromptPresetId || defaultPromptPresetId(),
+    name: preset?.name || activePromptPresetId || "Výchozí",
   };
 }
 
@@ -1568,16 +2325,17 @@ function currentPromptDraft({ id = null, name }) {
     id,
     name: name.trim(),
     wp_id: activePromptWpId(),
-    style: style.value,
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
-    length_prompts: currentLengthPrompts,
+    // Inline placeholder defs come from the live preset object, which the inline
+    // def editor (14d) mutates in place; saving the prompt persists them.
+    placeholders: activePromptInlinePlaceholderDefs(),
   };
 }
 
 function activePromptWpId() {
-  const active = getPromptPresetById(activePromptPresetId);
-  return active?.wp_id || appSettings.default_wp || "";
+  // Drafts are saved under the currently selected WP.
+  return resolveWpId(activeWpId);
 }
 
 async function saveCurrentPromptPreset({ mode }) {
@@ -1699,22 +2457,14 @@ function normalizeLocalPromptPreset(item) {
     id,
     name,
     wp_id: String(item.wp_id || appSettings.default_wp || ""),
-    style: String(item.style || ""),
     system_prompt: String(item.system_prompt || ""),
     user_prompt_template: String(item.user_prompt_template || ""),
-    length_prompts: stringMap(item.length_prompts),
+    // Inline placeholder defs are passed through as-is; the inline def editor
+    // (14d) mutates them and persists via persistLocalPromptPresets().
+    placeholders: item.placeholders && typeof item.placeholders === "object" && !Array.isArray(item.placeholders)
+      ? item.placeholders
+      : {},
   };
-}
-
-function stringMap(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, item]) => typeof item === "string")
-      .map(([key, item]) => [String(key), item])
-  );
 }
 
 function persistLocalPromptPresets() {
@@ -1722,31 +2472,28 @@ function persistLocalPromptPresets() {
 }
 
 function createBlankPromptDraft() {
-  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
+  activePromptPresetId = defaultPromptPresetId();
   systemPrompt.value = "";
   userPromptTemplate.value = "";
-  currentStylePrompts = {};
-  currentLengthPrompts = {};
-  updatePromptDescriptionEditors();
-  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  renderPlaceholderControls();
+  updatePromptTemplateWarning();
+  renderPromptPresets(defaultPromptPresetId());
   systemPrompt.focus();
 }
 
 function resetPromptEditors() {
   resetPromptEditorValues();
-  renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  renderPromptPresets(defaultPromptPresetId());
 }
 
 function resetPromptEditorValues() {
-  activePromptPresetId = DEFAULT_PROMPT_PRESET_ID;
-  const defaultPrompt = getPromptPresetById(DEFAULT_PROMPT_PRESET_ID);
+  activePromptPresetId = defaultPromptPresetId();
+  const defaultPrompt = getPromptPresetById(defaultPromptPresetId());
   if (defaultPrompt) {
-    style.value = defaultPrompt.style || "ucitel";
     systemPrompt.value = defaultPrompt.system_prompt || "";
     userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
-    currentStylePrompts = { ...(defaultPrompt.style_prompts || {}) };
-    currentLengthPrompts = { ...(appSettings.prompt_defaults?.length_prompts || {}), ...(defaultPrompt.length_prompts || {}) };
-    updatePromptDescriptionEditors();
+    renderPlaceholderControls();
+    updatePromptTemplateWarning();
   }
 }
 
@@ -1774,49 +2521,26 @@ async function deleteSelectedPromptPreset() {
     throw new Error(data.detail || "Prompt preset delete failed");
   }
   resetPromptEditors();
-  await loadPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+  await loadPromptPresets(defaultPromptPresetId());
 }
 
-function populateMsearchCollections(presets, currentCollection) {
-  const fallbackPresets = [
-    {
-      label: "WP1: histoedu v2026-02",
-      collection_id: "64d6f521-5044-4b02-8658-380b639801af",
-    },
-    {
-      label: "WP2: zaplavy v2025-11",
-      collection_id: "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
-    },
-    {
-      label: "WP3: law v2026-02",
-      collection_id: "d4be44d5-689c-4bbe-a372-b959929cd511",
-    },
-    {
-      label: "WP4: v2026-03",
-      collection_id: "3429956e-8a21-4502-ad21-a41fddc5ef99",
-    },
-  ];
+// Collection options are scoped to the active WP. Each WP currently has a
+// single collection, but the data model already supports several per WP.
+function populateMsearchCollections(currentCollection) {
+  const collections = getWpConfig(activeWpId)?.collections || [];
   const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
-  const usablePresets = (presets.length ? presets : fallbackPresets).map((preset) => ({
-    ...preset,
-    disabled:
-      (preset.collection_id || "") === WP2_MSEARCH_COLLECTION ||
-      String(preset.label || preset.collection_name || "").startsWith("WP2")
-        ? !aiUfalSelected
-        : false,
-  }));
-  msearchCollection.innerHTML = usablePresets
-    .map((preset) => {
-      const value = preset.collection_id || "";
-      const label = preset.label || preset.collection_name || value;
-      const disabled = preset.disabled ? " disabled" : "";
+  msearchCollection.innerHTML = collections
+    .map((collection) => {
+      const value = collection.msearch_collection_id || "";
+      const label = collection.label || value;
+      const disabled = value === WP2_MSEARCH_COLLECTION && !aiUfalSelected ? " disabled" : "";
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
   const options = Array.from(msearchCollection.options);
   const enabledCurrent = options.find((option) => option.value === currentCollection && !option.disabled);
   const firstEnabled = options.find((option) => !option.disabled);
-  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || "";
+  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || options[0]?.value || "";
 }
 
 function updateRetrievalControls({ resetValues = false } = {}) {
@@ -1826,12 +2550,7 @@ function updateRetrievalControls({ resetValues = false } = {}) {
       topK.value = appSettings.msearch_defaults?.max_results ?? 10;
       msearchMode.value = appSettings.msearch_defaults?.mode || "hybrid";
       msearchMinConfidence.value = appSettings.msearch_defaults?.min_confidence ?? "";
-      if (appSettings.msearch_defaults?.collection) {
-        const targetOption = Array.from(msearchCollection.options).find((option) => option.value === appSettings.msearch_defaults.collection);
-        if (targetOption && !targetOption.disabled) {
-          msearchCollection.value = targetOption.value;
-        }
-      }
+      populateMsearchCollections(msearchCollection.value || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
     } else {
       topK.value = appSettings.top_k ?? 10;
       denseWeight.value = appSettings.retrieval_defaults?.dense_weight ?? 0.7;
@@ -1957,18 +2676,6 @@ function promptOverride(value, defaultValue) {
     return null;
   }
   return current;
-}
-
-function promptMapOverride(value, defaultValue) {
-  const current = value || {};
-  const baseline = defaultValue || {};
-  const keys = Array.from(new Set([...Object.keys(current), ...Object.keys(baseline)]));
-  for (const key of keys) {
-    if ((current[key] || "") !== (baseline[key] || "")) {
-      return current;
-    }
-  }
-  return null;
 }
 
 function chunksToSources(chunks) {
@@ -2900,9 +3607,9 @@ function renderHistoryDetail(entry) {
     <section class="history-block">
       <h4>Použitá nastavení</h4>
       <div class="settings-grid">
+        ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
-        ${renderSetting("Profil", entry.settings?.style)}
-        ${renderSetting("Délka", entry.settings?.length)}
+        ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
         ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
         ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
@@ -2916,7 +3623,6 @@ function renderHistoryDetail(entry) {
         ${renderSetting("Min. skóre", entry.settings?.min_score)}
         ${renderSetting("Min. vůči nejlepšímu", entry.settings?.min_relative_score)}
         ${renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
-        ${renderSetting("Vlastní instrukce", entry.settings?.custom_instructions || "žádné")}
       </div>
     </section>
     ${
@@ -2951,14 +3657,7 @@ function renderHistoryDetail(entry) {
 	}
 
 function renderSetting(label, value) {
-  const displayValue =
-    label === "Profil"
-      ? STYLE_LABELS[value] || value
-      : label === "Délka"
-        ? LENGTH_LABELS[value] || value
-        : label === "Poskytovatel"
-          ? providerLabelForId(value)
-        : value;
+  const displayValue = label === "Poskytovatel" ? providerLabelForId(value) : value;
   return `
     <div class="setting-card">
       <span>${escapeHtml(label)}</span>
@@ -2967,10 +3666,38 @@ function renderSetting(label, value) {
   `;
 }
 
+// Render one setting card per saved placeholder selection, labeled by the def
+// (and, for selects, the chosen option's label). Defs come from the entry's saved
+// inline `placeholder_defs` overlaid on the current merged globals.
+function renderPlaceholderSettings(settings) {
+  const selections = settings?.selections && typeof settings.selections === "object" ? settings.selections : {};
+  const inline = settings?.placeholder_defs && typeof settings.placeholder_defs === "object" ? settings.placeholder_defs : {};
+  const globals = globalPlaceholderDefs();
+  return Object.entries(selections)
+    .map(([name, value]) => {
+      const def = inline[name] || globals[name] || null;
+      const label = def?.label || name;
+      let display = value;
+      if (def?.kind === "select") {
+        const option = (Array.isArray(def.options) ? def.options : []).find((item) => item.name === value);
+        display = option?.label || value;
+      } else if (def?.kind === "text") {
+        display = String(value || "").trim() || "žádné";
+      }
+      return renderSetting(label, display);
+    })
+    .join("");
+}
+
 function promptPresetLabelFromSettings(settings) {
   const presetId = promptPresetIdFromSettings(settings);
   const preset = getPromptPresetById(presetId);
   return settings?.prompt_preset_name || preset?.name || presetId;
+}
+
+function wpLabelFromSettings(settings) {
+  const wp = getWpConfig(resolveWpId(settings?.wp_id));
+  return wp?.label || settings?.wp_id || "";
 }
 
 function promptPresetIdFromSettings(settings) {
@@ -2978,8 +3705,13 @@ function promptPresetIdFromSettings(settings) {
   if (promptPresetExists(savedId)) {
     return normalizePromptPresetId(savedId);
   }
-  const stylePromptId = `${BUILTIN_PROMPT_PREFIX}${settings?.style || ""}`;
-  return promptPresetExists(stylePromptId) ? stylePromptId : DEFAULT_PROMPT_PRESET_ID;
+  // Legacy history used builtin-<style> ids; map them to the matching WP1 built-in.
+  const style = String(settings?.style || savedId || "").replace(BUILTIN_PROMPT_PREFIX, "");
+  const legacyId = `wp1-${style}`;
+  if (promptPresetExists(legacyId)) {
+    return legacyId;
+  }
+  return defaultPromptPresetId(resolveWpId(settings?.wp_id));
 }
 
 function applyHistoryEntryToForm(entry) {
@@ -2988,26 +3720,23 @@ function applyHistoryEntryToForm(entry) {
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
   }
+  activeWpId = resolveWpId(entry.settings?.wp_id);
+  wpSelect.value = activeWpId;
+  populateMsearchCollections(entry.settings?.msearch_collection || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   const savedPromptId = promptPresetIdFromSettings(entry.settings || {});
   if (promptPresetExists(savedPromptId)) {
+    // Re-selects the prompt and re-renders controls reset to the prompt defaults.
     applyPromptPresetById(savedPromptId);
   } else {
-    renderPromptPresets(DEFAULT_PROMPT_PRESET_ID);
+    renderPromptPresets(defaultPromptPresetId());
   }
-  style.value = entry.settings?.style || style.value;
-  length.value = entry.settings?.length || length.value;
-  customInstructions.value = entry.settings?.custom_instructions || "";
+  // Re-apply any saved prompt-text overrides, which can change the active tokens,
+  // then re-render controls before restoring the saved selection values.
   systemPrompt.value = entry.settings?.system_prompt || systemPrompt.value;
   userPromptTemplate.value = entry.settings?.user_prompt_template || userPromptTemplate.value;
-  currentStylePrompts = {
-    ...(appSettings.prompt_defaults?.style_prompts || {}),
-    ...(entry.settings?.style_prompts || {}),
-  };
-  currentLengthPrompts = {
-    ...(appSettings.prompt_defaults?.length_prompts || {}),
-    ...(entry.settings?.length_prompts || {}),
-  };
-  updatePromptDescriptionEditors();
+  renderPlaceholderControls();
+  applyPlaceholderSelections(entry.settings?.selections);
+  updatePromptTemplateWarning();
   refreshModelOptions(appSettings);
   const modelValue = entry.settings?.model || "";
   const unlocked = customModelAllowed();

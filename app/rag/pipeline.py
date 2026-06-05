@@ -412,13 +412,11 @@ class RAGPipeline:
     def chat(
         self,
         question: str,
-        style: str,
         length: str,
-        custom_instructions: str | None = None,
+        placeholder_defs: dict[str, Any] | None = None,
+        selections: dict[str, str] | None = None,
         system_prompt: str | None = None,
         user_prompt_template: str | None = None,
-        style_prompts: dict[str, str] | None = None,
-        length_prompts: dict[str, str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         conversation_summary: str | None = None,
         top_k: int | None = None,
@@ -484,16 +482,14 @@ class RAGPipeline:
         budget = prepare_prompt_budget(
             question=question,
             retrieved_chunks=retrieved,
-            style=style,
             length=length,
             model=resolved_model,
             config=budget_config,
-            custom_instructions=custom_instructions,
+            placeholder_defs=placeholder_defs,
+            selections=selections,
             conversation_history=effective_history,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
-            style_prompts=style_prompts,
-            length_prompts=length_prompts,
         )
         if summary_warning:
             budget.warnings.append(summary_warning)
@@ -508,11 +504,9 @@ class RAGPipeline:
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
-            "Generated answer question=%r style=%s length=%s custom=%r model=%s response_time=%.2fs answer=%s",
+            "Generated answer question=%r length=%s model=%s response_time=%.2fs answer=%s",
             question,
-            style,
             length,
-            custom_instructions,
             resolved_model,
             elapsed,
             _shorten(answer),
@@ -537,14 +531,12 @@ class RAGPipeline:
         *,
         question: str,
         retrieved: list[dict[str, Any]],
-        style: str,
         length: str,
         model: str,
-        custom_instructions: str | None = None,
+        placeholder_defs: dict[str, Any] | None = None,
+        selections: dict[str, str] | None = None,
         system_prompt: str | None = None,
         user_prompt_template: str | None = None,
-        style_prompts: dict[str, str] | None = None,
-        length_prompts: dict[str, str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         conversation_summary: str | None = None,
         llm_api_key: str | None = None,
@@ -563,16 +555,14 @@ class RAGPipeline:
         budget = prepare_prompt_budget(
             question=question,
             retrieved_chunks=retrieved,
-            style=style,
             length=length,
             model=model,
             config=resolved_config,
-            custom_instructions=custom_instructions,
+            placeholder_defs=placeholder_defs,
+            selections=selections,
             conversation_history=effective_history,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
-            style_prompts=style_prompts,
-            length_prompts=length_prompts,
         )
         if summary_warning:
             budget.warnings.append(summary_warning)

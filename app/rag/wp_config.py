@@ -1,8 +1,8 @@
 """Single source of truth for WP (work package) configuration.
 
 Each WP groups a set of built-in (read-only) prompts, the mSearch collections
-it may search, its own length definitions, and optional placeholder
-definitions. Shared and local prompt presets reference a WP through `wp_id`,
+it may search, and optional placeholder definitions. Shared and local prompt
+presets reference a WP through `wp_id`,
 so the UI can later show only the prompts and collections relevant to the
 selected WP.
 
@@ -18,12 +18,26 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.rag.prompts import (
-    LENGTH_PROMPTS,
-    STYLE_PROMPTS,
+    PlaceholderDef,
     default_system_prompt_template,
     default_user_prompt_template,
 )
 
+
+# WP1 persona guidance, baked into each WP1 built-in system prompt. These were
+# the old global persona-style texts; they now live as WP1 content (the
+# persona axis is gone — a persona is just which prompt you picked).
+_WP1_PERSONA_PROMPTS = {
+    "laik": """
+Piš srozumitelně pro běžného čtenáře bez odborného žargonu. Relevantní dodaný kontext používej jako hlavní oporu, ale můžeš doplnit obecné znalosti, pokud odpovědi pomohou. Citace nevyžaduj u každé věty; použij je jen tehdy, když se přímo opíráš o konkrétní nalezený zdroj. Pokud kontext nestačí nebo je mimo téma, řekni to jednoduše, nevnucuj citace a odpověz opatrně z obecné znalosti. Nejistotu pojmenuj přirozeně a nevymýšlej zdroje ani bibliografické údaje.
+""".strip(),
+    "ucitel": """
+Piš didakticky, jako učitel, který chce látku dobře vysvětlit. Začni od relevantního dodaného kontextu a tvrzení převzatá ze zdrojů cituj markdownovými poznámkami pod čarou ve tvaru [^Z1], [^Z2] atd. Obecné znalosti můžeš použít pro vysvětlení souvislostí, příkladů a důsledků, ale nesmíš předstírat, že pocházejí z nalezených dokumentů. Pokud jsou zdroje slabé, okrajové nebo nepokrývají otázku, řekni to a odděl podložené informace od obecného vysvětlení. Nejistotu formuluj jasně, bez falešné přesnosti a bez vymyšlených citací.
+""".strip(),
+    "historik": """
+Piš přesně, formálně a opatrně. Primárně vycházej z relevantních nalezených zdrojů; každé podstatné tvrzení, které lze opřít o kontext, opatři poznámkou pod čarou ve tvaru [^Z1], [^Z2] atd. Cituj pouze zdroje, které skutečně podporují dané tvrzení, a vynech pasáže, které jsou jen slovně podobné nebo zavádějící. Obecné znalosti používej střídmě; pokud nejsou doložené dodaným kontextem, uveď to přirozeně a označ míru nejistoty. Nevymýšlej autory, editory, bibliografické údaje ani zdrojovou oporu.
+""".strip(),
+}
 
 @dataclass(frozen=True)
 class BuiltInPrompt:
@@ -31,14 +45,16 @@ class BuiltInPrompt:
 
     The body uses the same finalized preset shape as saved presets: a full
     ``system_prompt`` (style is already baked in, ``{length}`` stays as the one
-    orthogonal placeholder) and a ``user_prompt_template``.
+    orthogonal placeholder) and a ``user_prompt_template``. An optional inline
+    ``placeholders`` map overrides global placeholder defs wholesale (highest
+    precedence in resolution).
     """
 
     id: str
     name: str
     system_prompt: str
     user_prompt_template: str
-    length_prompts: dict[str, str] = field(default_factory=dict)
+    placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -59,15 +75,14 @@ class WPConfig:
     default_prompt_id: str
     collections: list[WPCollection]
     default_collection_id: str
-    length_prompts: dict[str, str]
-    placeholders: dict[str, str] = field(default_factory=dict)
+    placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
 
 
-def _wp1_prompt(style_key: str) -> str:
+def _wp1_prompt(persona_key: str) -> str:
     # WP1 keeps the existing history behavior: take the generic system prompt
-    # template and bake the chosen style guidance in, leaving `{length}` for
+    # template and bake the chosen persona guidance in, leaving `{length}` for
     # chat-time rendering.
-    return default_system_prompt_template().replace("{style}", STYLE_PROMPTS[style_key])
+    return f"{default_system_prompt_template()}\n\nStyl:\n{_WP1_PERSONA_PROMPTS[persona_key]}"
 
 
 def _generic_prompt(domain: str) -> str:
@@ -128,7 +143,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp1-histoedu",
-        length_prompts=dict(LENGTH_PROMPTS),
     ),
     WPConfig(
         id="WP2-média",
@@ -151,7 +165,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp2-zaplavy",
-        length_prompts=dict(LENGTH_PROMPTS),
     ),
     WPConfig(
         id="WP3-právo",
@@ -174,7 +187,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp3-law",
-        length_prompts=dict(LENGTH_PROMPTS),
     ),
     WPConfig(
         id="WP4-adiktologie",
@@ -197,7 +209,6 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp4-default",
-        length_prompts=dict(LENGTH_PROMPTS),
     ),
 ]
 

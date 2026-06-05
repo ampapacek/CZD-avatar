@@ -10,6 +10,17 @@ sys.path.insert(0, str(ROOT))
 from app.config import get_settings  # noqa: E402
 from app.logging_config import configure_logging  # noqa: E402
 from app.rag.pipeline import RAGPipeline  # noqa: E402
+from app.rag.placeholders import (  # noqa: E402
+    DEFAULT_PLACEHOLDERS,
+    load_placeholders,
+    placeholder_defs_from_records,
+)
+from app.rag.prompts import (  # noqa: E402
+    default_system_prompt_template,
+    default_user_prompt_template,
+    resolve_placeholder_defs,
+    template_placeholder_names,
+)
 
 
 def main() -> None:
@@ -20,13 +31,25 @@ def main() -> None:
         help="Path to the input questions file.",
     )
     parser.add_argument("--output", default="answers_avatar.txt", help="Path to the output answers file.")
-    parser.add_argument("--style", default="ucitel", help="Answer style to use.")
-    parser.add_argument("--length", default="medium", help="Answer length to use.")
+    parser.add_argument("--length", default="medium", help="Answer length to use (short, medium, long).")
     args = parser.parse_args()
 
     configure_logging("batch-answers")
     settings = get_settings()
     pipeline = RAGPipeline(settings)
+
+    # Resolve placeholder defs the same way the server does: shared overlay over
+    # the DEFAULT_PLACEHOLDERS code floor, for the tokens the default prompts use.
+    system_template = default_system_prompt_template()
+    user_template = default_user_prompt_template()
+    names = template_placeholder_names(system_template) | template_placeholder_names(user_template)
+    shared_global = placeholder_defs_from_records(load_placeholders(settings.placeholders_path))
+    placeholder_defs = resolve_placeholder_defs(
+        names,
+        shared_global_defs=shared_global,
+        code_default_defs=DEFAULT_PLACEHOLDERS,
+    )
+    selections = {"length": args.length}
 
     questions_path = Path(args.questions)
     output_path = Path(args.output)
@@ -35,7 +58,12 @@ def main() -> None:
     sections: list[str] = []
     try:
         for index, question in enumerate(questions, start=1):
-            response = pipeline.chat(question=question, style=args.style, length=args.length)
+            response = pipeline.chat(
+                question=question,
+                length=args.length,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
+            )
             source_lines = [
                 f"- [{source.citation_id}] {source.title or source.source_path}"
                 + (f", str. {source.page_number}" if source.page_number else "")

@@ -37,7 +37,6 @@ class TokenBudgetTests(unittest.TestCase):
             prepare_prompt_budget(
                 question="x" * 10000,
                 retrieved_chunks=[],
-                style="ucitel",
                 length="short",
                 model="unknown-model",
                 config=config,
@@ -63,7 +62,6 @@ class TokenBudgetTests(unittest.TestCase):
         budget = prepare_prompt_budget(
             question="Jaký byl význam husitských válek?",
             retrieved_chunks=chunks,
-            style="ucitel",
             length="short",
             model="unknown-model",
             config=config,
@@ -91,7 +89,6 @@ class TokenBudgetTests(unittest.TestCase):
         budget = prepare_prompt_budget(
             question="Navazující otázka?",
             retrieved_chunks=[],
-            style="ucitel",
             length="short",
             model="unknown-model",
             config=config,
@@ -127,7 +124,6 @@ class TokenBudgetTests(unittest.TestCase):
         budget = prepare_prompt_budget(
             question="Co je relevantní?",
             retrieved_chunks=chunks,
-            style="ucitel",
             length="short",
             model="unknown-model",
             config=config,
@@ -155,7 +151,6 @@ class TokenBudgetTests(unittest.TestCase):
         budget = prepare_prompt_budget(
             question="Jaký význam měly husitské války?",
             retrieved_chunks=chunks,
-            style="ucitel",
             length="short",
             model="unknown-model",
             config=config,

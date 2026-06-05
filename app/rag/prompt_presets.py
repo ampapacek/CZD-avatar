@@ -28,10 +28,10 @@ def save_prompt_preset(
     system_prompt: str,
     user_prompt_template: str,
     wp_id: str | None = None,
-    length_prompts: dict[str, str] | None = None,
+    placeholders: dict[str, Any] | None = None,
     preset_id: str | None = None,
     owner_id: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     presets = load_prompt_presets(path)
     existing = next((preset for preset in presets if preset["id"] == preset_id), None) if preset_id else None
     resolved_id = preset_id or _slugify(name)
@@ -51,7 +51,7 @@ def save_prompt_preset(
         "wp_id": resolved_wp_id,
         "system_prompt": system_prompt,
         "user_prompt_template": user_prompt_template,
-        "length_prompts": length_prompts or {},
+        "placeholders": _normalize_placeholders(placeholders),
         "owner_id": resolved_owner,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -74,7 +74,7 @@ def _write_presets(path: Path, presets: list[dict[str, str]]) -> None:
     path.write_text(json.dumps({"presets": presets}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _normalize_preset(item: dict[str, Any]) -> dict[str, str]:
+def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
     name = str(item.get("name") or "Prompt").strip()
     preset_id = str(item.get("id") or _slugify(name)).strip()
     return {
@@ -83,7 +83,7 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, str]:
         "wp_id": resolve_wp_id(item.get("wp_id")),
         "system_prompt": str(item.get("system_prompt") or ""),
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
-        "length_prompts": _string_dict(item.get("length_prompts")),
+        "placeholders": _normalize_placeholders(item.get("placeholders")),
         "owner_id": str(item.get("owner_id") or ""),
         "updated_at": str(item.get("updated_at") or ""),
     }
@@ -94,7 +94,50 @@ def _slugify(value: str) -> str:
     return slug or f"prompt-{int(datetime.now(timezone.utc).timestamp())}"
 
 
-def _string_dict(value: Any) -> dict[str, str]:
+def _normalize_placeholders(value: Any) -> dict[str, dict[str, Any]]:
+    """Normalize an inline ``name -> PlaceholderDef`` map into stored records.
+
+    Inline defs are the highest-precedence placeholder source. Each value keeps
+    the ``PlaceholderDef`` shape (``label``/``kind``/``help``/``default``/
+    ``options``); unknown kinds fall back to ``text`` and options are only kept
+    for ``select``.
+    """
+
     if not isinstance(value, dict):
         return {}
-    return {str(key): str(item) for key, item in value.items()}
+    result: dict[str, dict[str, Any]] = {}
+    for name, definition in value.items():
+        if not isinstance(definition, dict):
+            continue
+        kind = str(definition.get("kind") or "text").strip()
+        if kind not in {"select", "text"}:
+            kind = "text"
+        help_value = definition.get("help")
+        result[str(name)] = {
+            "label": str(definition.get("label") or name).strip(),
+            "kind": kind,
+            "help": (str(help_value).strip() if help_value not in (None, "") else None),
+            "default": str(definition.get("default") or ""),
+            "options": _normalize_inline_options(definition.get("options")) if kind == "select" else [],
+        }
+    return result
+
+
+def _normalize_inline_options(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    options: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        option_name = str(item.get("name") or "").strip()
+        if not option_name:
+            continue
+        options.append(
+            {
+                "name": option_name,
+                "label": str(item.get("label") or option_name).strip(),
+                "text": str(item.get("text") or ""),
+            }
+        )
+    return options

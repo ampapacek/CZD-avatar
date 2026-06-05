@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import Settings
-from app.rag.prompts import build_messages, format_context
+from app.rag.prompts import PlaceholderDef, build_messages, format_context
 
 try:
     import tiktoken
@@ -151,29 +151,24 @@ def prepare_prompt_budget(
     *,
     question: str,
     retrieved_chunks: list[dict[str, Any]],
-    style: str,
     length: str,
     model: str,
     config: PromptBudgetConfig,
-    custom_instructions: str | None = None,
+    placeholder_defs: dict[str, "PlaceholderDef"] | None = None,
+    selections: dict[str, str] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
-    style_prompts: dict[str, str] | None = None,
-    length_prompts: dict[str, str] | None = None,
 ) -> PromptBudgetResult:
     empty_context = ""
     non_source_messages = build_messages(
         question,
         [],
-        style,
-        length,
-        custom_instructions,
+        placeholder_defs,
+        selections,
         conversation_history=conversation_history,
         system_prompt=system_prompt,
         user_prompt_template=user_prompt_template,
-        style_prompts=style_prompts,
-        length_prompts=length_prompts,
         context_text=empty_context,
     )
     usable_input = config.usable_input_tokens(length)
@@ -212,14 +207,11 @@ def prepare_prompt_budget(
     messages = build_messages(
         question,
         used_chunks,
-        style,
-        length,
-        custom_instructions,
+        placeholder_defs,
+        selections,
         conversation_history=conversation_history,
         system_prompt=system_prompt,
         user_prompt_template=user_prompt_template,
-        style_prompts=style_prompts,
-        length_prompts=length_prompts,
         context_text=context_text,
     )
     source_tokens = max(0, estimate_messages_tokens(messages, model) - non_source_tokens)
