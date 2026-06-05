@@ -137,6 +137,48 @@ class PromptPresetEndpointTests(unittest.TestCase):
         deleted = self.client.delete(f"/prompt-presets/{created['id']}", params={"owner_id": "owner-x"})
         self.assertEqual(deleted.status_code, 403)
 
+    def test_builtin_id_can_be_saved_as_shared_override_with_normal_ownership(self) -> None:
+        created = self.client.post(
+            "/prompt-presets",
+            json={
+                "id": "wp1-laik",
+                "name": "Laik",
+                "wp_id": "WP1-historie",
+                "system_prompt": "shared override",
+                "user_prompt_template": "{question}",
+                "owner_id": "owner-a",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["id"], "wp1-laik")
+
+        blocked = self.client.post(
+            "/prompt-presets",
+            json={
+                "id": "wp1-laik",
+                "name": "Laik",
+                "wp_id": "WP1-historie",
+                "system_prompt": "other browser",
+                "user_prompt_template": "{question}",
+                "owner_id": "owner-b",
+            },
+        )
+        self.assertEqual(blocked.status_code, 403)
+
+        owner_update = self.client.post(
+            "/prompt-presets",
+            json={
+                "id": "wp1-laik",
+                "name": "Laik",
+                "wp_id": "WP1-historie",
+                "system_prompt": "owner update",
+                "user_prompt_template": "{question}",
+                "owner_id": "owner-a",
+            },
+        )
+        self.assertEqual(owner_update.status_code, 200, owner_update.text)
+        self.assertEqual(owner_update.json()["system_prompt"], "owner update")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -636,6 +636,40 @@ select:focus {
   margin: 2px 0 0;
 }
 
+.prompt-save-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-save-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.prompt-save-row .prompt-actions {
+  justify-content: flex-start;
+}
+
+.prompt-save-row .prompt-share-toggle {
+  margin: 0;
+}
+
+.prompt-preset-status {
+  margin: 0;
+}
+
+.prompt-preset-status.success {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.prompt-preset-status.error {
+  color: var(--warn);
+  font-weight: 700;
+}
+
 .prompt-editor textarea {
   min-height: 180px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -1733,6 +1767,11 @@ body[data-theme="dark"] .source-highlight {
 
   .prompt-actions button {
     flex: 1 1 0;
+  }
+
+  .prompt-save-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .topbar,

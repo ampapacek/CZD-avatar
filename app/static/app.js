@@ -42,6 +42,7 @@ const newPromptButton = document.querySelector("#newPromptButton");
 const savePromptAsButton = document.querySelector("#savePromptAsButton");
 const sharePromptOnServer = document.querySelector("#sharePromptOnServer");
 const promptShareNote = document.querySelector("#promptShareNote");
+const promptPresetStatus = document.querySelector("#promptPresetStatus");
 const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
@@ -180,6 +181,7 @@ let currentConversationSummary = "";
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
+let draftPromptPreset = null;
 let activePromptPresetId = "";
 let activeWpId = "";
 // WP whose prompts/inline-defs the Settings dialog edits. Initialized to
@@ -648,28 +650,26 @@ savePromptAsButton.addEventListener("click", async () => {
       await saveCurrentPromptPresetLocally({ mode: "create" });
     }
   } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
+    setPromptPresetStatus(error.message, "error");
   } finally {
     savePromptAsButton.disabled = false;
   }
 });
 updatePromptButton.addEventListener("click", async () => {
-  if (!isEditablePromptPreset(promptPreset.value)) {
+  if (!getPromptPresetById(promptPreset.value)) {
     return;
   }
   updatePromptButton.disabled = true;
   try {
-    if (isLocalPromptPreset(promptPreset.value)) {
-      await saveCurrentPromptPresetLocally({ mode: "update" });
-    } else {
+    if (sharePromptOnServer.checked) {
       await saveCurrentPromptPreset({ mode: "update" });
+    } else {
+      await saveCurrentPromptPresetLocally({ mode: "update" });
     }
   } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
+    setPromptPresetStatus(error.message, "error");
   } finally {
-    updatePromptButton.disabled = !isEditablePromptPreset(promptPreset.value);
+    updatePromptButton.disabled = !getPromptPresetById(promptPreset.value);
   }
 });
 newPromptButton.addEventListener("click", createBlankPromptDraft);
@@ -678,10 +678,9 @@ deletePromptButton.addEventListener("click", async () => {
   try {
     await deleteSelectedPromptPreset();
   } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
+    setPromptPresetStatus(error.message, "error");
   } finally {
-    deletePromptButton.disabled = !isEditablePromptPreset(promptPreset.value);
+    deletePromptButton.disabled = !canDeletePromptPreset(promptPreset.value);
   }
 });
 
@@ -1831,25 +1830,19 @@ function renderInlinePlaceholderDefs() {
   if (!inlinePlaceholderDefsList) {
     return;
   }
-  // Inline defs can only be added to an editable prompt (local or owned/unlocked
-  // server preset). Built-ins are read-only, so disable the "add" button and show
-  // an in-dialog note instead of failing silently against the hidden status bar.
-  const editable = isEditablePromptPreset(activePromptPresetId);
+  const editable = Boolean(getPromptPresetById(activePromptPresetId));
   if (newInlinePlaceholderButton) {
     newInlinePlaceholderButton.disabled = !editable;
   }
   if (!editable) {
-    inlinePlaceholderDefsList.innerHTML =
-      `<p class="field-note">Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt (níže) a pak přidej inline proměnné.</p>`;
+    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Nejdřív vyber prompt.</p>`;
     return;
   }
   const inline = activePromptInlinePlaceholderDefs();
   const names = Object.keys(inline).sort();
-  // Inline defs on a SERVER preset live only in memory until the prompt itself is
-  // saved, so an edit is lost if the user navigates away first. Local presets
-  // persist immediately and built-ins are not editable here, so only warn for
-  // server presets.
-  const unsavedNote = isServerPromptPreset(activePromptPresetId)
+  // Inline defs on server/built-in/draft prompts live only in memory until the
+  // prompt itself is saved.
+  const unsavedNote = (!isLocalPromptPreset(activePromptPresetId) || isServerPromptPreset(activePromptPresetId))
     ? `<p class="field-note unsaved-note">Změny inline proměnných se uloží až po uložení promptu („Uložit jako nový“ / „Aktualizovat“).</p>`
     : "";
   if (!names.length) {
@@ -2085,12 +2078,14 @@ async function saveSharedGlobalPlaceholderDef(name, def) {
 // placeholders map; the change persists when the user saves the prompt (save-as-new
 // / update), matching how the rest of the prompt editor works.
 function saveInlinePlaceholderDef(name, def) {
-  const preset = getPromptPresetById(activePromptPresetId);
+  let preset = getPromptPresetById(activePromptPresetId);
   if (!preset) {
     throw new Error("Nejdřív vyber prompt.");
   }
-  if (isBuiltInPromptPreset(activePromptPresetId)) {
-    throw new Error("Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.");
+  if (!isLocalPromptPreset(activePromptPresetId) && !isServerPromptPreset(activePromptPresetId) && !isDraftPromptPreset(activePromptPresetId)) {
+    draftPromptPreset = currentPromptDraft({ id: preset.id, name: preset.name });
+    activePromptPresetId = draftPromptPreset.id;
+    preset = draftPromptPreset;
   }
   if (!preset.placeholders || typeof preset.placeholders !== "object" || Array.isArray(preset.placeholders)) {
     preset.placeholders = {};
@@ -2101,7 +2096,8 @@ function saveInlinePlaceholderDef(name, def) {
   }
   preset.placeholders[normalized.name] = normalized.def;
   // Persist immediately for editable local presets so an inline def is not lost if
-  // the user forgets to re-save; server presets persist on the next prompt save.
+  // the user forgets to re-save; server/built-in/draft prompts persist on the
+  // next prompt save.
   if (isLocalPromptPreset(activePromptPresetId)) {
     persistLocalPromptPresets();
   }
@@ -2148,10 +2144,7 @@ newGlobalPlaceholderButton?.addEventListener("click", () => {
   openPlaceholderDefEditor({ scope: "global", originalName: "" }, null);
 });
 newInlinePlaceholderButton?.addEventListener("click", () => {
-  // Built-ins are not editable for inline defs; the button is disabled and an
-  // in-dialog note explains why (see renderInlinePlaceholderDefs). Guard
-  // defensively in case the click still arrives.
-  if (!isEditablePromptPreset(activePromptPresetId)) {
+  if (!getPromptPresetById(activePromptPresetId)) {
     return;
   }
   openPlaceholderDefEditor({ scope: "inline", originalName: "" }, null);
@@ -2390,20 +2383,32 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId);
   renderPromptPresetSelect(promptPreset, resolvedId, settingsWpScope());
   activePromptPresetId = resolvedId;
-  deletePromptButton.disabled = !isEditablePromptPreset(resolvedId);
-  updatePromptButton.disabled = !isEditablePromptPreset(resolvedId);
-  // Built-ins are read-only (shipped in code); explain why Update is disabled.
-  updatePromptButton.title = isBuiltInPromptPreset(resolvedId)
-    ? "Vestavěný prompt nelze přepsat. Použij „Uložit jako nový“."
-    : "";
+  deletePromptButton.disabled = !canDeletePromptPreset(resolvedId);
+  updatePromptButton.disabled = !getPromptPresetById(resolvedId);
+  updatePromptButton.title = "";
 }
 
 function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
-  const wpLocal = localPromptPresets.filter((preset) => presetWpId(preset) === wpId);
-  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === wpId);
+  const builtinIds = new Set(builtInPromptPresets(wpId).map((preset) => preset.id));
+  const serverIds = new Set(promptPresets.map((preset) => preset.id));
+  const wpLocal = localPromptPresets.filter((preset) => (
+    presetWpId(preset) === wpId
+    && !builtinIds.has(preset.id)
+    && !serverIds.has(preset.id)
+  ));
+  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === wpId && !builtinIds.has(preset.id));
+  const wpDraft = draftPromptPreset?.is_new && presetWpId(draftPromptPreset) === wpId ? [draftPromptPreset] : [];
   const builtinOptions = builtInPromptPresets(wpId)
-    .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+    .map((preset) => {
+      const effective = getPromptPresetById(preset.id) || preset;
+      return `<option value="${escapeHtml(preset.id)}">${escapeHtml(effective.name || preset.name)}</option>`;
+    })
     .join("");
+  const draftOptions = wpDraft.length
+    ? `<optgroup label="Rozepsané prompty">${wpDraft
+        .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+        .join("")}</optgroup>`
+    : "";
   const localOptions = wpLocal.length
     ? `<optgroup label="Lokální prompty">${wpLocal
         .map((preset) => `<option value="${escapeHtml(preset.id)}">Local - ${escapeHtml(preset.name)}</option>`)
@@ -2417,7 +2422,7 @@ function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
         })
         .join("")}</optgroup>`
     : "";
-  selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${localOptions}${serverOptions}`;
+  selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${draftOptions}${localOptions}${serverOptions}`;
   selectEl.value = normalizePromptPresetId(selectedId);
 }
 
@@ -2441,18 +2446,23 @@ function isBuiltInPromptPreset(presetId) {
 }
 
 function isLocalPromptPreset(presetId) {
-  return String(presetId || "").startsWith(LOCAL_PROMPT_PREFIX)
-    && localPromptPresets.some((preset) => preset.id === presetId);
+  return localPromptPresets.some((preset) => preset.id === presetId);
 }
 
 function isServerPromptPreset(presetId) {
-  return !isBuiltInPromptPreset(presetId)
-    && !String(presetId || "").startsWith(LOCAL_PROMPT_PREFIX)
-    && promptPresets.some((preset) => preset.id === presetId);
+  return promptPresets.some((preset) => preset.id === presetId);
 }
 
 function isEditablePromptPreset(presetId) {
-  return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
+  return Boolean(getPromptPresetById(presetId));
+}
+
+function isDraftPromptPreset(presetId) {
+  return Boolean(draftPromptPreset && draftPromptPreset.id === presetId);
+}
+
+function canDeletePromptPreset(presetId) {
+  return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId) || isDraftPromptPreset(presetId);
 }
 
 // Built-in prompts are shipped per WP by the backend (appSettings.wps). Each may
@@ -2488,9 +2498,10 @@ function getPromptPresetById(presetId) {
   if (presetId === LEGACY_DEFAULT_PROMPT_PRESET_ID) {
     return getPromptPresetById(defaultPromptPresetId());
   }
-  return allBuiltInPromptPresets().find((preset) => preset.id === presetId)
+  return (draftPromptPreset && draftPromptPreset.id === presetId ? draftPromptPreset : null)
     || localPromptPresets.find((preset) => preset.id === presetId)
     || promptPresets.find((preset) => preset.id === presetId)
+    || allBuiltInPromptPresets().find((preset) => preset.id === presetId)
     || null;
 }
 
@@ -2538,6 +2549,18 @@ function currentPromptDraft({ id = null, name }) {
   };
 }
 
+function selectedPromptNameForSave() {
+  const preset = getPromptPresetById(promptPreset.value);
+  return preset?.name || "";
+}
+
+function promptNameForCreate(promptLabel) {
+  if (isDraftPromptPreset(promptPreset.value)) {
+    return selectedPromptNameForSave();
+  }
+  return window.prompt(promptLabel, selectedPromptNameForSave());
+}
+
 function settingsWpScope() {
   // The Settings dialog edits the Settings-scoped WP; before it has been opened
   // (settingsWpId empty) it mirrors the active WP.
@@ -2551,19 +2574,21 @@ function activePromptWpId() {
 
 async function saveCurrentPromptPreset({ mode }) {
   const isUpdate = mode === "update";
-  const currentPreset = isUpdate && isServerPromptPreset(promptPreset.value)
-    ? promptPresets.find((item) => item.id === promptPreset.value)
-    : null;
+  const currentPreset = isUpdate ? getPromptPresetById(promptPreset.value) : null;
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber uložený prompt, který chceš aktualizovat.");
   }
-  // Update keeps the existing name; only "Save as new" asks for one.
-  const name = isUpdate ? currentPreset.name : window.prompt("Název promptu", "");
+  // Update keeps the existing name; only "Save as new" asks for one, except a
+  // blank draft already asked for its name when it was created.
+  const name = isUpdate ? currentPreset.name : promptNameForCreate("Název promptu");
   if (!name || !name.trim()) {
     return;
   }
+  const updateId = isUpdate && !(isDraftPromptPreset(promptPreset.value) && draftPromptPreset?.is_new)
+    ? currentPreset.id
+    : null;
   const payload = {
-    ...currentPromptDraft({ id: isUpdate ? currentPreset.id : null, name }),
+    ...currentPromptDraft({ id: updateId, name }),
     owner_id: getBrowserOwnerId(),
     admin_password: llmUnlockPassword.value.trim() || null,
   };
@@ -2576,28 +2601,35 @@ async function saveCurrentPromptPreset({ mode }) {
   if (!response.ok) {
     throw new Error(data.detail || "Prompt preset save failed");
   }
+  removeLocalPromptPreset(data.id);
+  draftPromptPreset = null;
+  setPromptPresetStatus("Uloženo sdíleně na serveru.", "success");
   await loadPromptPresets(data.id);
 }
 
 async function saveCurrentPromptPresetLocally({ mode }) {
   const isUpdate = mode === "update";
-  const currentPreset = isUpdate && isLocalPromptPreset(promptPreset.value)
-    ? localPromptPresets.find((item) => item.id === promptPreset.value)
-    : null;
+  const currentPreset = isUpdate ? getPromptPresetById(promptPreset.value) : null;
   if (isUpdate && !currentPreset) {
-    throw new Error("Vyber lokální prompt, který chceš aktualizovat.");
+    throw new Error("Vyber prompt, který chceš aktualizovat.");
   }
-  // Update keeps the existing name; only "Save as new" asks for one.
-  const name = isUpdate ? currentPreset.name : window.prompt("Název lokálního promptu", "");
+  // Update keeps the existing name; only "Save as new" asks for one, except a
+  // blank draft already asked for its name when it was created.
+  const name = isUpdate ? currentPreset.name : promptNameForCreate("Název lokálního promptu");
   if (!name || !name.trim()) {
     return;
   }
-  const id = isUpdate ? currentPreset.id : createLocalPromptPresetId();
+  const id = isUpdate && !(isDraftPromptPreset(promptPreset.value) && draftPromptPreset?.is_new)
+    ? currentPreset.id
+    : createLocalPromptPresetId();
   const nextPreset = currentPromptDraft({ id, name });
-  localPromptPresets = isUpdate
+  const hasExistingLocal = localPromptPresets.some((preset) => preset.id === id);
+  localPromptPresets = hasExistingLocal
     ? localPromptPresets.map((preset) => (preset.id === id ? nextPreset : preset))
     : [...localPromptPresets, nextPreset];
   persistLocalPromptPresets();
+  draftPromptPreset = null;
+  setPromptPresetStatus("Uloženo lokálně v tomto prohlížeči.", "success");
   applyPromptPresetById(id);
 }
 
@@ -2605,6 +2637,23 @@ function updatePromptShareNote() {
   promptShareNote.textContent = sharePromptOnServer.checked
     ? "Uloží se na serveru a bude dostupný ostatním."
     : "Uloží se jen v tomto prohlížeči.";
+}
+
+function setPromptPresetStatus(message, variant = "") {
+  if (!promptPresetStatus) {
+    return;
+  }
+  promptPresetStatus.textContent = message || "";
+  promptPresetStatus.classList.toggle("success", variant === "success");
+  promptPresetStatus.classList.toggle("error", variant === "error");
+}
+
+function removeLocalPromptPreset(presetId) {
+  if (!presetId || !localPromptPresets.some((preset) => preset.id === presetId)) {
+    return;
+  }
+  localPromptPresets = localPromptPresets.filter((preset) => preset.id !== presetId);
+  persistLocalPromptPresets();
 }
 
 function createLocalPromptPresetId() {
@@ -2661,7 +2710,7 @@ function normalizeLocalPromptPreset(item) {
   }
   const id = String(item.id || "");
   const name = String(item.name || "").trim();
-  if (!id.startsWith(LOCAL_PROMPT_PREFIX) || !name) {
+  if (!id || id.startsWith("draft-") || !name) {
     return null;
   }
   return {
@@ -2683,16 +2732,32 @@ function persistLocalPromptPresets() {
 }
 
 function createBlankPromptDraft() {
+  const name = window.prompt("Název promptu", "");
+  if (!name || !name.trim()) {
+    return;
+  }
   // Blank drafts are a Settings-editor action, scoped to the Settings WP.
-  activePromptPresetId = defaultPromptPresetId(settingsWpScope());
-  systemPrompt.value = "";
+  const draftId = `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   // A truly empty user template would drop {question}/{context}, leaving the
   // model with no question and no retrieved passages. Seed the two system tokens
   // the server fills so the draft is functional out of the box.
-  userPromptTemplate.value = BLANK_USER_PROMPT_TEMPLATE;
+  draftPromptPreset = {
+    id: draftId,
+    name: name.trim(),
+    wp_id: settingsWpScope(),
+    system_prompt: "",
+    user_prompt_template: BLANK_USER_PROMPT_TEMPLATE,
+    placeholders: {},
+    is_new: true,
+  };
+  activePromptPresetId = draftId;
+  systemPrompt.value = draftPromptPreset.system_prompt;
+  userPromptTemplate.value = draftPromptPreset.user_prompt_template;
   renderPlaceholderControls();
   updatePromptTemplateWarning();
-  renderPromptPresets(defaultPromptPresetId(settingsWpScope()));
+  renderInlinePlaceholderDefs();
+  renderPromptPresets(draftId);
+  setPromptPresetStatus("Nový prompt je připravený. Uloží se až po kliknutí na uložení.", "success");
   systemPrompt.focus();
 }
 
@@ -2713,10 +2778,17 @@ function resetPromptEditorValues() {
 }
 
 async function deleteSelectedPromptPreset() {
+  if (isDraftPromptPreset(promptPreset.value)) {
+    draftPromptPreset = null;
+    resetPromptEditors();
+    setPromptPresetStatus("Rozepsaný prompt byl zahozen.", "success");
+    return;
+  }
   if (isLocalPromptPreset(promptPreset.value)) {
     localPromptPresets = localPromptPresets.filter((preset) => preset.id !== promptPreset.value);
     persistLocalPromptPresets();
     resetPromptEditors();
+    setPromptPresetStatus("Lokální prompt byl smazán.", "success");
     return;
   }
   if (!isServerPromptPreset(promptPreset.value)) {
@@ -2736,6 +2808,7 @@ async function deleteSelectedPromptPreset() {
     throw new Error(data.detail || "Prompt preset delete failed");
   }
   resetPromptEditors();
+  setPromptPresetStatus("Sdílený prompt byl smazán.", "success");
   await loadPromptPresets(defaultPromptPresetId(settingsWpScope()));
 }
 

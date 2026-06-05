@@ -424,16 +424,9 @@
               </label>
               <div class="prompt-actions">
                 <button id="newPromptButton" class="secondary" type="button">Nový prázdný</button>
-                <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
-                <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
                 <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
               </div>
             </div>
-            <label class="field inline-field prompt-share-toggle">
-              <input id="sharePromptOnServer" type="checkbox" />
-              <span>Sdílet s ostatními</span>
-            </label>
-            <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
             <label class="field prompt-editor">
               <span>Systémový prompt</span>
               <textarea id="systemPrompt" rows="12"></textarea>
@@ -447,13 +440,26 @@
               <h4>Vlastní proměnné tohoto promptu (inline)</h4>
               <p class="field-note">
                 Inline proměnné přebijí globální. Uloží se do promptu při „Uložit jako nový“
-                nebo „Aktualizovat vybraný“. Vestavěné prompty nelze upravit přímo — ulož je
-                nejdřív jako nový prompt.
+                nebo „Aktualizovat vybraný“.
               </p>
               <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
               <div class="prompt-actions">
                 <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat inline proměnnou</button>
               </div>
+            </div>
+            <div class="prompt-save-panel">
+              <div class="prompt-save-row">
+                <div class="prompt-actions">
+                  <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
+                  <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
+                </div>
+                <label class="field inline-field prompt-share-toggle">
+                  <input id="sharePromptOnServer" type="checkbox" />
+                  <span>Sdílet s ostatními</span>
+                </label>
+              </div>
+              <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
+              <p id="promptPresetStatus" class="field-note prompt-preset-status" role="status" aria-live="polite"></p>
             </div>
           </section>
         </div>
