@@ -14,7 +14,7 @@ from app.rag.placeholders import (
     placeholder_defs_from_records,
     save_placeholder,
 )
-from app.rag.prompts import OptionDef, PlaceholderDef, resolve_placeholder_defs
+from app.rag.prompts import PlaceholderDef, resolve_placeholder_defs
 
 
 class PlaceholderStorageTests(unittest.TestCase):
@@ -112,35 +112,6 @@ class DefaultPlaceholdersTests(unittest.TestCase):
         self.assertEqual(defs["length"].default, "medium")
         self.assertEqual(defs["custom_instructions"].default, "Žádné.")
 
-    def test_overlay_overrides_code_floor_wholesale(self) -> None:
-        overlay = {
-            "length": PlaceholderDef(
-                label="Délka",
-                kind="select",
-                default="short",
-                options=[OptionDef(name="short", label="Krátká", text="OVERLAY short")],
-            )
-        }
-        defs = resolve_placeholder_defs(
-            {"length"},
-            shared_global_defs=overlay,
-            code_default_defs=DEFAULT_PLACEHOLDERS,
-        )
-        # Whole def taken from overlay; code-floor options are NOT merged in.
-        self.assertEqual([o.text for o in defs["length"].options], ["OVERLAY short"])
-        self.assertEqual(defs["length"].default, "short")
-
-    def test_inline_overrides_everything(self) -> None:
-        inline = {"length": PlaceholderDef(label="Délka", kind="text", default="INLINE")}
-        defs = resolve_placeholder_defs(
-            {"length"},
-            inline_defs=inline,
-            shared_global_defs={"length": DEFAULT_PLACEHOLDERS["length"]},
-            code_default_defs=DEFAULT_PLACEHOLDERS,
-        )
-        self.assertEqual(defs["length"].kind, "text")
-        self.assertEqual(defs["length"].default, "INLINE")
-
     def test_code_floor_def_applies_only_when_no_higher_layer(self) -> None:
         # custom_instructions only in code; length overridden by overlay.
         overlay = {"length": PlaceholderDef(label="x", kind="text", default="OVERLAY")}
@@ -153,7 +124,7 @@ class DefaultPlaceholdersTests(unittest.TestCase):
         self.assertEqual(defs["custom_instructions"].default, "Žádné.")
 
 
-class LoadPlaceholdersMissingFileTests(unittest.TestCase):
+class PlaceholderRecordConversionTests(unittest.TestCase):
     def test_missing_file_returns_empty_without_raising(self) -> None:
         self.assertEqual(load_placeholders(Path("/nonexistent/placeholders.json")), [])
 

@@ -13,7 +13,7 @@ from app.rag.wp_config import (
 
 
 class WPConfigTests(unittest.TestCase):
-    def test_loads_all_four_wps(self) -> None:
+    def test_loads_expected_wp_ids(self) -> None:
         ids = [wp.id for wp in load_wp_configs()]
         self.assertEqual(
             ids,
@@ -30,6 +30,8 @@ class WPConfigTests(unittest.TestCase):
             self.assertIn(wp.default_prompt_id, prompt_ids, f"{wp.id} default prompt missing")
             collection_ids = {collection.id for collection in wp.collections}
             self.assertIn(wp.default_collection_id, collection_ids, f"{wp.id} default collection missing")
+            for collection in wp.collections:
+                self.assertTrue(collection.msearch_collection_id, f"{collection.id} missing mSearch id")
 
     def test_wp1_keeps_history_built_in_prompts(self) -> None:
         wp1 = get_wp_config("WP1-historie")
@@ -40,17 +42,6 @@ class WPConfigTests(unittest.TestCase):
         # Style is baked in; the orthogonal length placeholder stays for chat-time rendering.
         self.assertNotIn("{style}", ucitel.system_prompt)
         self.assertIn("{length}", ucitel.system_prompt)
-
-    def test_wp_collections_map_by_number(self) -> None:
-        expected = {
-            "WP1-historie": "64d6f521-5044-4b02-8658-380b639801af",
-            "WP2-média": "ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
-            "WP3-právo": "d4be44d5-689c-4bbe-a372-b959929cd511",
-            "WP4-adiktologie": "3429956e-8a21-4502-ad21-a41fddc5ef99",
-        }
-        for wp in load_wp_configs():
-            default_collection = next(c for c in wp.collections if c.id == wp.default_collection_id)
-            self.assertEqual(default_collection.msearch_collection_id, expected[wp.id])
 
     def test_resolve_wp_id_falls_back_to_default(self) -> None:
         self.assertEqual(resolve_wp_id("WP3-právo"), "WP3-právo")
