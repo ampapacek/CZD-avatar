@@ -248,23 +248,56 @@
           </button>
         </div>
         <div class="help-body">
-          <p>Tento avatar odpovídá nad vašimi dokumenty a ukazuje nalezené zdroje vpravo.</p>
-          <p>`Pouze vyhledat zdroje` vrátí jen nalezené chunky bez generování odpovědi.</p>
           <div class="help-card">
-            <h3>Jak odpovídá</h3>
-            <p>Nejdřív vyhledá relevantní úryvky, potom z nich skládá odpověď. Citace v textu jsou poznámky pod čarou; použité zdroje se zvýrazní vpravo.</p>
+            <h3>Jak aplikace odpovídá</h3>
+            <p>Aplikace nejdřív vyhledá relevantní úryvky dokumentů (snippets) a potom z nich složí odpověď pomocí vybraného jazykového modelu. Citace v odpovědi odkazují na zdroje zobrazené v pravém panelu. Pokud chceš samotné vyhledávání bez generování odpovědi, zapni <code>Pouze vyhledat zdroje</code>.</p>
           </div>
           <div class="help-card">
-            <h3>Režimy práce</h3>
-            <p>`Konverzace` slouží pro navazující otázky. `Historie` ukazuje uložené dotazy, odpovědi, nastavení a nalezené dokumenty.</p>
+            <h3>Zdroje: mSearch / lokální databáze</h3>
+            <p>Výchozí vyhledávání používá mSearch, tedy vyhledávání nad kolekcemi dokumentů v Seafile. mSearch vrací confidence skóre, podle kterého lze výsledky filtrovat, například vyžadovat minimální skóre. Podle tohoto skóre se výsledky také řadí. Lokální vyhledávání je zatím hlavně testovací režim pro WP1; používá lokálně zaindexované dokumenty, dense podobnost a BM25.</p>
+            <p>Nastavení jako počet dokumentů, minimální skóre, relativní skóre nebo reranking ovlivňuje, které úryvky a kolik z nich se pošle modelu.</p>
+          </div>
+          <div class="help-card">
+            <h3>Prompty a {proměnné}</h3>
+            <p>Prompt může obsahovat proměnné ve tvaru <code>{length}</code>, <code>{custom_instructions}</code> nebo jiné vlastní proměnné (placeholdery). Aplikace z nich vytvoří ovládací prvky na hlavní stránce. Globální proměnné platí pro více promptů, <code>inline</code> proměnné patří jen ke konkrétnímu promptu. Pokud existuje globální i inline proměnná se stejným názvem, inline má přednost.</p>
+          </div>
+          <div class="help-card">
+            <h3>Lokální a sdílené úpravy</h3>
+            <p>Prompty a proměnné (placeholdery) se dají uložit jen v tomto prohlížeči nebo sdíleně na serveru. Lokální úpravy jsou vhodné pro experimenty. Sdílené úpravy uvidí i ostatní uživatelé. Úpravy existujících promptů vyžadují admin heslo.</p>
+          </div>
+          <div class="help-card">
+            <h3>Zamčeno a admin přístup</h3>
+            <p>Bez admin přístupu jsou dostupné jen veřejně povolené modely a běžné lokální úpravy. Admin přístup zpřístupní všechny načtené modely, vlastní model a úpravy sdílených promptů nebo proměnných na serveru. Tlačítkem <code>Odhlásit admina</code> lze stav vrátit zpět a otestovat běžný zamčený režim.</p>
+          </div>
+          <div class="help-card">
+            <h3>Tokeny a délka kontextu</h3>
+            <p>Do modelu se posílá systémový prompt, uživatelský prompt, vybrané hodnoty proměnných (vložené na daná místa v promptu), případná historie konverzace (v konverzačním režimu) a nalezené zdroje. To vše spotřebovává tokeny. Pokud je kontext příliš dlouhý, aplikace musí zdroje zkrátit nebo některé vynechat, aby zůstalo místo na odpověď.</p>
+            <p>Jako první se odstraní nejméně relevantní dokumenty. Pokud to nestačí, snippets se zkracují. Pokud ani to nestačí, systém zahlásí chybu.</p>
+          </div>
+          <div class="help-card">
+            <h3>Konverzace a historie</h3>
+            <p>Konverzace slouží pro navazující otázky, ale v beta verzi může být méně spolehlivá než samostatný dotaz. Historie ukládá předchozí odpovědi, zdroje a nastavení lokálně v tomto prohlížeči.</p>
           </div>
           <div class="help-card">
             <h3>Nastavení</h3>
-            <p>V `Pokročilém nastavení` lze změnit model a vyhledávání. Tlačítko `Nastavení` otevírá LLM API, klíče, vlastní provider a prompty.</p>
+            <p>Tlačítko <code>Nastavení</code> otevírá správu věcí, které se obvykle nemění u každé otázky. Lze tam uložit API klíče pro jednotlivé providery, zadat nebo odhlásit admin přístup, nastavit tokenové limity, přidat vlastního LLM providera a upravovat prompty nebo proměnné. Pokud se něco uloží jen lokálně, platí to pouze pro tento prohlížeč. Pokud se něco uloží sdíleně na serveru, mohou to používat i ostatní uživatelé.</p>
           </div>
           <div class="help-card">
-            <h3>Zdroje a soukromí</h3>
-            <p>U každého zdroje lze otevřít celý úryvek a kliknout na `Dokument` nebo `Zdroj`. Historie i konverzace se zatím ukládají jen lokálně v tomto prohlížeči.</p>
+            <h3>Pokročilé nastavení</h3>
+            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje aktuální dotaz. Dá se tam vybrat model, zdroj dokumentů, backend vyhledávání, mSearch kolekce, počet vrácených dokumentů, minimální skóre, relativní skóre vůči nejlepšímu výsledku a reranking. Prakticky to znamená: nejdřív nastavíš, odkud a jak se mají najít dokumenty, a potom kolik z nich se má poslat modelu jako kontext pro odpověď.</p>
+          </div>
+          <div class="help-card">
+            <h3>Re-ranking</h3>
+            <p>Re-ranking je volitelný druhý krok po vyhledávání. Nejdřív se najde širší sada kandidátních úryvků a potom je cross-encoder znovu ohodnotí podle relevance k otázce. Pomáhá to seřadit chunky přesněji, takže se modelu častěji pošlou nejvhodnější zdroje nahoře v pořadí. Nevýhoda je, že re-ranking trvá déle, protože model musí zvlášť přečíst dvojice otázka + úryvek. Tato funkce je zatím v testovací fázi.</p>
+            <p>Aktuálně se pro re-ranking používá cross-encoder model <code>BAAI/bge-reranker-v2-m3</code>.</p>
+          </div>
+          <div class="help-card">
+            <h3>Soukromí a kontrola</h3>
+            <p>API klíče, lokální prompty, lokální proměnné, historie a konverzace se ukládají v tomto prohlížeči. Sdílené prompty a proměnné se ukládají na serveru. U důležitých odpovědí vždy otevři zdroje a ověř, jestli citace opravdu podporují tvrzení v textu.</p>
+          </div>
+          <div class="help-card">
+            <h3>Upozornění</h3>
+            <p>Tato aplikace je v beta testovací fázi a stále ve vývoji. Výsledky je potřeba ověřovat, LLMs mohou dělat chyby.</p>
           </div>
         </div>
       </div>
