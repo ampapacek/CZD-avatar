@@ -434,6 +434,38 @@ select:focus {
   background: var(--surface-3);
 }
 
+.placeholder-def-details {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.placeholder-def-details p {
+  margin: 6px 0;
+}
+
+.placeholder-def-details ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.placeholder-def-details li + li {
+  margin-top: 6px;
+}
+
+.placeholder-defs-status {
+  min-height: 1.2em;
+}
+
+.placeholder-defs-status.success {
+  color: var(--accent);
+}
+
+.placeholder-defs-status.error {
+  color: var(--warn);
+}
+
 .placeholder-def-meta {
   display: flex;
   align-items: baseline;

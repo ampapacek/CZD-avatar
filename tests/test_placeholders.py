@@ -200,6 +200,43 @@ class PlaceholderEndpointTests(unittest.TestCase):
         )
         self.assertEqual(deleted.status_code, 204)
 
+    def test_builtin_server_override_requires_password(self) -> None:
+        response = self.client.post(
+            "/placeholders",
+            json={"name": "length", "label": "Délka", "kind": "text", "owner_id": "owner-a"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+        created = self.client.post(
+            "/placeholders",
+            json={
+                "name": "length",
+                "label": "Délka",
+                "kind": "text",
+                "owner_id": "owner-a",
+                "admin_password": "s3cret",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        owner_update = self.client.post(
+            "/placeholders",
+            json={"name": "length", "label": "Délka bez hesla", "kind": "text", "owner_id": "owner-a"},
+        )
+        self.assertEqual(owner_update.status_code, 403)
+
+        admin_update = self.client.post(
+            "/placeholders",
+            json={
+                "name": "length",
+                "label": "Délka admin",
+                "kind": "text",
+                "owner_id": "owner-b",
+                "admin_password": "s3cret",
+            },
+        )
+        self.assertEqual(admin_update.status_code, 200, admin_update.text)
+
     def test_get_returns_saved(self) -> None:
         self._create("tone", owner_id="owner-a")
         response = self.client.get("/placeholders")

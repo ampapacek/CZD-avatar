@@ -356,6 +356,9 @@ def remove_prompt_preset(
 PLACEHOLDER_FORBIDDEN_DETAIL = (
     "Tato sdílená proměnná patří jinému prohlížeči. Odemkni ji sdíleným heslem, abys ji mohl změnit."
 )
+BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL = (
+    "Vestavěnou sdílenou proměnnou může na serveru změnit jen uživatel se sdíleným heslem."
+)
 
 
 def _find_placeholder(name: str) -> dict[str, object] | None:
@@ -366,6 +369,11 @@ def _find_placeholder(name: str) -> dict[str, object] | None:
 
 
 def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None, password: str | None) -> bool:
+    if str(placeholder.get("name") or "") in DEFAULT_PLACEHOLDERS:
+        return bool(settings.admin_password) and hmac.compare_digest(
+            (password or "").strip(),
+            settings.admin_password,
+        )
     owner = (str(placeholder.get("owner_id") or "")).strip()
     requester = (owner_id or "").strip()
     if owner and requester and hmac.compare_digest(owner, requester):
@@ -386,7 +394,14 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
     if not name:
         raise HTTPException(status_code=400, detail="Placeholder name is required.")
     existing = _find_placeholder(name)
+    if existing is None and name in DEFAULT_PLACEHOLDERS and not (
+        settings.admin_password
+        and hmac.compare_digest((request.admin_password or "").strip(), settings.admin_password)
+    ):
+        raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
     if existing is not None and not _can_modify_placeholder(existing, request.owner_id, request.admin_password):
+        if name in DEFAULT_PLACEHOLDERS:
+            raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
         raise HTTPException(status_code=403, detail=PLACEHOLDER_FORBIDDEN_DETAIL)
     record = save_placeholder(
         settings.placeholders_path,
@@ -411,6 +426,8 @@ def remove_placeholder(
     if existing is None:
         raise HTTPException(status_code=404, detail="Placeholder not found.")
     if not _can_modify_placeholder(existing, owner_id, admin_password):
+        if name in DEFAULT_PLACEHOLDERS:
+            raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
         raise HTTPException(status_code=403, detail=PLACEHOLDER_FORBIDDEN_DETAIL)
     delete_placeholder(settings.placeholders_path, name)
     return Response(status_code=204)

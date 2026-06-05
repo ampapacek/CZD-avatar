@@ -406,9 +406,11 @@
             <p class="field-note">
               Globální proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>.
               Sdílené proměnné se ukládají na serveru pro všechny; lokální jen v tomto prohlížeči.
-              Prompty pak mohou mít vlastní (inline) proměnné, které tyto globální přebijí.
+              Pokud má prompt vlastní proměnnou se stejným názvem jako globální proměnná,
+              použije se verze z promptu.
             </p>
             <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
+            <p id="globalPlaceholderDefsStatus" class="field-note placeholder-defs-status" role="status" aria-live="polite"></p>
             <div class="prompt-actions">
               <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
             </div>
@@ -486,6 +488,11 @@
             <span>Nápověda (volitelné)</span>
             <input id="placeholderDefHelp" type="text" autocomplete="off" />
           </label>
+          <label class="field inline-field" id="placeholderDefShareField" hidden>
+            <input id="placeholderDefShareOnServer" type="checkbox" />
+            <span>Sdílet na serveru</span>
+          </label>
+          <p id="placeholderDefShareNote" class="field-note" hidden></p>
           <label class="field">
             <span>Typ</span>
             <select id="placeholderDefKind">

@@ -49,6 +49,7 @@ const systemPrompt = document.querySelector("#systemPrompt");
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
 const globalPlaceholderDefsList = document.querySelector("#globalPlaceholderDefsList");
+const globalPlaceholderDefsStatus = document.querySelector("#globalPlaceholderDefsStatus");
 const newGlobalPlaceholderButton = document.querySelector("#newGlobalPlaceholderButton");
 const inlinePlaceholderDefsList = document.querySelector("#inlinePlaceholderDefsList");
 const newInlinePlaceholderButton = document.querySelector("#newInlinePlaceholderButton");
@@ -60,6 +61,9 @@ const closePlaceholderDefButton = document.querySelector("#closePlaceholderDefBu
 const placeholderDefName = document.querySelector("#placeholderDefName");
 const placeholderDefLabel = document.querySelector("#placeholderDefLabel");
 const placeholderDefHelp = document.querySelector("#placeholderDefHelp");
+const placeholderDefShareField = document.querySelector("#placeholderDefShareField");
+const placeholderDefShareOnServer = document.querySelector("#placeholderDefShareOnServer");
+const placeholderDefShareNote = document.querySelector("#placeholderDefShareNote");
 const placeholderDefKind = document.querySelector("#placeholderDefKind");
 const placeholderDefDefaultTextField = document.querySelector("#placeholderDefDefaultTextField");
 const placeholderDefDefaultText = document.querySelector("#placeholderDefDefaultText");
@@ -159,6 +163,7 @@ const KNOWN_PROMPT_VARIABLES = new Set([
   "length",
   "custom_instructions",
 ]);
+const CODE_FLOOR_PLACEHOLDERS = new Set(["length", "custom_instructions"]);
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
@@ -329,6 +334,7 @@ async function loadSettings() {
   renderHistory();
   renderConversationWorkspace();
   await loadPromptPresets();
+  renderGlobalPlaceholderDefs();
 }
 
 form.addEventListener("submit", async (event) => {
@@ -499,9 +505,9 @@ helpDialog.addEventListener("click", (event) => {
 settingsButton.addEventListener("click", () => {
   renderProviderApiKeyFields();
   populateCustomProviderFields();
-  renderGlobalPlaceholderDefs();
   // Scope the Settings editors to the active WP on open; the user can switch.
   syncSettingsWp(activeWpId);
+  renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
   settingsDialog.showModal();
 });
@@ -1685,12 +1691,42 @@ function globalPlaceholderDefSource(name) {
   if (Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)) {
     return "local";
   }
-  const record = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
-    .find((item) => item && item.name === name);
+  const record = globalSharedPlaceholderRecord(name);
   if (record && (record.owner_id || record.updated_at)) {
     return "shared";
   }
   return "builtin";
+}
+
+function globalSharedPlaceholderRecord(name) {
+  return (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
+    .find((item) => item && item.name === name && (item.owner_id || item.updated_at)) || null;
+}
+
+function canShareGlobalPlaceholder(name) {
+  const slug = slugifyPlaceholderName(name);
+  if (!slug) {
+    return true;
+  }
+  const record = globalSharedPlaceholderRecord(slug);
+  if (CODE_FLOOR_PLACEHOLDERS.has(slug)) {
+    return llmModelsUnlocked;
+  }
+  if (!record) {
+    return true;
+  }
+  return record.owner_id === getBrowserOwnerId() || llmModelsUnlocked;
+}
+
+function canDeleteGlobalPlaceholder(name, source) {
+  if (source === "local") {
+    return true;
+  }
+  if (source !== "shared") {
+    return false;
+  }
+  const record = globalSharedPlaceholderRecord(name);
+  return Boolean(record) && (record.owner_id === getBrowserOwnerId() || llmModelsUnlocked);
 }
 
 const PLACEHOLDER_SOURCE_LABELS = {
@@ -1698,6 +1734,22 @@ const PLACEHOLDER_SOURCE_LABELS = {
   shared: "sdílená (server)",
   builtin: "vestavěná",
 };
+
+function placeholderDefDetailsHtml(def) {
+  const help = def.help ? `<p><strong>Nápověda:</strong> ${escapeHtml(def.help)}</p>` : "";
+  const defaultValue = def.default ? escapeHtml(def.default) : "nenastaveno";
+  const options = Array.isArray(def.options) && def.options.length
+    ? `<ul>${def.options.map((option) => `
+        <li><code>${escapeHtml(option.name)}</code> ${escapeHtml(option.label || option.name)}<br><span>${escapeHtml(option.text || "")}</span></li>
+      `).join("")}</ul>`
+    : "";
+  return `
+    <div class="placeholder-def-details" hidden>
+      ${help}
+      <p><strong>Výchozí hodnota:</strong> ${defaultValue}</p>
+      ${options}
+    </div>`;
+}
 
 function renderGlobalPlaceholderDefs() {
   if (!globalPlaceholderDefsList) {
@@ -1715,6 +1767,7 @@ function renderGlobalPlaceholderDefs() {
       const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || {};
       const sourceLabel = PLACEHOLDER_SOURCE_LABELS[source] || source;
       const kindLabel = def.kind === "select" ? "výběr" : "text";
+      const canDelete = canDeleteGlobalPlaceholder(name, source);
       return `
         <div class="placeholder-def-row" data-global-placeholder="${escapeHtml(name)}">
           <div class="placeholder-def-meta">
@@ -1723,12 +1776,13 @@ function renderGlobalPlaceholderDefs() {
             <span class="field-note">${escapeHtml(kindLabel)} · ${escapeHtml(sourceLabel)}</span>
           </div>
           <div class="inline-actions">
-            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="local">Upravit lokálně</button>
-            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}" data-edit-scope="shared">Upravit sdíleně</button>
-            ${source === "builtin"
+            <button class="secondary" type="button" data-view-global="${escapeHtml(name)}">Zobrazit</button>
+            <button class="secondary" type="button" data-edit-global="${escapeHtml(name)}">Upravit</button>
+            ${!canDelete
               ? ""
               : `<button class="secondary danger-lite" type="button" data-delete-global="${escapeHtml(name)}" data-delete-scope="${source}">Smazat</button>`}
           </div>
+          ${placeholderDefDetailsHtml(def)}
         </div>`;
     })
     .join("");
@@ -1785,7 +1839,7 @@ function renderInlinePlaceholderDefs() {
 
 // --- shared dialog editor ---------------------------------------------------
 // editorContext describes where the result is saved:
-//   { scope: "global-local" | "global-shared" | "inline", originalName }
+//   { scope: "global" | "inline", originalName }
 let placeholderEditorContext = null;
 
 function openPlaceholderDefEditor(context, def) {
@@ -1802,31 +1856,57 @@ function openPlaceholderDefEditor(context, def) {
   setPlaceholderDefError("");
   placeholderDefTitle.textContent = isNew ? "Nová proměnná" : "Upravit proměnnou";
   placeholderDefScopeNote.textContent = placeholderScopeNote(context.scope);
-  renderPlaceholderDefActions(context.scope, isNew);
+  if (placeholderDefShareOnServer) {
+    placeholderDefShareOnServer.checked = context.scope === "global"
+      && context.originalName
+      && globalPlaceholderDefSource(context.originalName) === "shared"
+      && canShareGlobalPlaceholder(context.originalName);
+  }
+  updatePlaceholderShareVisibility();
+  renderPlaceholderDefActions(context.scope);
   placeholderDefDialog.showModal();
   placeholderDefName.focus();
 }
 
 function placeholderScopeNote(scope) {
-  if (scope === "global-local") {
-    return "Globální proměnná uložená jen v tomto prohlížeči.";
+  if (scope === "global") {
+    return "Globální proměnná. Může být lokální jen pro tento prohlížeč, nebo sdílená na serveru.";
   }
-  if (scope === "global-shared") {
-    return "Globální proměnná sdílená přes server (vyžaduje vlastnictví nebo admin heslo).";
-  }
-  return "Inline proměnná tohoto promptu (přebije globální). Uloží se až při uložení promptu.";
+  return "Inline proměnná tohoto promptu. Pokud má stejný název jako globální proměnná, použije se tato promptová verze.";
 }
 
-// Default action is "save as new" so editing does not silently shadow a shared
-// def; updating an existing name is the explicit secondary action.
-function renderPlaceholderDefActions(scope, isNew) {
-  const saveLabel = scope === "inline" ? "Uložit jako novou inline" : "Uložit jako novou";
-  const updateLabel = "Aktualizovat tuto";
-  const actions = [`<button class="secondary" type="button" data-def-action="save-new">${escapeHtml(saveLabel)}</button>`];
-  if (!isNew) {
-    actions.push(`<button class="secondary" type="button" data-def-action="update">${escapeHtml(updateLabel)}</button>`);
+function updatePlaceholderShareVisibility() {
+  if (!placeholderDefShareField || !placeholderDefShareOnServer || !placeholderDefShareNote) {
+    return;
   }
-  placeholderDefActions.innerHTML = actions.join("");
+  const context = placeholderEditorContext || {};
+  const isGlobal = context.scope === "global";
+  placeholderDefShareField.hidden = !isGlobal;
+  placeholderDefShareNote.hidden = !isGlobal;
+  if (!isGlobal) {
+    placeholderDefShareOnServer.checked = false;
+    return;
+  }
+  const slug = slugifyPlaceholderName(placeholderDefName.value || context.originalName);
+  const shareAllowed = canShareGlobalPlaceholder(slug);
+  placeholderDefShareField.hidden = !shareAllowed;
+  placeholderDefShareNote.hidden = false;
+  if (!shareAllowed) {
+    placeholderDefShareOnServer.checked = false;
+    placeholderDefShareNote.textContent = CODE_FLOOR_PLACEHOLDERS.has(slug)
+      ? "Serverovou výchozí hodnotu vestavěné proměnné může změnit jen uživatel se sdíleným heslem. Bez něj se změna uloží lokálně."
+      : "Tuto sdílenou proměnnou může na serveru změnit jen její vlastník nebo uživatel se sdíleným heslem. Bez oprávnění se změna uloží lokálně.";
+    return;
+  }
+  placeholderDefShareNote.textContent = placeholderDefShareOnServer.checked
+    ? "Uloží se na serveru pro všechny uživatele."
+    : "Uloží se jen v tomto prohlížeči.";
+}
+
+function renderPlaceholderDefActions(scope) {
+  const saveLabel = scope === "inline" ? "Uložit inline proměnnou" : "Uložit";
+  placeholderDefActions.innerHTML =
+    `<button class="primary" type="button" data-def-action="save">${escapeHtml(saveLabel)}</button>`;
 }
 
 function updatePlaceholderKindVisibility() {
@@ -1870,6 +1950,15 @@ function setPlaceholderDefError(message) {
   placeholderDefError.textContent = message || "";
 }
 
+function setGlobalPlaceholderDefsStatus(message, variant = "") {
+  if (!globalPlaceholderDefsStatus) {
+    return;
+  }
+  globalPlaceholderDefsStatus.textContent = message || "";
+  globalPlaceholderDefsStatus.classList.toggle("success", variant === "success");
+  globalPlaceholderDefsStatus.classList.toggle("error", variant === "error");
+}
+
 // Build a {name, def} from the dialog inputs, or null with an error shown.
 function readPlaceholderDefFromEditor() {
   const slug = slugifyPlaceholderName(placeholderDefName.value);
@@ -1894,22 +1983,25 @@ function readPlaceholderDefFromEditor() {
   return { name: slug, def };
 }
 
-async function submitPlaceholderDefEditor(action) {
+async function submitPlaceholderDefEditor() {
   const result = readPlaceholderDefFromEditor();
   if (!result) {
     return;
   }
   const context = placeholderEditorContext || {};
-  // "update" keeps the original name; "save-new" uses the typed name and refuses
-  // to silently overwrite an existing entry in the same scope.
-  const targetName = action === "update" && context.originalName ? context.originalName : result.name;
+  const targetName = result.name;
   try {
-    if (context.scope === "global-local") {
-      saveLocalGlobalPlaceholderDef(targetName, result.def, action);
-    } else if (context.scope === "global-shared") {
-      await saveSharedGlobalPlaceholderDef(targetName, result.def, action);
+    setPlaceholderDefError("");
+    if (context.scope === "global") {
+      if (placeholderDefShareOnServer.checked && canShareGlobalPlaceholder(targetName)) {
+        await saveSharedGlobalPlaceholderDef(targetName, result.def);
+        setGlobalPlaceholderDefsStatus(`Proměnná "{${targetName}}" byla uložena na serveru.`, "success");
+      } else {
+        saveLocalGlobalPlaceholderDef(targetName, result.def);
+        setGlobalPlaceholderDefsStatus(`Proměnná "{${targetName}}" byla uložena lokálně.`, "success");
+      }
     } else {
-      saveInlinePlaceholderDef(targetName, result.def, action);
+      saveInlinePlaceholderDef(targetName, result.def);
     }
   } catch (error) {
     setPlaceholderDefError(error.message);
@@ -1919,10 +2011,7 @@ async function submitPlaceholderDefEditor(action) {
   await refreshAfterPlaceholderDefChange();
 }
 
-function saveLocalGlobalPlaceholderDef(name, def, action) {
-  if (action === "save-new" && Object.prototype.hasOwnProperty.call(localPlaceholderDefs, name)) {
-    throw new Error(`Lokální proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
-  }
+function saveLocalGlobalPlaceholderDef(name, def) {
   const normalized = normalizePlaceholderDef(name, def);
   if (!normalized) {
     throw new Error("Proměnnou se nepodařilo uložit.");
@@ -1931,12 +2020,7 @@ function saveLocalGlobalPlaceholderDef(name, def, action) {
   persistLocalPlaceholderDefs();
 }
 
-async function saveSharedGlobalPlaceholderDef(name, def, action) {
-  const existing = (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
-    .find((item) => item && item.name === name && (item.owner_id || item.updated_at));
-  if (action === "save-new" && existing) {
-    throw new Error(`Sdílená proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
-  }
+async function saveSharedGlobalPlaceholderDef(name, def) {
   const payload = {
     name,
     label: def.label,
@@ -1961,7 +2045,7 @@ async function saveSharedGlobalPlaceholderDef(name, def, action) {
 // Inline defs live on the selected prompt preset. We mutate the in-memory preset's
 // placeholders map; the change persists when the user saves the prompt (save-as-new
 // / update), matching how the rest of the prompt editor works.
-function saveInlinePlaceholderDef(name, def, action) {
+function saveInlinePlaceholderDef(name, def) {
   const preset = getPromptPresetById(activePromptPresetId);
   if (!preset) {
     throw new Error("Nejdřív vyber prompt.");
@@ -1971,9 +2055,6 @@ function saveInlinePlaceholderDef(name, def, action) {
   }
   if (!preset.placeholders || typeof preset.placeholders !== "object" || Array.isArray(preset.placeholders)) {
     preset.placeholders = {};
-  }
-  if (action === "save-new" && Object.prototype.hasOwnProperty.call(preset.placeholders, name)) {
-    throw new Error(`Inline proměnná "${name}" už existuje. Použij „Aktualizovat tuto“.`);
   }
   const normalized = normalizePlaceholderDef(name, def);
   if (!normalized) {
@@ -2025,7 +2106,7 @@ function deleteInlinePlaceholderDef(name) {
 
 // --- editor event wiring ----------------------------------------------------
 newGlobalPlaceholderButton?.addEventListener("click", () => {
-  openPlaceholderDefEditor({ scope: "global-local", originalName: "" }, null);
+  openPlaceholderDefEditor({ scope: "global", originalName: "" }, null);
 });
 newInlinePlaceholderButton?.addEventListener("click", () => {
   // Built-ins are not editable for inline defs; the button is disabled and an
@@ -2038,22 +2119,22 @@ newInlinePlaceholderButton?.addEventListener("click", () => {
 });
 
 globalPlaceholderDefsList?.addEventListener("click", async (event) => {
+  const viewButton = event.target.closest("[data-view-global]");
+  if (viewButton) {
+    const row = viewButton.closest(".placeholder-def-row");
+    const details = row?.querySelector(".placeholder-def-details");
+    if (details) {
+      const isHidden = details.hidden;
+      details.hidden = !isHidden;
+      viewButton.textContent = isHidden ? "Skrýt" : "Zobrazit";
+    }
+    return;
+  }
   const editButton = event.target.closest("[data-edit-global]");
   if (editButton) {
     const name = editButton.dataset.editGlobal;
-    const scope = editButton.dataset.editScope === "shared" ? "global-shared" : "global-local";
     const def = localGlobalPlaceholderDefs()[name] || globalPlaceholderDefs()[name] || null;
-    // Editing a built-in/shared into local scope starts from its current def but
-    // creates a NEW browser-local entry (so default action is still save-as-new
-    // unless the name already exists in that scope).
-    const existsInScope = scope === "global-local"
-      ? Object.prototype.hasOwnProperty.call(localGlobalPlaceholderDefs(), name)
-      : Boolean((Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
-          .find((item) => item && item.name === name && (item.owner_id || item.updated_at)));
-    openPlaceholderDefEditor({ scope, originalName: existsInScope ? name : "" }, def);
-    if (!existsInScope) {
-      placeholderDefName.value = name;
-    }
+    openPlaceholderDefEditor({ scope: "global", originalName: name }, def);
     return;
   }
   const deleteButton = event.target.closest("[data-delete-global]");
@@ -2066,11 +2147,14 @@ globalPlaceholderDefsList?.addEventListener("click", async (event) => {
     try {
       if (scope === "local") {
         deleteLocalGlobalPlaceholderDef(name);
+        setGlobalPlaceholderDefsStatus(`Proměnná "{${name}}" byla smazána z tohoto prohlížeče.`, "success");
       } else {
         await deleteSharedGlobalPlaceholderDef(name);
+        setGlobalPlaceholderDefsStatus(`Proměnná "{${name}}" byla smazána ze serveru.`, "success");
       }
       await refreshAfterPlaceholderDefChange();
     } catch (error) {
+      setGlobalPlaceholderDefsStatus(error.message, "error");
       statusEl.className = "status error";
       statusEl.textContent = error.message;
     }
@@ -2097,6 +2181,8 @@ inlinePlaceholderDefsList?.addEventListener("click", async (event) => {
 });
 
 placeholderDefKind?.addEventListener("change", updatePlaceholderKindVisibility);
+placeholderDefName?.addEventListener("input", updatePlaceholderShareVisibility);
+placeholderDefShareOnServer?.addEventListener("change", updatePlaceholderShareVisibility);
 addPlaceholderOptionButton?.addEventListener("click", () => {
   placeholderDefOptionsList.insertAdjacentHTML("beforeend", placeholderOptionRowHtml({}));
 });
@@ -2109,7 +2195,7 @@ placeholderDefOptionsList?.addEventListener("click", (event) => {
 placeholderDefActions?.addEventListener("click", (event) => {
   const actionButton = event.target.closest("[data-def-action]");
   if (actionButton) {
-    submitPlaceholderDefEditor(actionButton.dataset.defAction);
+    submitPlaceholderDefEditor();
   }
 });
 closePlaceholderDefButton?.addEventListener("click", () => placeholderDefDialog.close());
