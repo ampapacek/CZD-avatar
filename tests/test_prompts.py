@@ -161,7 +161,7 @@ class ResolutionTests(unittest.TestCase):
 
     def test_system_placeholders_are_never_resolved(self) -> None:
         defs = resolve_placeholder_defs(
-            {"question", "context", "current_date"},
+            {"question", "retrieved_snippets", "current_date"},
             shared_global_defs=self._shared(),
         )
         self.assertEqual(defs, {})

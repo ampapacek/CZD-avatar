@@ -196,7 +196,7 @@ API endpoints:
 
 - `GET /health`
 - `GET /settings`
-- `GET /questions/random`
+- `GET /questions/random` (per-WP; reads the private files under `data/questions/`, see [Random Questions](#random-questions))
 - `GET /prompt-presets`
 - `POST /prompt-presets`
 - `DELETE /prompt-presets/{preset_id}`
@@ -413,16 +413,27 @@ The chat request carries `selections` (a generic `{name: value}` map) and `place
 
 Browser state lives under three `localStorage` keys: `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, and `czdemos4ai-history-v2` (history).
 
+## Random Questions
+
+The "Náhodná otázka" button and `GET /questions/random?wp_id=...` read a per-WP plain-text file (one question per line) configured by `questions_path` in `app/rag/wp_config.py`:
+
+- `data/questions/wp1-historie.txt`
+- `data/questions/wp2-media.txt`
+- `data/questions/wp3-pravo.txt`
+- `data/questions/wp4-adiktologie.txt`
+
+These files are **private and gitignored** (`data/questions/` in `.gitignore`), so they are not in the repo. They must be provisioned separately on each machine/deploy (rsync, mounted volume, or your data-deploy step). When a WP's file is missing, `GET /questions/random` returns a localized 404 and the rest of the app keeps working — only that WP's random-question button is unavailable.
+
 ## Collections And Prompts
 
 For now, `data/raw/` acts as the active indexed document collection for local retrieval. Built-in prompts and placeholder defaults ship in code (`app/rag/wp_config.py`, `app/rag/placeholders.py`). The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
 
 Collection-specific app assets currently live under `data/collections/czech_history/`:
 
-- random-question seed file: `questions/questions.txt`
-- extended question set: `questions/questions_extended.txt`
 - topic list: `topics/topics.txt`
 - UFAL logo asset: `app/static/logo_ufal_110u.png`
+
+Random-question seed files have moved to the private, per-WP files under `data/questions/` (see [Random Questions](#random-questions)).
 
 The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 

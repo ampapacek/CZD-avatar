@@ -160,7 +160,7 @@ const LOCAL_PROMPT_PREFIX = "local-";
 // are also "known" so they do not trigger the unknown-variable warning.
 const KNOWN_PROMPT_VARIABLES = new Set([
   "question",
-  "context",
+  "retrieved_snippets",
   "current_date",
   "length",
   "custom_instructions",
@@ -1550,7 +1550,7 @@ function refreshModelOptions(settings = appSettings) {
 }
 
 // System placeholders are filled by the server and never surfaced as a control.
-const SYSTEM_PLACEHOLDERS = new Set(["question", "context", "current_date"]);
+const SYSTEM_PLACEHOLDERS = new Set(["question", "retrieved_snippets", "current_date"]);
 
 // System placeholders are filled by the server and cannot be edited or deleted.
 // Surfaced read-only in the "Proměnné promptu" list for discoverability.
