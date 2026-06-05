@@ -21,6 +21,7 @@ data/qdrant/
 data/processed/
 data/prompt_presets.json
 data/placeholders.json
+data/questions/
 data/raw/*
 !data/raw/agent.md
 !data/raw/.gitkeep

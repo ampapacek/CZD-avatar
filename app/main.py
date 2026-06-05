@@ -62,6 +62,8 @@ from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
 from app.rag.wp_config import (
     default_wp_id,
     gated_msearch_collection_ids,
+    get_wp_config,
+    resolve_wp_id,
     wp_collection_prefix,
     wp_public_payload,
     wp_requires_aiufal,
@@ -145,9 +147,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path(__file__).parent / "static"
-collection_dir = Path(__file__).resolve().parents[1] / "data" / "collections" / "czech_history"
+project_root = Path(__file__).resolve().parents[1]
 ufal_logo_path = static_dir / "logo_ufal_110u.png"
-questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 AI_UFAL_HOST = "ai.ufal.mff.cuni.cz"
@@ -317,14 +318,28 @@ def refresh_llm_providers() -> dict[str, object]:
     return {**_llm_settings_payload(), "wps": _wps_payload_with_live_collections()}
 
 
+def _questions_path_for_wp(wp_id: str | None) -> tuple[str, Path | None]:
+    resolved_wp_id = resolve_wp_id(wp_id)
+    wp = get_wp_config(resolved_wp_id)
+    if not wp or not wp.questions_path:
+        return resolved_wp_id, None
+    questions_path = Path(wp.questions_path)
+    if not questions_path.is_absolute():
+        questions_path = project_root / questions_path
+    return resolved_wp_id, questions_path
+
+
 @app.get("/questions/random")
-def random_question() -> dict[str, str]:
+def random_question(wp_id: str | None = None) -> dict[str, str]:
+    resolved_wp_id, questions_path = _questions_path_for_wp(wp_id)
+    if questions_path is None:
+        raise HTTPException(status_code=404, detail=f"No random questions are configured for {resolved_wp_id}.")
     if not questions_path.exists():
-        raise HTTPException(status_code=404, detail="Collection questions file was not found.")
+        raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} was not found.")
     questions = [line.strip() for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not questions:
-        raise HTTPException(status_code=404, detail="Collection questions file does not contain any questions.")
-    return {"question": random.choice(questions)}
+        raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} does not contain any questions.")
+    return {"question": random.choice(questions), "wp_id": resolved_wp_id}
 
 
 PROMPT_PRESET_FORBIDDEN_DETAIL = (

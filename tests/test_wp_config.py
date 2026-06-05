@@ -67,6 +67,7 @@ class WPConfigTests(unittest.TestCase):
                 "default_prompt_id",
                 "collections",
                 "default_collection_id",
+                "questions_path",
                 "placeholders",
                 "requires_aiufal",
             },

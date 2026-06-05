@@ -483,7 +483,8 @@ randomQuestionButton.addEventListener("click", async () => {
   statusEl.className = "status";
   statusEl.textContent = "Vybírám náhodnou otázku...";
   try {
-    const response = await fetch("questions/random");
+    const params = new URLSearchParams({ wp_id: wpSelect.value || "" });
+    const response = await fetch(`questions/random?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");

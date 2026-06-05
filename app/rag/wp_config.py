@@ -80,6 +80,7 @@ class WPConfig:
     default_prompt_id: str
     collections: list[WPCollection]
     default_collection_id: str
+    questions_path: str | None = None
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
     # When true, every collection in this WP is only retrievable through the AI
     # Ufal provider. The backend policy and the frontend selector both read this
@@ -153,6 +154,7 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp1-histoedu",
+        questions_path="data/questions/wp1-historie.txt",
     ),
     WPConfig(
         id="WP2-média",
@@ -175,6 +177,7 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp2-zaplavy",
+        questions_path="data/questions/wp2-media.txt",
         requires_aiufal=True,
     ),
     WPConfig(
@@ -198,6 +201,7 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp3-law",
+        questions_path="data/questions/wp3-pravo.txt",
     ),
     WPConfig(
         id="WP4-adiktologie",
@@ -220,6 +224,7 @@ WP_CONFIGS: list[WPConfig] = [
             ),
         ],
         default_collection_id="wp4-default",
+        questions_path="data/questions/wp4-adiktologie.txt",
     ),
 ]
 
