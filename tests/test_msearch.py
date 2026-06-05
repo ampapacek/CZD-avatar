@@ -1,6 +1,6 @@
 import unittest
 
-from app.rag.msearch import _records_from_response
+from app.rag.msearch import _group_collections_by_prefix, _records_from_response
 
 
 # Shape mirrors a real mSearch hybrid response: when `highlight: true` is sent,
@@ -51,6 +51,25 @@ class MSearchTextTests(unittest.TestCase):
 
         # Every retrieved chunk should carry real context, not a few keywords.
         self.assertGreater(len(text.split()), 20)
+
+
+class CollectionGroupingTests(unittest.TestCase):
+    def test_groups_all_versions_per_wp_newest_first(self) -> None:
+        collections = [
+            {"collection_id": "a", "collection_name": "wp1-histoedu-v2026-01", "last_modified": "2026-01-10"},
+            {"collection_id": "b", "collection_name": "wp1-histoedu-v2026-02", "last_modified": "2026-02-10"},
+            {"collection_id": "c", "collection_name": "wp3-law-v2026-02", "last_modified": "2026-02-01"},
+            {"collection_id": "d", "collection_name": "public-misc", "last_modified": "2026-03-01"},
+            {"collection_id": "", "collection_name": "wp2-zaplavy-v1", "last_modified": "2026-01-01"},
+        ]
+
+        grouped = _group_collections_by_prefix(collections)
+
+        # All wp1 versions kept, newest first; non-wp and id-less entries dropped.
+        self.assertEqual([entry["collection_id"] for entry in grouped["wp1"]], ["b", "a"])
+        self.assertEqual([entry["collection_id"] for entry in grouped["wp3"]], ["c"])
+        self.assertNotIn("wp2", grouped)
+        self.assertNotIn("wp4", grouped)
 
 
 if __name__ == "__main__":

@@ -275,19 +275,11 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
 
-// mSearch collection ids that are only retrievable via the AI Ufal provider.
-// Derived from the WP config (collections flagged requires_aiufal) so the
-// restriction is not duplicated as a literal here.
-function gatedMsearchCollectionIds() {
-  const ids = new Set();
-  for (const wp of getWpConfigs()) {
-    for (const collection of wp.collections || []) {
-      if (collection.requires_aiufal && collection.msearch_collection_id) {
-        ids.add(collection.msearch_collection_id);
-      }
-    }
-  }
-  return ids;
+// Whether a WP's collections are only retrievable via the AI Ufal provider.
+// Gating lives on the WP (requires_aiufal), not on individual collection ids,
+// which change as new collection versions are published.
+function wpRequiresAiufal(wp) {
+  return Boolean(wp?.requires_aiufal);
 }
 
 function isAiUfalBaseUrl(baseUrl) {
@@ -2830,14 +2822,15 @@ async function deleteSelectedPromptPreset() {
 // Collection options are scoped to the active WP. Each WP currently has a
 // single collection, but the data model already supports several per WP.
 function populateMsearchCollections(currentCollection) {
-  const collections = getWpConfig(activeWpId)?.collections || [];
+  const wp = getWpConfig(activeWpId);
+  const collections = wp?.collections || [];
   const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
-  const gatedCollections = gatedMsearchCollectionIds();
+  const wpGated = wpRequiresAiufal(wp) && !aiUfalSelected;
   msearchCollection.innerHTML = collections
     .map((collection) => {
       const value = collection.msearch_collection_id || "";
       const label = collection.label || value;
-      const disabled = gatedCollections.has(value) && !aiUfalSelected ? " disabled" : "";
+      const disabled = wpGated ? " disabled" : "";
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");

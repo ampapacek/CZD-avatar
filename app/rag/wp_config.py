@@ -59,15 +59,16 @@ class BuiltInPrompt:
 
 @dataclass(frozen=True)
 class WPCollection:
-    """A document collection a WP may search, mapped to an mSearch collection."""
+    """A document collection a WP may search, mapped to an mSearch collection.
+
+    These are the offline fallback / default selection; at runtime the live list
+    of all mSearch collections for the WP replaces them (see
+    ``MSearchRetriever.live_collections_by_prefix``).
+    """
 
     id: str
     label: str
     msearch_collection_id: str
-    # Some collections are only retrievable through the AI Ufal provider; the
-    # backend policy and the frontend collection selector both read this flag so
-    # the restriction lives in one place (no duplicated collection-id literals).
-    requires_aiufal: bool = False
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,11 @@ class WPConfig:
     collections: list[WPCollection]
     default_collection_id: str
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
+    # When true, every collection in this WP is only retrievable through the AI
+    # Ufal provider. The backend policy and the frontend selector both read this
+    # flag, so the restriction lives in one place (the WP, not per-collection ids
+    # that change as new collection versions are published).
+    requires_aiufal: bool = False
 
 
 def _wp1_prompt(persona_key: str) -> str:
@@ -166,10 +172,10 @@ WP_CONFIGS: list[WPConfig] = [
                 id="wp2-zaplavy",
                 label="wp2-zaplavy-v2026-6",
                 msearch_collection_id="ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
-                requires_aiufal=True,
             ),
         ],
         default_collection_id="wp2-zaplavy",
+        requires_aiufal=True,
     ),
     WPConfig(
         id="WP3-právo",
@@ -247,31 +253,39 @@ def wp_public_payload() -> list[dict[str, Any]]:
     return [asdict(wp) for wp in WP_CONFIGS]
 
 
+def wp_collection_prefix(wp_id: str) -> str:
+    """The ``wp1``..``wp4`` token that mSearch collection names start with.
+
+    mSearch collection names are ``wp1-histoedu-...``, ``wp2-zaplavy-...`` etc.;
+    the WP ids are ``WP1-historie`` etc. Both share the same leading token, which
+    is how the live collection list is grouped back onto a WP.
+    """
+
+    return (wp_id or "").split("-", 1)[0].strip().lower()
+
+
+def wp_requires_aiufal(wp_id: str | None) -> bool:
+    wp = get_wp_config((wp_id or "").strip())
+    return bool(wp and wp.requires_aiufal)
+
+
+def gated_wp_collection_prefixes() -> set[str]:
+    """Collection-name prefixes (``wp2`` etc.) whose WP is AI-Ufal-only."""
+
+    return {wp_collection_prefix(wp.id) for wp in WP_CONFIGS if wp.requires_aiufal}
+
+
 def gated_msearch_collection_ids() -> set[str]:
-    """mSearch collection ids that are only retrievable via the AI Ufal provider."""
+    """Static fallback mSearch collection ids that are AI-Ufal-only.
+
+    Live enforcement also folds in the current mSearch collections for the gated
+    WP prefixes; this static set keeps the known ids gated even when the live list
+    is unavailable.
+    """
 
     return {
         collection.msearch_collection_id
         for wp in WP_CONFIGS
+        if wp.requires_aiufal
         for collection in wp.collections
-        if collection.requires_aiufal
     }
-
-
-def msearch_collection_presets() -> list[dict[str, str]]:
-    """Collection presets derived from the WP config.
-
-    Single source of truth for the collection ids/names so they cannot drift from
-    the WP config. Used as the offline fallback when the live mSearch collection
-    list is unavailable.
-    """
-
-    return [
-        {
-            "label": f"{wp.label}: {collection.label}",
-            "collection_id": collection.msearch_collection_id,
-            "collection_name": collection.label,
-        }
-        for wp in WP_CONFIGS
-        for collection in wp.collections
-    ]

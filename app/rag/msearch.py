@@ -1,11 +1,33 @@
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from app.config import Settings
-from app.rag.wp_config import msearch_collection_presets
+from app.rag.wp_config import gated_wp_collection_prefixes
+
+
+# mSearch publishes new collection versions rarely, so the full collection list
+# is cached and only re-fetched once an hour. This mirrors the LLM model
+# discovery cache (``llm_providers._discover_models_cached``): each page load
+# reads the settings payload, which reuses the cached list unless it is stale.
+_COLLECTIONS_CACHE_TTL_SECONDS = 3600.0
+
+
+@dataclass
+class _CollectionsCacheEntry:
+    collections: list[dict[str, Any]]
+    fetched_at: float
+
+
+_collections_cache: dict[str, _CollectionsCacheEntry] = {}
+
+
+def clear_collections_cache() -> None:
+    _collections_cache.clear()
 
 
 class MSearchRetriever:
@@ -14,10 +36,22 @@ class MSearchRetriever:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def collection_presets(self) -> list[dict[str, str]]:
-        fallback = msearch_collection_presets()
+    def _fetch_collections(self, force_refresh: bool = False) -> list[dict[str, Any]]:
+        """All mSearch collections (raw dicts), cached with a 1h TTL.
+
+        Returns the last good list on transient failure, or an empty list when no
+        credentials are configured / nothing has ever been fetched.
+        """
+
         if not self.settings.msearch_username or not self.settings.msearch_password:
-            return fallback
+            return []
+
+        cache_key = self.base_url
+        cached = _collections_cache.get(cache_key)
+        now = time.time()
+        if cached and not force_refresh and now - cached.fetched_at < _COLLECTIONS_CACHE_TTL_SECONDS:
+            return cached.collections
+
         try:
             with httpx.Client(timeout=min(self.settings.msearch_timeout, 10.0)) as client:
                 response = client.get(
@@ -28,13 +62,34 @@ class MSearchRetriever:
                 response.raise_for_status()
                 data = response.json()
         except Exception:
-            return fallback
+            return cached.collections if cached else []
 
         collections = data.get("collections") if isinstance(data, dict) else None
         if not isinstance(collections, list):
-            return fallback
-        presets = _newest_wp_presets(collections)
-        return presets or fallback
+            return cached.collections if cached else []
+        collections = [item for item in collections if isinstance(item, dict)]
+        _collections_cache[cache_key] = _CollectionsCacheEntry(collections=collections, fetched_at=now)
+        return collections
+
+    def live_collections_by_prefix(self, force_refresh: bool = False) -> dict[str, list[dict[str, str]]]:
+        """Live mSearch collections grouped by WP prefix (``wp1``..``wp4``).
+
+        Each WP's list is newest-first. Empty dict when the live list is
+        unavailable, so callers fall back to the static WP config collections.
+        """
+
+        return _group_collections_by_prefix(self._fetch_collections(force_refresh))
+
+    def gated_collection_ids(self) -> set[str]:
+        """Live mSearch collection ids whose WP is AI-Ufal-only (for policy)."""
+
+        gated_prefixes = gated_wp_collection_prefixes()
+        grouped = self.live_collections_by_prefix()
+        return {
+            collection["collection_id"]
+            for prefix in gated_prefixes
+            for collection in grouped.get(prefix, [])
+        }
 
     def retrieve(
         self,
@@ -164,41 +219,25 @@ def _document_text(item: dict[str, Any], document: dict[str, Any]) -> str:
     return ""
 
 
-def _newest_wp_presets(collections: list[Any]) -> list[dict[str, str]]:
-    newest: dict[str, dict[str, str]] = {}
+def _group_collections_by_prefix(collections: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+    grouped: dict[str, list[dict[str, str]]] = {}
     for item in collections:
-        if not isinstance(item, dict):
-            continue
         name = _string(item.get("collection_name"))
         collection_id = _string(item.get("collection_id"))
-        last_modified = _string(item.get("last_modified"))
         prefix = name.split("-", 1)[0].lower()
         if prefix not in {"wp1", "wp2", "wp3", "wp4"} or not collection_id:
             continue
-        existing = newest.get(prefix)
-        if existing is None or last_modified > existing.get("last_modified", ""):
-            newest[prefix] = {
-                "label": _preset_label(prefix, name),
+        grouped.setdefault(prefix, []).append(
+            {
                 "collection_id": collection_id,
                 "collection_name": name,
-                "last_modified": last_modified,
+                "last_modified": _string(item.get("last_modified")),
             }
-    return [newest[prefix] for prefix in ("wp1", "wp2", "wp3", "wp4") if prefix in newest]
-
-
-def _preset_label(prefix: str, name: str) -> str:
-    label_prefix = prefix.upper()
-    tail = name.split("-", 1)[1] if "-" in name else name
-    if prefix == "wp1":
-        tail = tail.removeprefix("histoedu-")
-        return f"{label_prefix}: histoedu {tail}"
-    if prefix == "wp2":
-        tail = tail.removeprefix("zaplavy-")
-        return f"{label_prefix}: zaplavy {tail}"
-    if prefix == "wp3":
-        tail = tail.removeprefix("law-")
-        return f"{label_prefix}: law {tail}"
-    return f"{label_prefix}: {tail}"
+        )
+    for entries in grouped.values():
+        # Newest first so the default selection lands on the latest version.
+        entries.sort(key=lambda entry: entry["last_modified"], reverse=True)
+    return grouped
 
 
 def _trim_doc_id(doc_id: str) -> str:

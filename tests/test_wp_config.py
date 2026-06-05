@@ -68,6 +68,7 @@ class WPConfigTests(unittest.TestCase):
                 "collections",
                 "default_collection_id",
                 "placeholders",
+                "requires_aiufal",
             },
         )
         self.assertEqual(

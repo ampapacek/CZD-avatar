@@ -30,6 +30,7 @@ from app.models import (
     UnlockRequest,
     UnlockResponse,
 )
+from app.rag.msearch import clear_collections_cache
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
@@ -58,7 +59,13 @@ from app.rag.prompts import (
     template_placeholder_names,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
-from app.rag.wp_config import default_wp_id, gated_msearch_collection_ids, wp_public_payload
+from app.rag.wp_config import (
+    default_wp_id,
+    gated_msearch_collection_ids,
+    wp_collection_prefix,
+    wp_public_payload,
+    wp_requires_aiufal,
+)
 
 
 log_path = configure_logging("api")
@@ -151,8 +158,22 @@ def _is_ai_ufal_base_url(base_url: str | None) -> bool:
     return parsed.scheme == "https" and parsed.hostname == AI_UFAL_HOST
 
 
-def _enforce_msearch_collection_policy(msearch_collection: str | None, llm_base_url: str | None) -> None:
-    if (msearch_collection or "").strip() in gated_msearch_collection_ids() and not _is_ai_ufal_base_url(llm_base_url):
+def _gated_msearch_collection_ids() -> set[str]:
+    """mSearch collection ids that are AI-Ufal-only: the live collections of every
+    gated WP, plus the static fallback ids when the live list is unavailable."""
+
+    return gated_msearch_collection_ids() | pipeline.msearch_retriever.gated_collection_ids()
+
+
+def _enforce_msearch_collection_policy(
+    wp_id: str | None,
+    msearch_collection: str | None,
+    llm_base_url: str | None,
+) -> None:
+    # Gate per WP, but also enforce by collection id so a forged ``wp_id`` cannot
+    # smuggle a gated collection in through an ungated WP.
+    gated = wp_requires_aiufal(wp_id) or (msearch_collection or "").strip() in _gated_msearch_collection_ids()
+    if gated and not _is_ai_ufal_base_url(llm_base_url):
         raise HTTPException(
             status_code=400,
             detail="This mSearch collection is available only with the AI Ufal provider.",
@@ -246,7 +267,6 @@ def get_public_settings() -> dict[str, object]:
         },
         "msearch_defaults": {
             "collection": settings.msearch_collection,
-            "collection_presets": pipeline.msearch_retriever.collection_presets(),
             "mode": settings.msearch_mode,
             "modes": ["hybrid", "semantic", "keyword"],
             "max_results": settings.msearch_max_results,
@@ -256,14 +276,44 @@ def get_public_settings() -> dict[str, object]:
             "system_prompt": default_system_prompt_template(),
             "user_prompt_template": default_user_prompt_template(),
         },
-        "wps": wp_public_payload(),
+        "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
     }
+
+
+def _wps_payload_with_live_collections() -> list[dict[str, object]]:
+    """WP payload with each WP's collections replaced by the live mSearch list.
+
+    The live list (cached 1h) holds every collection version for the WP, newest
+    first. When it is unavailable the static WP config collections are kept as the
+    offline fallback.
+    """
+
+    grouped = pipeline.msearch_retriever.live_collections_by_prefix()
+    payload = wp_public_payload()
+    for wp in payload:
+        live = grouped.get(wp_collection_prefix(wp["id"])) or []
+        if not live:
+            continue
+        wp["collections"] = [
+            {
+                "id": entry["collection_id"],
+                "label": entry["collection_name"],
+                "msearch_collection_id": entry["collection_id"],
+            }
+            for entry in live
+        ]
+        # Default to the newest live version (the static default id no longer maps).
+        wp["default_collection_id"] = live[0]["collection_id"]
+    return payload
 
 
 @app.post("/llm-providers/refresh")
 def refresh_llm_providers() -> dict[str, object]:
     _refresh_provider_state(force_model_refresh=True)
+    # Drop the cached mSearch collection list too, so the next /settings re-fetches
+    # the live collections instead of waiting out the 1h TTL.
+    clear_collections_cache()
     return _llm_settings_payload()
 
 
@@ -484,6 +534,7 @@ def ingest(request: IngestRequest) -> IngestResponse:
 def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     try:
         _enforce_msearch_collection_policy(
+            request.wp_id,
             request.msearch_collection or settings.msearch_collection,
             default_provider_preset["base_url"],
         )
@@ -534,7 +585,9 @@ def chat(request: ChatRequest) -> ChatResponse:
     length = _output_budget_length(placeholder_defs, selections)
     try:
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
-        _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
+        _enforce_msearch_collection_policy(
+            request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+        )
         return pipeline.chat(
             question=request.question,
             length=length,
@@ -586,7 +639,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         started = time.perf_counter()
         try:
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
-            _enforce_msearch_collection_policy(request.msearch_collection or settings.msearch_collection, resolved_base_url)
+            _enforce_msearch_collection_policy(
+                request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+            )
             candidates = pipeline.retrieve_candidates(
                 request.question,
                 request.top_k,
