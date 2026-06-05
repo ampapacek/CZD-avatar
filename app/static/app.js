@@ -1678,6 +1678,18 @@ function renderInlinePlaceholderDefs() {
   if (!inlinePlaceholderDefsList) {
     return;
   }
+  // Inline defs can only be added to an editable prompt (local or owned/unlocked
+  // server preset). Built-ins are read-only, so disable the "add" button and show
+  // an in-dialog note instead of failing silently against the hidden status bar.
+  const editable = isEditablePromptPreset(activePromptPresetId);
+  if (newInlinePlaceholderButton) {
+    newInlinePlaceholderButton.disabled = !editable;
+  }
+  if (!editable) {
+    inlinePlaceholderDefsList.innerHTML =
+      `<p class="field-note">Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt (níže) a pak přidej inline proměnné.</p>`;
+    return;
+  }
   const inline = activePromptInlinePlaceholderDefs();
   const names = Object.keys(inline).sort();
   // Inline defs on a SERVER preset live only in memory until the prompt itself is
@@ -1956,9 +1968,10 @@ newGlobalPlaceholderButton?.addEventListener("click", () => {
   openPlaceholderDefEditor({ scope: "global-local", originalName: "" }, null);
 });
 newInlinePlaceholderButton?.addEventListener("click", () => {
-  if (isBuiltInPromptPreset(activePromptPresetId)) {
-    statusEl.className = "status error";
-    statusEl.textContent = "Vestavěný prompt nelze upravit. Ulož ho nejdřív jako nový prompt.";
+  // Built-ins are not editable for inline defs; the button is disabled and an
+  // in-dialog note explains why (see renderInlinePlaceholderDefs). Guard
+  // defensively in case the click still arrives.
+  if (!isEditablePromptPreset(activePromptPresetId)) {
     return;
   }
   openPlaceholderDefEditor({ scope: "inline", originalName: "" }, null);
