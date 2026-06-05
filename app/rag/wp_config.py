@@ -138,7 +138,7 @@ WP_CONFIGS: list[WPConfig] = [
         collections=[
             WPCollection(
                 id="wp1-histoedu",
-                label="WP1: histoedu",
+                label="wp1-histoedu-v2026-02",
                 msearch_collection_id="64d6f521-5044-4b02-8658-380b639801af",
             ),
         ],
@@ -160,8 +160,8 @@ WP_CONFIGS: list[WPConfig] = [
         collections=[
             WPCollection(
                 id="wp2-zaplavy",
-                label="WP2: zaplavy",
-                msearch_collection_id="35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09",
+                label="wp2-zaplavy-v2026-6",
+                msearch_collection_id="ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
             ),
         ],
         default_collection_id="wp2-zaplavy",
@@ -182,7 +182,7 @@ WP_CONFIGS: list[WPConfig] = [
         collections=[
             WPCollection(
                 id="wp3-law",
-                label="WP3: law",
+                label="wp3-law-v2026-02",
                 msearch_collection_id="d4be44d5-689c-4bbe-a372-b959929cd511",
             ),
         ],
@@ -204,7 +204,7 @@ WP_CONFIGS: list[WPConfig] = [
         collections=[
             WPCollection(
                 id="wp4-default",
-                label="WP4",
+                label="wp4-v2026-03",
                 msearch_collection_id="3429956e-8a21-4502-ad21-a41fddc5ef99",
             ),
         ],

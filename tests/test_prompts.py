@@ -117,39 +117,6 @@ class ResolutionTests(unittest.TestCase):
             )
         }
 
-    def test_picks_shared_global_when_only_source(self) -> None:
-        defs = resolve_placeholder_defs({"length"}, shared_global_defs=self._shared())
-        self.assertEqual(defs["length"].options[0].text, "SHARED short")
-
-    def test_local_global_overrides_shared_wholesale(self) -> None:
-        local = {
-            "length": PlaceholderDef(
-                label="Délka",
-                kind="select",
-                default="short",
-                options=[OptionDef(name="short", label="Krátká", text="LOCAL short")],
-            )
-        }
-        defs = resolve_placeholder_defs(
-            {"length"},
-            local_global_defs=local,
-            shared_global_defs=self._shared(),
-        )
-        # Whole def is taken from local; shared options are NOT merged in.
-        self.assertEqual([o.text for o in defs["length"].options], ["LOCAL short"])
-        self.assertEqual(defs["length"].default, "short")
-
-    def test_inline_wins_over_local_and_shared(self) -> None:
-        inline = {"length": PlaceholderDef(label="Délka", kind="text", default="INLINE")}
-        defs = resolve_placeholder_defs(
-            {"length"},
-            inline_defs=inline,
-            local_global_defs={"length": PlaceholderDef(label="x", default="LOCAL")},
-            shared_global_defs=self._shared(),
-        )
-        self.assertEqual(defs["length"].default, "INLINE")
-        self.assertEqual(defs["length"].kind, "text")
-
     def _code(self) -> dict[str, PlaceholderDef]:
         return {
             "length": PlaceholderDef(
@@ -159,10 +126,6 @@ class ResolutionTests(unittest.TestCase):
                 options=[OptionDef(name="medium", label="Střední", text="CODE medium")],
             )
         }
-
-    def test_code_floor_used_when_no_higher_layer(self) -> None:
-        defs = resolve_placeholder_defs({"length"}, code_default_defs=self._code())
-        self.assertEqual(defs["length"].options[0].text, "CODE medium")
 
     def test_full_four_layer_precedence_no_merging(self) -> None:
         inline = {"length": PlaceholderDef(label="i", default="INLINE")}

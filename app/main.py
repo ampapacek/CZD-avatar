@@ -144,7 +144,7 @@ questions_path = collection_dir / "questions" / "questions.txt"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 AI_UFAL_HOST = "ai.ufal.mff.cuni.cz"
-WP2_MSEARCH_COLLECTION = "35a4a85e-4d6e-42a3-a3ff-e1f151ffbd09"
+WP2_MSEARCH_COLLECTION = "ab79b4f6-6a91-45a3-908e-edb2c771d3b0"
 
 
 def _is_ai_ufal_base_url(base_url: str | None) -> bool:

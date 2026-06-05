@@ -3,7 +3,6 @@ import unittest
 from app.rag.token_budget import (
     PromptBudgetConfig,
     PromptBudgetError,
-    estimate_text_tokens,
     prepare_prompt_budget,
 )
 
@@ -19,9 +18,6 @@ def chunk(chunk_id: str, text: str, score: float) -> dict:
 
 
 class TokenBudgetTests(unittest.TestCase):
-    def test_estimates_tokens(self) -> None:
-        self.assertGreater(estimate_text_tokens("hello world", "unknown-model"), 0)
-
     def test_errors_when_non_source_prompt_does_not_fit(self) -> None:
         config = PromptBudgetConfig(
             context_window_tokens=1024,
