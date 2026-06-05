@@ -276,7 +276,7 @@
           <div>
             <h2>Nastavení</h2>
             <p>LLM API, lokální klíče, vlastní poskytovatel a prompty.</p>
-            <p>API klíče a odemykací heslo se ukládají jen v tomto prohlížeči.</p>
+            <p>API klíče a admin heslo se ukládají jen v tomto prohlížeči.</p>
           </div>
           <button id="closeSettingsButton" class="icon-button help-close" type="button" aria-label="Zavřít nastavení" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -303,10 +303,11 @@
           </section>
 
           <section class="settings-section">
-            <h3>Odemknout modely</h3>
+            <h3>Admin přístup</h3>
+            <p class="field-note">Admin heslo zpřístupní všechny modely a dovolí upravovat sdílené prompty a proměnné na serveru.</p>
             <div class="inline-actions">
               <div class="secret-field">
-                <input id="llmUnlockPassword" type="password" placeholder="Sdílené heslo z .env" autocomplete="off" />
+                <input id="llmUnlockPassword" type="password" placeholder="Admin heslo z .env" autocomplete="off" />
                 <button id="toggleUnlockPasswordButton" class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit heslo" title="Zobrazit heslo">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
@@ -315,9 +316,9 @@
                 </button>
               </div>
               <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
+              <button id="logoutAdminButton" class="secondary" type="button">Odhlásit admina</button>
             </div>
             <p id="unlockModelsStatus" class="field-note unlock-status" role="status" aria-live="polite"></p>
-            <p class="field-note">Po odemčení bude v rozbalovacím seznamu modelů dostupná volba `Jiný model`.</p>
           </section>
 
           <section class="settings-section">

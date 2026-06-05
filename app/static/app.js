@@ -9,6 +9,7 @@ const llmBaseUrl = document.querySelector("#llmBaseUrl");
 const llmApiKey = document.querySelector("#llmApiKey");
 const llmUnlockPassword = document.querySelector("#llmUnlockPassword");
 const unlockModelsButton = document.querySelector("#unlockModelsButton");
+const logoutAdminButton = document.querySelector("#logoutAdminButton");
 const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPasswordButton");
 const unlockModelsStatus = document.querySelector("#unlockModelsStatus");
 const refreshModelsButton = document.querySelector("#refreshModelsButton");
@@ -790,6 +791,7 @@ customProviderModels.addEventListener("input", () => {
   input.addEventListener("input", persistTokenBudgetSettings);
 });
 unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
+logoutAdminButton.addEventListener("click", logoutAdminAccess);
 toggleUnlockPasswordButton.addEventListener("click", () => {
   toggleSecretField(toggleUnlockPasswordButton);
 });
@@ -951,7 +953,7 @@ function renderProviderApiKeyFields() {
       const publicModels = providerPublicModels(provider, appSettings);
       const policyNote =
         publicModels.length > 0
-          ? `Bez odemykacího hesla jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`
+          ? `Bez admin přístupu jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`
           : `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
       return `
         <label class="field provider-key-row">
@@ -1127,9 +1129,9 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
     if (!silent) {
-      setUnlockStatus("Zadej odemykací heslo.", "error");
+      setUnlockStatus("Zadej admin heslo.", "error");
       statusEl.className = "status error";
-      statusEl.textContent = "Zadej odemykací heslo.";
+      statusEl.textContent = "Zadej admin heslo.";
     }
     return false;
   }
@@ -1145,15 +1147,15 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     });
     const data = await response.json();
     if (!response.ok || !data.unlocked) {
-      throw new Error("Odemykací heslo není správné.");
+      throw new Error("Admin heslo není správné.");
     }
     llmModelsUnlocked = true;
     persistLlmSettings();
     refreshModelOptions(appSettings);
     if (!silent) {
-      setUnlockStatus("Modely jsou odemčené.", "success");
+      setUnlockStatus("Admin přístup je aktivní.", "success");
       statusEl.className = "status";
-      statusEl.textContent = "Modely jsou odemčené.";
+      statusEl.textContent = "Admin přístup je aktivní.";
     }
     return true;
   } catch (error) {
@@ -1168,6 +1170,19 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   } finally {
     unlockModelsButton.disabled = false;
   }
+}
+
+function logoutAdminAccess() {
+  llmModelsUnlocked = false;
+  llmUnlockPassword.value = "";
+  persistLlmSettings();
+  refreshModelOptions(appSettings);
+  renderPromptPresets();
+  renderPlaceholderControls();
+  updatePromptShareNote();
+  setUnlockStatus("Admin přístup byl odhlášen.", "success");
+  statusEl.className = "status";
+  statusEl.textContent = "Admin přístup byl odhlášen.";
 }
 
 function setUnlockStatus(message, variant = "") {
@@ -2920,12 +2935,12 @@ function updateLlmPolicyNote(policy, unlocked = false, browserApiKeyProvided = f
     return;
   }
   if (unlocked) {
-    llmPolicyNote.textContent = `Odemčeno: v rozbalovacím seznamu jsou modely pro ${providerLabel} a lze zadat i jiný model.`;
+    llmPolicyNote.textContent = `Admin přístup je aktivní: pro ${providerLabel} jsou dostupné všechny načtené modely a vlastní model.`;
     return;
   }
   const publicModels = providerPublicModels(provider, appSettings);
   if (publicModels.length > 0) {
-    llmPolicyNote.textContent = `Bez odemykacího hesla jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`;
+    llmPolicyNote.textContent = `Bez admin přístupu jsou pro ${providerLabel} dostupné aktuálně načtené veřejné modely: ${publicModels.join(", ")}.`;
     return;
   }
   llmPolicyNote.textContent = `Pro ${providerLabel} zadej API klíč v Nastavení, nebo nastav veřejné modely v .env.`;
