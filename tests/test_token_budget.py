@@ -127,6 +127,7 @@ class TokenBudgetTests(unittest.TestCase):
 
         self.assertIn("z1", {item["chunk_id"] for item in budget.used_chunks})
         self.assertIn("z3", {item["chunk_id"] for item in budget.omitted_chunks})
+        self.assertIn("Kvůli limitu kontextu nebylo modelu posláno", budget.warnings[0])
 
     def test_trims_top_chunks_to_keep_minimum_when_possible(self) -> None:
         chunks = [

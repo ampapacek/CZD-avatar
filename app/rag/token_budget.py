@@ -218,11 +218,11 @@ def prepare_prompt_budget(
     total_input_tokens = non_source_tokens + source_tokens
     trimmed_count = sum(1 for chunk in used_chunks if chunk.get("metadata", {}).get("budget_status") == "trimmed")
     if omitted_chunks:
-        warnings.append(f"{len(omitted_chunks)} retrieved chunks were omitted because of the context budget.")
+        warnings.append(f"Kvůli limitu kontextu nebylo modelu posláno {len(omitted_chunks)} nalezených chunků.")
     if trimmed_count:
-        warnings.append(f"{trimmed_count} chunks were trimmed before being sent to the model.")
+        warnings.append(f"Před odesláním modelu bylo zkráceno {trimmed_count} chunků.")
     if retrieved_chunks and not used_chunks:
-        warnings.append("No retrieved chunks fit into the remaining context budget; the model answered without sources.")
+        warnings.append("Do zbývajícího kontextového limitu se nevešel žádný nalezený chunk; model odpověděl bez zdrojů.")
 
     return PromptBudgetResult(
         messages=messages,
