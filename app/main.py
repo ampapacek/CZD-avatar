@@ -239,6 +239,15 @@ def ufal_logo() -> FileResponse:
     return FileResponse(ufal_logo_path)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def site_icon() -> FileResponse:
+    # Browsers and iOS request these legacy root paths regardless of the
+    # <link rel="icon"> tag; serve the SVG mark so they stop 404ing.
+    return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", collection=settings.qdrant_collection)
