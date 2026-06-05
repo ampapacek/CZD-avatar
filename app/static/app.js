@@ -34,6 +34,7 @@ const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
 const msearchMinConfidence = document.querySelector("#msearchMinConfidence");
 const wpSelect = document.querySelector("#wpSelect");
+const settingsWpSelect = document.querySelector("#settingsWpSelect");
 const activePromptPreset = document.querySelector("#activePromptPreset");
 const promptPreset = document.querySelector("#promptPreset");
 const newPromptButton = document.querySelector("#newPromptButton");
@@ -170,6 +171,10 @@ let promptPresets = [];
 let localPromptPresets = [];
 let activePromptPresetId = "";
 let activeWpId = "";
+// WP whose prompts/inline-defs the Settings dialog edits. Initialized to
+// activeWpId when the dialog opens; the user can switch it inside Settings
+// without touching the main page (which keeps using activeWpId).
+let settingsWpId = "";
 // Resolved parameter placeholder defs for the active prompt (name -> def) and the
 // current control values (name -> value). Both are rebuilt on every prompt switch.
 let activePlaceholderDefs = {};
@@ -216,10 +221,28 @@ function wpDefaultCollectionMsearchId(wp) {
 }
 
 function populateWpSelect() {
-  wpSelect.innerHTML = getWpConfigs()
+  const options = getWpConfigs()
     .map((wp) => `<option value="${escapeHtml(wp.id)}">${escapeHtml(wp.label || wp.id)}</option>`)
     .join("");
+  wpSelect.innerHTML = options;
   wpSelect.value = activeWpId;
+  if (settingsWpSelect) {
+    settingsWpSelect.innerHTML = options;
+    settingsWpSelect.value = settingsWpScope();
+  }
+}
+
+// Open the Settings dialog scoped to a WP: initialize settingsWpId to the active
+// WP, reflect it in the selector, and load that WP's prompts into the editor.
+function syncSettingsWp(wpId) {
+  settingsWpId = resolveWpId(wpId);
+  if (settingsWpSelect) {
+    settingsWpSelect.value = settingsWpId;
+  }
+  // Load the Settings-scoped WP's currently-selected (or default) prompt into the
+  // shared editor. Keep the loaded prompt if it already belongs to this WP.
+  const keepCurrent = presetWpId(getPromptPresetById(activePromptPresetId)) === settingsWpId;
+  applyPromptPresetById(keepCurrent ? activePromptPresetId : defaultPromptPresetId(settingsWpId));
 }
 
 // Switch the active work package: pick its default collection and prompt, which
@@ -469,6 +492,8 @@ settingsButton.addEventListener("click", () => {
   renderProviderApiKeyFields();
   populateCustomProviderFields();
   renderGlobalPlaceholderDefs();
+  // Scope the Settings editors to the active WP on open; the user can switch.
+  syncSettingsWp(activeWpId);
   renderInlinePlaceholderDefs();
   settingsDialog.showModal();
 });
@@ -478,6 +503,19 @@ closeSettingsButton.addEventListener("click", () => {
 settingsDialog.addEventListener("click", (event) => {
   if (event.target === settingsDialog) {
     settingsDialog.close();
+  }
+});
+settingsDialog.addEventListener("close", () => {
+  // If the user edited a different WP in Settings, restore the shared editor to the
+  // main page's active WP so the main page (which shares the prompt editor state)
+  // is left consistent with its own #wpSelect.
+  if (settingsWpId && settingsWpId !== activeWpId) {
+    settingsWpId = activeWpId;
+    if (presetWpId(getPromptPresetById(activePromptPresetId)) !== activeWpId) {
+      applyPromptPresetById(defaultPromptPresetId(activeWpId));
+    } else {
+      renderPromptPresets(activePromptPresetId);
+    }
   }
 });
 
@@ -555,6 +593,7 @@ userPromptTemplate.addEventListener("input", () => {
   updatePromptTemplateWarning();
 });
 wpSelect.addEventListener("change", () => selectWp(wpSelect.value));
+settingsWpSelect?.addEventListener("change", () => syncSettingsWp(settingsWpSelect.value));
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
 sharePromptOnServer.addEventListener("change", updatePromptShareNote);
@@ -2199,17 +2238,20 @@ async function loadPromptPresets(selectedId = activePromptPresetId || defaultPro
 
 function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   const resolvedId = normalizePromptPresetId(selectedId);
-  renderPromptPresetSelect(activePromptPreset, resolvedId);
-  renderPromptPresetSelect(promptPreset, resolvedId);
+  // The main-page select lists the active WP's prompts; the Settings select lists
+  // the Settings-scoped WP's prompts (defaults to activeWpId until the user
+  // switches the Settings WP). Both reflect the same loaded prompt (resolvedId).
+  renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId);
+  renderPromptPresetSelect(promptPreset, resolvedId, settingsWpScope());
   activePromptPresetId = resolvedId;
   deletePromptButton.disabled = !isEditablePromptPreset(resolvedId);
   updatePromptButton.disabled = !isEditablePromptPreset(resolvedId);
 }
 
-function renderPromptPresetSelect(selectEl, selectedId) {
-  const wpLocal = localPromptPresets.filter((preset) => presetWpId(preset) === activeWpId);
-  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === activeWpId);
-  const builtinOptions = builtInPromptPresets()
+function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
+  const wpLocal = localPromptPresets.filter((preset) => presetWpId(preset) === wpId);
+  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === wpId);
+  const builtinOptions = builtInPromptPresets(wpId)
     .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
     .join("");
   const localOptions = wpLocal.length
@@ -2346,9 +2388,15 @@ function currentPromptDraft({ id = null, name }) {
   };
 }
 
+function settingsWpScope() {
+  // The Settings dialog edits the Settings-scoped WP; before it has been opened
+  // (settingsWpId empty) it mirrors the active WP.
+  return resolveWpId(settingsWpId || activeWpId);
+}
+
 function activePromptWpId() {
-  // Drafts are saved under the currently selected WP.
-  return resolveWpId(activeWpId);
+  // Drafts are saved under the WP currently selected in the Settings dialog.
+  return settingsWpScope();
 }
 
 async function saveCurrentPromptPreset({ mode }) {
@@ -2485,23 +2533,24 @@ function persistLocalPromptPresets() {
 }
 
 function createBlankPromptDraft() {
-  activePromptPresetId = defaultPromptPresetId();
+  // Blank drafts are a Settings-editor action, scoped to the Settings WP.
+  activePromptPresetId = defaultPromptPresetId(settingsWpScope());
   systemPrompt.value = "";
   userPromptTemplate.value = "";
   renderPlaceholderControls();
   updatePromptTemplateWarning();
-  renderPromptPresets(defaultPromptPresetId());
+  renderPromptPresets(defaultPromptPresetId(settingsWpScope()));
   systemPrompt.focus();
 }
 
 function resetPromptEditors() {
   resetPromptEditorValues();
-  renderPromptPresets(defaultPromptPresetId());
+  renderPromptPresets(defaultPromptPresetId(settingsWpScope()));
 }
 
 function resetPromptEditorValues() {
-  activePromptPresetId = defaultPromptPresetId();
-  const defaultPrompt = getPromptPresetById(defaultPromptPresetId());
+  activePromptPresetId = defaultPromptPresetId(settingsWpScope());
+  const defaultPrompt = getPromptPresetById(defaultPromptPresetId(settingsWpScope()));
   if (defaultPrompt) {
     systemPrompt.value = defaultPrompt.system_prompt || "";
     userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
@@ -2534,7 +2583,7 @@ async function deleteSelectedPromptPreset() {
     throw new Error(data.detail || "Prompt preset delete failed");
   }
   resetPromptEditors();
-  await loadPromptPresets(defaultPromptPresetId());
+  await loadPromptPresets(defaultPromptPresetId(settingsWpScope()));
 }
 
 // Collection options are scoped to the active WP. Each WP currently has a
