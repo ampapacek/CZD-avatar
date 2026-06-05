@@ -1348,6 +1348,12 @@ button:hover {
   font-weight: 700;
 }
 
+.footnote-sep {
+  font-size: 0.8em;
+  vertical-align: super;
+  font-weight: 700;
+}
+
 .footnotes {
   margin-top: 1.25rem;
   padding-top: 1rem;

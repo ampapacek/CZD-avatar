@@ -4248,7 +4248,14 @@ function renderInlineMarkdown(text, citationMap = new Map(), usedCitationIds = n
   escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   escaped = escaped.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   escaped = escaped.replace(/_([^_]+)_/g, "<em>$1</em>");
-  return escaped.replace(/@@CODEXPH(\d+)@@/g, (_, index) => placeholders[Number(index)] || "");
+  const rendered = escaped.replace(/@@CODEXPH(\d+)@@/g, (_, index) => placeholders[Number(index)] || "");
+  // Separate adjacent citation markers (e.g. [^A2][^A3]) so they read as "2,3"
+  // instead of a glued-together "23". The comma is itself superscript so it
+  // aligns with the markers rather than dropping to the baseline.
+  return rendered.replace(
+    /<\/sup>(<sup class="footnote-ref">)/g,
+    '</sup><sup class="footnote-ref"><span class="footnote-sep">,</span></sup>$1',
+  );
 }
 
 function normalizeCitationMarkdown(markdown, citationMap) {
