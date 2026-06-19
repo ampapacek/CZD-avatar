@@ -99,7 +99,7 @@ Délka: {length}
 Forma odpovědi:
 - Piš v Markdownu.
 - Zvol přirozenou strukturu podle otázky.
-- Pokud cituješ nalezený kontext, používej značky uvedené v kontextu jako markdownové poznámky pod čarou ve tvaru [^Z1], [^Z2] atd.
+- Pokud cituješ nalezený kontext, používej značky uvedené v kontextu jako markdownové poznámky pod čarou ve tvaru [^Z1], [^Z2] atd. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. [^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5].
 - Zmiňuj pouze zdroje, které v odpovědi skutečně používáš.
 - Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů. Přehled zdrojů vytvoří rozhraní samo.
 - Neuzavírej odpověď nabídkami typu "Pokud chceš..." nebo podobnými dodatky. Odpověz přímo a přirozeně.
