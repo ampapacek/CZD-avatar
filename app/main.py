@@ -639,6 +639,78 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     )
 
 
+@app.post("/retrieve/stream")
+def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
+    def event_stream():
+        try:
+            # No mSearch provider gate here for the same reason as /retrieve:
+            # retrieve-only never sends chunks to an LLM provider.
+            _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            candidates = pipeline.retrieve_candidates(
+                request.question,
+                request.top_k,
+                dense_weight=request.dense_weight,
+                bm25_weight=request.bm25_weight,
+                min_score=request.min_score,
+                min_relative_score=request.min_relative_score,
+                retrieval_backend=request.retrieval_backend,
+                msearch_collection=request.msearch_collection,
+                msearch_mode=request.msearch_mode,
+                msearch_min_confidence=request.msearch_min_confidence,
+                msearch_rescore=request.msearch_rescore,
+                rerank_enabled=request.rerank_enabled,
+                rerank_weight=request.rerank_weight,
+                rerank_candidates=request.rerank_candidates,
+            )
+            baseline_payload = [_serialize_retrieved_chunk(chunk) for chunk in candidates.baseline]
+            if candidates.rerank_active and candidates.baseline:
+                yield _sse_event(
+                    "preliminary_sources",
+                    {
+                        "question": request.question,
+                        "retrieved_chunks": baseline_payload,
+                        "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
+                    },
+                )
+
+            retrieved: list = []
+            rerank_seconds = 0.0
+            for event in pipeline.apply_rerank_iter(request.question, candidates):
+                kind = event[0]
+                if kind == "eta":
+                    yield _sse_event("rerank_progress", {"done": 0, "total": 0, "eta_seconds": event[1]})
+                elif kind == "progress":
+                    _, done, total, elapsed = event
+                    eta = round(elapsed / done * (total - done), 2) if done else None
+                    yield _sse_event(
+                        "rerank_progress",
+                        {"done": done, "total": total, "elapsed": round(elapsed, 3), "eta_seconds": eta},
+                    )
+                else:  # "result"
+                    retrieved, rerank_seconds = event[1], event[2]
+
+            payload = {
+                "question": request.question,
+                "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in retrieved],
+                "baseline_chunks": baseline_payload,
+                "sources": [_serialize_source(chunk) for chunk in retrieved],
+                "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
+            }
+            yield _sse_event("sources", payload)
+            yield _sse_event("done", payload)
+        except HTTPException as exc:
+            yield _sse_event("error", {"detail": exc.detail})
+        except Exception as exc:
+            logger.exception("Streaming retrieve failed")
+            yield _sse_event("error", {"detail": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 def _output_budget_length(placeholder_defs: dict, selections: dict[str, str]) -> str:
     """Pick the short/medium/long key used only for output-token budget sizing.
 

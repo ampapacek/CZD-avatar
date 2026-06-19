@@ -1,7 +1,10 @@
 import unittest
 
+from fastapi.testclient import TestClient
+
+from app import main
 from app.config import get_settings
-from app.rag.pipeline import RAGPipeline
+from app.rag.pipeline import RAGPipeline, RetrievalCandidates
 from app.rag.reranker import blend_and_rank
 
 
@@ -135,6 +138,59 @@ class RetrieveWithBaselineTests(unittest.TestCase):
         )
         self.assertEqual(baseline, [])
         self.assertEqual([chunk["chunk_id"] for chunk in reranked], ["c1", "c2", "c3"])
+
+
+class RetrieveStreamEndpointTests(unittest.TestCase):
+    def test_streams_msearch_rescored_sources_before_local_rerank_finishes(self):
+        baseline = _candidates()[:3]
+        final = list(reversed(_candidates()))[:3]
+        candidates = RetrievalCandidates(
+            candidates=_candidates(),
+            baseline=baseline,
+            rerank_active=True,
+            rerank_weight=1.0,
+            resolved_top_k=3,
+        )
+
+        orig_retrieve_candidates = main.pipeline.retrieve_candidates
+        orig_apply_rerank_iter = main.pipeline.apply_rerank_iter
+        main.pipeline.retrieve_candidates = lambda *args, **kwargs: candidates
+
+        def fake_apply_rerank_iter(*args, **kwargs):
+            yield ("eta", 2.0)
+            yield ("progress", 1, 5, 0.5)
+            yield ("result", final, 0.6)
+
+        main.pipeline.apply_rerank_iter = fake_apply_rerank_iter
+        try:
+            client = TestClient(main.app)
+            response = client.post(
+                "/retrieve/stream",
+                json={
+                    "question": "q",
+                    "retrieval_backend": "msearch",
+                    "msearch_rescore": True,
+                    "rerank_enabled": True,
+                    "rerank_weight": 1.0,
+                    "rerank_candidates": 5,
+                    "top_k": 3,
+                },
+            )
+        finally:
+            main.pipeline.retrieve_candidates = orig_retrieve_candidates
+            main.pipeline.apply_rerank_iter = orig_apply_rerank_iter
+
+        self.assertEqual(response.status_code, 200, response.text)
+        event_names = [
+            line.removeprefix("event: ").strip()
+            for line in response.text.splitlines()
+            if line.startswith("event: ")
+        ]
+        self.assertEqual(
+            event_names,
+            ["preliminary_sources", "rerank_progress", "rerank_progress", "sources", "done"],
+        )
+        self.assertLess(response.text.index('"chunk_id": "c1"'), response.text.index('"chunk_id": "c5"'))
 
 
 if __name__ == "__main__":
