@@ -14,6 +14,8 @@ const toggleUnlockPasswordButton = document.querySelector("#toggleUnlockPassword
 const unlockModelsStatus = document.querySelector("#unlockModelsStatus");
 const refreshModelsButton = document.querySelector("#refreshModelsButton");
 const modelRefreshStatus = document.querySelector("#modelRefreshStatus");
+const mainContextWindowTokens = document.querySelector("#mainContextWindowTokens");
+const modelContextWindowNote = document.querySelector("#modelContextWindowNote");
 const contextWindowTokens = document.querySelector("#contextWindowTokens");
 const outputBudgetShort = document.querySelector("#outputBudgetShort");
 const outputBudgetMedium = document.querySelector("#outputBudgetMedium");
@@ -205,6 +207,7 @@ let placeholderSelections = {};
 // Browser-local global placeholder defs (name -> def), loaded from localStorage.
 let localPlaceholderDefs = {};
 let llmModelsUnlocked = false;
+let contextWindowManuallyEdited = false;
 let llmSettingsState = {
   selected_provider: "",
   provider_settings: {},
@@ -791,6 +794,7 @@ llmProvider.addEventListener("change", () => {
   const providerId = normalizeProviderId(llmProvider.value);
   loadProviderValues(providerId, { preferStored: true });
   refreshModelOptions(appSettings);
+  updateContextWindowForSelectedModel();
   populateMsearchCollections(msearchCollection.value);
   updateRetrievalControls({ resetValues: false });
   persistLlmSettings();
@@ -837,10 +841,14 @@ providerApiKeyList.addEventListener("click", (event) => {
   refreshModelOptions(appSettings);
 });
 refreshModelsButton.addEventListener("click", refreshProviderModels);
-customModel.addEventListener("input", persistLlmSettings);
+customModel.addEventListener("input", () => {
+  persistLlmSettings();
+  updateContextWindowForSelectedModel();
+});
 model.addEventListener("change", () => {
   updateCustomModelVisibility(customModelAllowed());
   persistLlmSettings();
+  updateContextWindowForSelectedModel();
   if (model.value === CUSTOM_MODEL_VALUE) {
     customModel.focus();
   }
@@ -884,7 +892,15 @@ customProviderModels.addEventListener("input", () => {
   persistLlmSettings();
   refreshModelOptions(appSettings);
 });
-[contextWindowTokens, outputBudgetShort, outputBudgetMedium, outputBudgetLong, minPromptChunks, tokenBudgetSafetyMargin, conversationSummaryTriggerTokens].forEach((input) => {
+[contextWindowTokens, mainContextWindowTokens].forEach((input) => {
+  input?.addEventListener("input", () => {
+    contextWindowManuallyEdited = true;
+    syncContextWindowTokenInputs(input);
+    persistTokenBudgetSettings();
+    updateModelContextWindowNote();
+  });
+});
+[outputBudgetShort, outputBudgetMedium, outputBudgetLong, minPromptChunks, tokenBudgetSafetyMargin, conversationSummaryTriggerTokens].forEach((input) => {
   input.addEventListener("input", persistTokenBudgetSettings);
 });
 unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
@@ -1330,6 +1346,7 @@ async function refreshProviderModels() {
     }
     if (previousModel && Array.from(model.options).some((option) => option.value === previousModel)) {
       model.value = previousModel;
+      updateContextWindowForSelectedModel();
     }
     renderProviderApiKeyFields();
     const provider = selectedProviderConfig(appSettings);
@@ -1378,6 +1395,14 @@ function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
     llm_providers: Array.isArray(data.llm_providers) ? data.llm_providers : appSettings.llm_providers,
     model_presets: Array.isArray(data.model_presets) ? data.model_presets : appSettings.model_presets,
     all_model_presets: Array.isArray(data.all_model_presets) ? data.all_model_presets : appSettings.all_model_presets,
+    model_context_windows:
+      data.model_context_windows && typeof data.model_context_windows === "object"
+        ? data.model_context_windows
+        : appSettings.model_context_windows,
+    provider_context_window_defaults:
+      data.provider_context_window_defaults && typeof data.provider_context_window_defaults === "object"
+        ? data.provider_context_window_defaults
+        : appSettings.provider_context_window_defaults,
     llm_policy: data.llm_policy && typeof data.llm_policy === "object" ? data.llm_policy : appSettings.llm_policy,
   };
   const providers = getLlmProviders(appSettings);
@@ -1410,7 +1435,10 @@ async function streamChat(payload) {
 function populateTokenBudgetFields(settings = appSettings) {
   const defaults = settings.token_budget_defaults || {};
   const stored = loadTokenBudgetSettings();
-  contextWindowTokens.value = stored.context_window_tokens ?? defaults.context_window_tokens ?? 32768;
+  contextWindowManuallyEdited = stored.context_window_tokens !== undefined && stored.context_window_tokens !== null;
+  setContextWindowTokensValue(
+    stored.context_window_tokens ?? selectedModelContextWindow() ?? defaultContextWindowTokens(settings),
+  );
   outputBudgetShort.value = stored.output_token_budget_short ?? defaults.output_token_budget_short ?? 384;
   outputBudgetMedium.value = stored.output_token_budget_medium ?? defaults.output_token_budget_medium ?? 768;
   outputBudgetLong.value = stored.output_token_budget_long ?? defaults.output_token_budget_long ?? 1024;
@@ -1418,6 +1446,7 @@ function populateTokenBudgetFields(settings = appSettings) {
   tokenBudgetSafetyMargin.value = stored.token_budget_safety_margin ?? defaults.token_budget_safety_margin ?? 0.1;
   conversationSummaryTriggerTokens.value =
     stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 3000;
+  updateModelContextWindowNote();
 }
 
 function loadTokenBudgetSettings() {
@@ -1443,6 +1472,95 @@ function currentTokenBudgetSettings() {
     token_budget_safety_margin: nullableNumber(tokenBudgetSafetyMargin.value),
     conversation_summary_trigger_tokens: nullableInteger(conversationSummaryTriggerTokens.value),
   };
+}
+
+function defaultContextWindowTokens(settings = appSettings) {
+  return settings.token_budget_defaults?.context_window_tokens ?? 32768;
+}
+
+function selectedModelContextWindow(modelName = selectedModelValue(), provider = selectedProviderConfig()) {
+  const modelKey = String(modelName || "").trim();
+  if (!modelKey) {
+    return null;
+  }
+  const providerWindows =
+    provider?.model_context_windows && typeof provider.model_context_windows === "object"
+      ? provider.model_context_windows
+      : {};
+  const globalWindows =
+    appSettings.model_context_windows && typeof appSettings.model_context_windows === "object"
+      ? appSettings.model_context_windows
+      : {};
+  const tokens = providerWindows[modelKey] ?? globalWindows[modelKey];
+  const parsed = Number(tokens);
+  if (Number.isFinite(parsed) && parsed >= 1024) {
+    return parsed;
+  }
+  const providerDefault = Number(provider?.default_context_window_tokens);
+  return Number.isFinite(providerDefault) && providerDefault >= 1024 ? providerDefault : null;
+}
+
+function formatTokenCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toLocaleString("cs-CZ") : "";
+}
+
+function setContextWindowTokensValue(value) {
+  const nextValue = value ?? "";
+  if (contextWindowTokens) {
+    contextWindowTokens.value = nextValue;
+  }
+  if (mainContextWindowTokens) {
+    mainContextWindowTokens.value = nextValue;
+  }
+}
+
+function syncContextWindowTokenInputs(sourceInput) {
+  const value = sourceInput?.value ?? "";
+  if (sourceInput !== contextWindowTokens && contextWindowTokens) {
+    contextWindowTokens.value = value;
+  }
+  if (sourceInput !== mainContextWindowTokens && mainContextWindowTokens) {
+    mainContextWindowTokens.value = value;
+  }
+}
+
+function updateContextWindowForSelectedModel({ force = false, persist = false } = {}) {
+  if (!force && contextWindowManuallyEdited) {
+    updateModelContextWindowNote();
+    return;
+  }
+  setContextWindowTokensValue(selectedModelContextWindow() ?? defaultContextWindowTokens());
+  if (persist) {
+    persistTokenBudgetSettings();
+  }
+  updateModelContextWindowNote();
+}
+
+function updateModelContextWindowNote() {
+  if (!modelContextWindowNote) {
+    return;
+  }
+  const knownWindow = selectedModelContextWindow();
+  const currentWindow = nullableInteger(contextWindowTokens?.value);
+  modelContextWindowNote.classList.remove("warning");
+  if (knownWindow) {
+    if (currentWindow && currentWindow > knownWindow) {
+      modelContextWindowNote.classList.add("warning");
+      modelContextWindowNote.textContent =
+        `Známé maximum pro tento model: ${formatTokenCount(knownWindow)} tokenů. `
+        + `Aktuálně používáte ${formatTokenCount(currentWindow)} tokenů, takže se kontext nemusí vejít.`;
+      return;
+    }
+    const suffix =
+      currentWindow && currentWindow !== knownWindow
+        ? ` Aktuálně používáte ${formatTokenCount(currentWindow)} tokenů.`
+        : "";
+    modelContextWindowNote.textContent = `Známé maximum pro tento model: ${formatTokenCount(knownWindow)} tokenů.${suffix}`;
+    return;
+  }
+  modelContextWindowNote.textContent =
+    `Pro tento model nemáme uložené maximum. Výchozí hodnota aplikace: ${formatTokenCount(defaultContextWindowTokens())} tokenů.`;
 }
 
 async function chatRequest(payload, handlers = {}) {
@@ -1644,6 +1762,7 @@ function refreshModelOptions(settings = appSettings) {
   const providerBaseUrl = provider?.base_url || "";
   llmBaseUrl.value = selectedProviderBaseUrl(provider?.id) || providerBaseUrl;
   updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);
+  updateContextWindowForSelectedModel();
 }
 
 // System placeholders are filled by the server and never surfaced as a control.

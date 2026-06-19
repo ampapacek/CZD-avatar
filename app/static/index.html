@@ -6,7 +6,7 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=notes-fixes-1" />
+    <link rel="stylesheet" href="static/styles.css?v=model-context-1" />
   </head>
   <body>
     <main class="shell">
@@ -122,6 +122,11 @@
               <label class="field">
                 <span>Model</span>
                 <select id="model"></select>
+              </label>
+              <label class="field context-window-main-field">
+                <span>Context window</span>
+                <input id="mainContextWindowTokens" type="number" min="1024" step="1024" />
+                <span id="modelContextWindowNote" class="field-note">Načítám výchozí hodnotu modelu...</span>
               </label>
               <label class="field" id="customModelField" hidden>
                 <span>Jiný model</span>
@@ -652,6 +657,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=msearch-rescore-2"></script>
+  <script src="static/app.js?v=model-context-1"></script>
 </body>
 </html>

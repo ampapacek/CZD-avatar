@@ -272,6 +272,11 @@ body[data-theme="dark"] #themeToggle > .icon-moon {
   line-height: 1.4;
 }
 
+.field .field-note.warning {
+  color: #b91c1c;
+  font-weight: 750;
+}
+
 .field-note.unsaved-note {
   color: #b45309;
 }
@@ -573,6 +578,10 @@ select:focus {
 
 .top-k-control {
   grid-column: 1 / -1;
+}
+
+.context-window-main-field {
+  align-self: start;
 }
 
 .score-thresholds {

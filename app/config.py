@@ -65,6 +65,10 @@ class Settings(BaseSettings):
 
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
+    model_context_windows_path: Path = Field(
+        default=Path("data/model_context_windows.json"),
+        alias="MODEL_CONTEXT_WINDOWS_PATH",
+    )
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")
 

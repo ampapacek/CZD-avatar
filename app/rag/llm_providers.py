@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from app.config import load_env_values
+from app.rag.model_metadata import filter_model_context_windows
 
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,8 @@ class LLMProviderConfig:
     api_key_label: str
     discover_models: bool
     models_url: str | None = None
+    model_context_windows: dict[str, int] | None = None
+    default_context_window_tokens: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +100,8 @@ class LLMProviderConfig:
             "supports_streaming": self.supports_streaming,
             "discover_models": self.discover_models,
             "models_url": self.models_url,
+            "model_context_windows": dict(self.model_context_windows or {}),
+            "default_context_window_tokens": self.default_context_window_tokens,
         }
 
 
@@ -206,7 +211,26 @@ def clear_model_discovery_cache() -> None:
     _model_discovery_cache.clear()
 
 
-def load_provider_configs(env: dict[str, str] | None = None, force_model_refresh: bool = False) -> list[LLMProviderConfig]:
+def _provider_context_window_default(
+    provider_context_window_defaults: dict[str, int] | None,
+    provider_id: str,
+    label: str,
+) -> int | None:
+    defaults = provider_context_window_defaults or {}
+    for key in (provider_id, label, _normalize_provider_id(provider_id), _normalize_provider_id(label)):
+        tokens = defaults.get(key)
+        if tokens:
+            return tokens
+    normalized_defaults = {_normalize_provider_id(key): value for key, value in defaults.items()}
+    return normalized_defaults.get(_normalize_provider_id(provider_id)) or normalized_defaults.get(_normalize_provider_id(label))
+
+
+def load_provider_configs(
+    env: dict[str, str] | None = None,
+    force_model_refresh: bool = False,
+    model_context_windows: dict[str, int] | None = None,
+    provider_context_window_defaults: dict[str, int] | None = None,
+) -> list[LLMProviderConfig]:
     resolved_env = env or load_env_values()
     provider_ids = _discover_provider_ids(resolved_env)
     providers: list[LLMProviderConfig] = []
@@ -257,6 +281,18 @@ def load_provider_configs(env: dict[str, str] | None = None, force_model_refresh
         else:
             public_models = tuple(model for model in public_models if model in model_presets)
         resolved_default_model = default_model if default_model in model_presets else (model_presets[0] if model_presets else "")
+        resolved_model_presets = tuple(dict.fromkeys(model_presets))
+        default_context_window_tokens = _provider_context_window_default(
+            provider_context_window_defaults,
+            provider_id,
+            label,
+        )
+        resolved_model_context_windows = filter_model_context_windows(model_context_windows, resolved_model_presets)
+        if default_context_window_tokens:
+            resolved_model_context_windows = {
+                model: resolved_model_context_windows.get(model, default_context_window_tokens)
+                for model in resolved_model_presets
+            }
 
         providers.append(
             LLMProviderConfig(
@@ -266,19 +302,34 @@ def load_provider_configs(env: dict[str, str] | None = None, force_model_refresh
                 api_key=api_key,
                 default_model=resolved_default_model,
                 public_models=public_models,
-                model_presets=tuple(dict.fromkeys(model_presets)),
+                model_presets=resolved_model_presets,
                 supports_streaming=supports_streaming,
                 api_key_label=api_key_label,
                 discover_models=discover_models,
                 models_url=models_url,
+                model_context_windows=resolved_model_context_windows,
+                default_context_window_tokens=default_context_window_tokens,
             )
         )
 
     return providers
 
 
-def available_llm_providers(env: dict[str, str] | None = None, force_model_refresh: bool = False) -> list[dict[str, Any]]:
-    return [provider.to_dict() for provider in load_provider_configs(env, force_model_refresh=force_model_refresh)]
+def available_llm_providers(
+    env: dict[str, str] | None = None,
+    force_model_refresh: bool = False,
+    model_context_windows: dict[str, int] | None = None,
+    provider_context_window_defaults: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    return [
+        provider.to_dict()
+        for provider in load_provider_configs(
+            env,
+            force_model_refresh=force_model_refresh,
+            model_context_windows=model_context_windows,
+            provider_context_window_defaults=provider_context_window_defaults,
+        )
+    ]
 
 
 def resolve_llm_provider(

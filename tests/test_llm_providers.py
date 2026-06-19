@@ -66,6 +66,48 @@ class LLMProviderTests(unittest.TestCase):
 
         self.assertNotIn("api_key", providers[0])
 
+    def test_provider_payload_includes_known_context_windows_for_its_models(self) -> None:
+        providers = available_llm_providers(
+            {
+                "LLM_PROVIDERS": "aiufal,openrouter",
+                "LLM_PROVIDER_AIUFAL_DEFAULT_MODEL": "LLM1-A40.llama3.3:latest",
+                "LLM_PROVIDER_AIUFAL_MODELS": "LLM1-A40.llama3.3:latest,unknown-aiufal-model",
+                "LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL": "openrouter/free",
+                "LLM_PROVIDER_OPENROUTER_MODELS": "openrouter/free",
+            },
+            model_context_windows={
+                "LLM1-A40.llama3.3:latest": 4500,
+                "openrouter/free": 8192,
+                "not-configured": 20000,
+            },
+        )
+
+        aiufal = next(provider for provider in providers if provider["id"] == "aiufal")
+        openrouter = next(provider for provider in providers if provider["id"] == "openrouter")
+
+        self.assertEqual(aiufal["model_context_windows"], {"LLM1-A40.llama3.3:latest": 4500})
+        self.assertEqual(openrouter["model_context_windows"], {"openrouter/free": 8192})
+
+    def test_provider_context_window_default_applies_to_all_provider_models(self) -> None:
+        providers = available_llm_providers(
+            {
+                "LLM_PROVIDERS": "provider2",
+                "LLM_PROVIDER_PROVIDER2_NAME": "OpenRouter",
+                "LLM_PROVIDER_PROVIDER2_DEFAULT_MODEL": "openrouter/free",
+                "LLM_PROVIDER_PROVIDER2_MODELS": "openrouter/free,meta-llama/llama-4-scout",
+            },
+            provider_context_window_defaults={"OpenRouter": 50000},
+        )
+
+        self.assertEqual(providers[0]["default_context_window_tokens"], 50000)
+        self.assertEqual(
+            providers[0]["model_context_windows"],
+            {
+                "openrouter/free": 50000,
+                "meta-llama/llama-4-scout": 50000,
+            },
+        )
+
     def test_provider_api_key_can_read_private_config(self) -> None:
         providers = load_provider_configs(
             {

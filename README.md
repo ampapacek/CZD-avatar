@@ -264,6 +264,7 @@ The web UI lets you tune retrieval while testing:
 - mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
 - LLM model preset or custom model id
+- context-window size, with known model defaults from `data/model_context_windows.json`
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
 - editable prompts (see [Prompts And Placeholders](#prompts-and-placeholders))
 
@@ -318,6 +319,7 @@ Important `.env` variables:
 - `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
 - `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
 - `LLM_PROVIDER_<ID>_API_KEY_LABEL`
+- `MODEL_CONTEXT_WINDOWS_PATH`
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`

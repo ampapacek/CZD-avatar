@@ -31,6 +31,7 @@ from app.models import (
     UnlockResponse,
 )
 from app.rag.msearch import clear_collections_cache
+from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
@@ -85,7 +86,11 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 settings = get_settings()
-provider_presets = available_llm_providers()
+model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
+provider_presets = available_llm_providers(
+    model_context_windows=model_context_windows,
+    provider_context_window_defaults=provider_context_window_defaults,
+)
 default_provider = ""
 default_provider_preset: dict[str, object] = {}
 all_llm_models: list[str] = []
@@ -93,8 +98,14 @@ default_model = ""
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
+    global model_context_windows, provider_context_window_defaults
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
-    provider_presets = available_llm_providers(force_model_refresh=force_model_refresh)
+    model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
+    provider_presets = available_llm_providers(
+        force_model_refresh=force_model_refresh,
+        model_context_windows=model_context_windows,
+        provider_context_window_defaults=provider_context_window_defaults,
+    )
     default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
     default_provider_preset = provider_preset(default_provider, provider_presets)
     provider_model_presets = _dedupe_preserve_order(
@@ -113,6 +124,8 @@ def _llm_settings_payload() -> dict[str, object]:
         "llm_providers": provider_presets,
         "model_presets": selected_provider["model_presets"],
         "all_model_presets": all_llm_models,
+        "model_context_windows": model_context_windows,
+        "provider_context_window_defaults": provider_context_window_defaults,
         "llm_policy": {
             "provider": default_provider,
             "providers": provider_presets,

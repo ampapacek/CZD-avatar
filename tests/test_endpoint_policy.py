@@ -73,6 +73,16 @@ class PolicyErrorStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("Local retrieval", response.json()["detail"])
 
+    def test_settings_exposes_model_context_metadata(self) -> None:
+        response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertIsInstance(payload["model_context_windows"], dict)
+        self.assertTrue(
+            all(isinstance(provider.get("model_context_windows"), dict) for provider in payload["llm_providers"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
