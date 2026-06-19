@@ -350,17 +350,28 @@ def _questions_path_for_wp(wp_id: str | None) -> tuple[str, Path | None]:
     return resolved_wp_id, questions_path
 
 
-@app.get("/questions/random")
-def random_question(wp_id: str | None = None) -> dict[str, str]:
+def _load_questions_for_wp(wp_id: str | None) -> tuple[str, list[str]]:
     resolved_wp_id, questions_path = _questions_path_for_wp(wp_id)
     if questions_path is None:
-        raise HTTPException(status_code=404, detail=f"No random questions are configured for {resolved_wp_id}.")
+        raise HTTPException(status_code=404, detail=f"No questions are configured for {resolved_wp_id}.")
     if not questions_path.exists():
         raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} was not found.")
     questions = [line.strip() for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not questions:
         raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} does not contain any questions.")
+    return resolved_wp_id, questions
+
+
+@app.get("/questions/random")
+def random_question(wp_id: str | None = None) -> dict[str, str]:
+    resolved_wp_id, questions = _load_questions_for_wp(wp_id)
     return {"question": random.choice(questions), "wp_id": resolved_wp_id}
+
+
+@app.get("/questions")
+def list_questions(wp_id: str | None = None) -> dict[str, object]:
+    resolved_wp_id, questions = _load_questions_for_wp(wp_id)
+    return {"questions": questions, "wp_id": resolved_wp_id}
 
 
 PROMPT_PRESET_FORBIDDEN_DETAIL = (

@@ -708,10 +708,6 @@ select:focus {
   gap: 10px;
 }
 
-.retrieve-toggle {
-  align-self: start;
-}
-
 .inline-field input {
   width: 18px;
   height: 18px;
@@ -746,8 +742,61 @@ button:hover {
 
 .question-actions {
   display: flex;
-  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   margin-top: -6px;
+}
+
+.predefined-question-control {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* Fixed-height, scrollable list so a long question set stays compact. */
+.predefined-question-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 280px;
+  max-width: 440px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.predefined-question-list li {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.predefined-question-list li:hover,
+.predefined-question-list li.is-active {
+  background: var(--surface-2);
+}
+
+.predefined-question-list .predefined-question-empty {
+  color: var(--muted);
+  cursor: default;
+}
+
+.predefined-question-list .predefined-question-empty:hover {
+  background: transparent;
+}
+
+/* Push the "Pouze vyhledat zdroje" action to the right edge of the row. */
+.retrieve-button {
+  margin-left: auto;
 }
 
 .primary {

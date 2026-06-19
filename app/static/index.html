@@ -86,6 +86,15 @@
             <button id="randomQuestionButton" class="secondary" type="button" title="Vybere náhodnou otázku pro aktuální WP a vloží ji do pole.">
               Náhodná otázka
             </button>
+            <div id="predefinedQuestionWrap" class="predefined-question-control">
+              <button id="predefinedQuestionButton" class="secondary" type="button" aria-haspopup="listbox" aria-expanded="false" title="Vyber z připravených otázek pro aktuální WP.">
+                Připravené otázky ▾
+              </button>
+              <ul id="predefinedQuestionList" class="predefined-question-list" role="listbox" aria-label="Připravené otázky" hidden></ul>
+            </div>
+            <button id="retrieveButton" class="secondary retrieve-button" type="button" title="Pouze vyhledá relevantní zdroje pro otázku bez generování odpovědi.">
+              Pouze vyhledat zdroje
+            </button>
           </div>
 
           <div class="controls">
@@ -103,11 +112,6 @@
             </label>
             <div id="placeholderControls" class="placeholder-controls"></div>
           </div>
-
-          <label class="field inline-field retrieve-toggle">
-            <input id="retrieveOnly" type="checkbox" />
-            <span>Pouze vyhledat zdroje</span>
-          </label>
 
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
@@ -251,7 +255,7 @@
         <div class="help-body">
           <div class="help-card">
             <h3>Jak aplikace odpovídá</h3>
-            <p>Aplikace nejdřív vyhledá relevantní úryvky dokumentů (snippets) a potom z nich složí odpověď pomocí vybraného jazykového modelu. Citace v odpovědi odkazují na zdroje zobrazené v pravém panelu. Pokud chceš samotné vyhledávání bez generování odpovědi, zapni <code>Pouze vyhledat zdroje</code>.</p>
+            <p>Aplikace nejdřív vyhledá relevantní úryvky dokumentů (snippets) a potom z nich složí odpověď pomocí vybraného jazykového modelu. Citace v odpovědi odkazují na zdroje zobrazené v pravém panelu. Pokud chceš samotné vyhledávání bez generování odpovědi, klikni na tlačítko <code>Pouze vyhledat zdroje</code>.</p>
           </div>
           <div class="help-card">
             <h3>Zdroje: mSearch / lokální databáze</h3>

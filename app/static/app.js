@@ -29,7 +29,10 @@ const saveCustomProviderApiKeyButton = document.querySelector("#saveCustomProvid
 const clearCustomProviderApiKeyButton = document.querySelector("#clearCustomProviderApiKeyButton");
 const customProviderDefaultModel = document.querySelector("#customProviderDefaultModel");
 const customProviderModels = document.querySelector("#customProviderModels");
-const retrieveOnly = document.querySelector("#retrieveOnly");
+const retrieveButton = document.querySelector("#retrieveButton");
+const predefinedQuestionWrap = document.querySelector("#predefinedQuestionWrap");
+const predefinedQuestionButton = document.querySelector("#predefinedQuestionButton");
+const predefinedQuestionList = document.querySelector("#predefinedQuestionList");
 const retrievalBackend = document.querySelector("#retrievalBackend");
 const msearchCollection = document.querySelector("#msearchCollection");
 const msearchMode = document.querySelector("#msearchMode");
@@ -272,6 +275,7 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
     ? promptId
     : defaultPromptPresetId(activeWpId);
   applyPromptPresetById(targetPrompt);
+  loadPredefinedQuestions(activeWpId);
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
@@ -353,13 +357,18 @@ async function loadSettings() {
   renderConversationWorkspace();
   await loadPromptPresets();
   renderGlobalPlaceholderDefs();
+  loadPredefinedQuestions(activeWpId);
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+// Shared by the "Odpovědět" form submit (full answer) and the "Pouze vyhledat
+// zdroje" button (retrieval only). `retrieveOnlyMode` picks the branch.
+async function runQuery(retrieveOnlyMode) {
   submitButton.disabled = true;
+  retrieveButton.disabled = true;
   statusEl.className = "status";
-  statusEl.textContent = "Vyhledávám zdroje a generuji odpověď...";
+  statusEl.textContent = retrieveOnlyMode
+    ? "Vyhledávám zdroje..."
+    : "Vyhledávám zdroje a generuji odpověď...";
   streamedAnswerText = "";
   currentAnswerSources = [];
   currentRetrievedChunks = [];
@@ -377,7 +386,7 @@ form.addEventListener("submit", async (event) => {
   loadingIndicator.hidden = false;
 
   try {
-    if (retrieveOnly.checked) {
+    if (retrieveOnlyMode) {
       const payload = buildRetrievePayload();
       const response = await fetch("retrieve", {
         method: "POST",
@@ -484,8 +493,16 @@ form.addEventListener("submit", async (event) => {
     stopRerankCountdown();
     loadingIndicator.hidden = true;
     submitButton.disabled = false;
+    retrieveButton.disabled = false;
   }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  runQuery(false);
 });
+
+retrieveButton.addEventListener("click", () => runQuery(true));
 
 randomQuestionButton.addEventListener("click", async () => {
   randomQuestionButton.disabled = true;
@@ -506,6 +523,76 @@ randomQuestionButton.addEventListener("click", async () => {
     statusEl.textContent = error.message;
   } finally {
     randomQuestionButton.disabled = false;
+  }
+});
+
+function closePredefinedQuestions() {
+  if (!predefinedQuestionList) {
+    return;
+  }
+  predefinedQuestionList.hidden = true;
+  predefinedQuestionButton?.setAttribute("aria-expanded", "false");
+}
+
+function openPredefinedQuestions() {
+  if (!predefinedQuestionList || !predefinedQuestionList.children.length) {
+    return;
+  }
+  predefinedQuestionList.hidden = false;
+  predefinedQuestionButton?.setAttribute("aria-expanded", "true");
+}
+
+// Fills the "Připravené otázky" dropdown with the same question list used for
+// random questions, scoped to the given WP. The list is a fixed-height,
+// scrollable popover so a long question set stays compact.
+async function loadPredefinedQuestions(wpId = wpSelect.value || "") {
+  if (!predefinedQuestionList) {
+    return;
+  }
+  closePredefinedQuestions();
+  try {
+    const params = new URLSearchParams({ wp_id: wpId || "" });
+    const response = await fetch(`questions?${params.toString()}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Nepodařilo se načíst otázky.");
+    }
+    predefinedQuestionList.innerHTML = (data.questions || [])
+      .map((q) => `<li role="option" title="${escapeHtml(q)}">${escapeHtml(q)}</li>`)
+      .join("");
+  } catch {
+    predefinedQuestionList.innerHTML =
+      `<li class="predefined-question-empty">Žádné připravené otázky.</li>`;
+  }
+}
+
+predefinedQuestionButton?.addEventListener("click", () => {
+  if (predefinedQuestionList?.hidden) {
+    openPredefinedQuestions();
+  } else {
+    closePredefinedQuestions();
+  }
+});
+
+predefinedQuestionList?.addEventListener("click", (event) => {
+  const item = event.target.closest("li");
+  if (!item || item.classList.contains("predefined-question-empty")) {
+    return;
+  }
+  question.value = item.textContent;
+  closePredefinedQuestions();
+  question.focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (predefinedQuestionWrap && !predefinedQuestionWrap.contains(event.target)) {
+    closePredefinedQuestions();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closePredefinedQuestions();
   }
 });
 
@@ -4086,7 +4173,6 @@ function applyHistoryEntryToForm(entry) {
   }
   updateCustomModelVisibility(unlocked);
   persistLlmSettings();
-  retrieveOnly.checked = entry.mode === "retrieve";
   retrievalBackend.value = entry.settings?.retrieval_backend || retrievalBackend.value;
   updateRetrievalControls({ resetValues: false });
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;

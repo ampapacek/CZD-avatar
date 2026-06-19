@@ -415,14 +415,14 @@ Browser state lives under three `localStorage` keys: `czdemos4ai-local-prompt-pr
 
 ## Random Questions
 
-The "Náhodná otázka" button and `GET /questions/random?wp_id=...` read a per-WP plain-text file (one question per line) configured by `questions_path` in `app/rag/wp_config.py`:
+The "Náhodná otázka" button (`GET /questions/random?wp_id=...`) and the "Připravené otázky" dropdown (`GET /questions?wp_id=...`) read a per-WP plain-text file (one question per line) configured by `questions_path` in `app/rag/wp_config.py`:
 
 - `data/questions/wp1-historie.txt`
 - `data/questions/wp2-media.txt`
 - `data/questions/wp3-pravo.txt`
 - `data/questions/wp4-adiktologie.txt`
 
-These files are **private and gitignored** (`data/questions/` in `.gitignore`), so they are not in the repo. They must be provisioned separately on each machine/deploy (rsync, mounted volume, or your data-deploy step). When a WP's file is missing, `GET /questions/random` returns a localized 404 and the rest of the app keeps working — only that WP's random-question button is unavailable.
+These files are **private and gitignored** (`data/questions/` in `.gitignore`), so they are not in the repo. They must be provisioned separately on each machine/deploy (rsync, mounted volume, or your data-deploy step). When a WP's file is missing, `GET /questions/random` and `GET /questions` return a localized 404 and the rest of the app keeps working — only that WP's random-question button and prepared-questions dropdown are unavailable.
 
 ## Collections And Prompts
 
