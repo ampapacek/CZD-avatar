@@ -6,7 +6,7 @@ Practical handoff for future agents in this repo.
 
 - Respond in English unless asked otherwise.
 - Ask clarifying questions before non-trivial code; skip the pause for small doc/mechanical edits.
-- Dont start coding if the prompt is just some question.
+- Don't start coding if the prompt is just some question. Discuss first.
 - Test every non-trivial change (run the app/scripts or add automated tests) and report what was and wasn't verified.
 - Don't commit or push without explicit approval. Split commits into related chunks with clear messages.
 
@@ -27,7 +27,8 @@ Stack: FastAPI · hosted `msearch` retrieval (default) · local/remote Qdrant ·
 - `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)
-- `data/collections/czech_history/questions/questions.txt` — random-question + downloader + batch seed
+- `data/questions/*.txt` — private per-WP random/prepared questions (gitignored, may be absent)
+- `data/collections/czech_history/` — Czech-history assets/metadata kept for the current WP1 setup
 
 ## Run
 
@@ -40,10 +41,11 @@ cp .env.example .env
 uvicorn app.main:app --reload   # http://127.0.0.1:8000
 ```
 
-Minimum `.env` for hosted msearch: `LLM_API_KEY`, `LLM_MODEL`, `RETRIEVAL_BACKEND=msearch`, `MSEARCH_USERNAME`, `MSEARCH_PASSWORD`.
+Minimum `.env` for hosted msearch: one or more `LLM_PROVIDER_<ID>_*` provider blocks, `LLM_PROVIDER`, `LLM_PROVIDERS`, `RETRIEVAL_BACKEND=msearch`, `MSEARCH_USERNAME`, `MSEARCH_PASSWORD`.
 
-- Generation is generic OpenAI-compatible (`LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`); `OPENROUTER_*` are legacy aliases. The UI's `LLM API` panel can override base URL/key per browser session.
-- `ADMIN_PASSWORD` unlocks the full preset list and authorizes editing/deleting shared presets owned by others. (Replaced `LLM_UNLOCK_PASSWORD`, no back-compat.)
+- Generation is generic OpenAI-compatible, configured through provider env vars: `LLM_PROVIDER_<ID>_BASE_URL`, `API_KEY`, `DEFAULT_MODEL`, `PUBLIC_MODELS`, optional `MODELS`, `MODELS_URL`, `DISCOVER_MODELS`, `SUPPORTS_STREAMING`, `API_KEY_LABEL`. The UI's `LLM API` panel can override base URL/key per browser session.
+- `LLM_MODELS_CACHE_TTL_SECONDS` controls server-side discovered model cache; `/llm-providers/refresh` busts model and live mSearch collection caches.
+- `ADMIN_PASSWORD` unlocks the full model list and authorizes editing/deleting shared presets owned by others. (Replaced `LLM_UNLOCK_PASSWORD`, no back-compat.)
 - `.env` intentionally wins over exported shell env vars (an old exported `OPENROUTER_API_KEY` used to override it). On odd LLM behavior, check the key fingerprint in startup logs — never print the key.
 
 Local retrieval: `RETRIEVAL_BACKEND=local`, add docs under `data/raw/`, then `uv run python scripts/ingest.py --path data/raw`.
@@ -55,6 +57,7 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 - WPs are typed dataclasses in `wp_config.py` (not env/JSON): `WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`. WP1 holds the history prompts (`Učitel`/`Historik`/`Laik`); WP2–WP4 ship neutral starters.
 - Collections map by number prefix (WP1→`wp1-*`, etc.). `wp_config.py` entries are only the offline fallback; at runtime `MSearchRetriever.live_collections_by_prefix()` lists live versions (cached 1h, busted by `/llm-providers/refresh`), injected into `/settings` by `_wps_payload_with_live_collections()` in `main.py`.
 - AI-Ufal gating is per-WP (`WPConfig.requires_aiufal`, currently WP2). Backend `_enforce_msearch_collection_policy` gates by `wp_id`; frontend disables gated collections unless AI Ufal provider is selected.
+- Random/prepared questions are per-WP plain-text files configured by `WPConfig.questions_path`: `data/questions/wp1-historie.txt`, `wp2-media.txt`, `wp3-pravo.txt`, `wp4-adiktologie.txt`. These are private/gitignored; missing files make `/questions/random` and `/questions` return 404 for that WP only.
 - `/settings` exposes `wps` + `default_wp`; built-in prompts appear even without `data/prompt_presets.json`.
 - Preset JSON shape (shared file + browser `localStorage`): `{id, name, wp_id, system_prompt, user_prompt_template, placeholders, owner_id, updated_at}`. Every preset stores `wp_id`; unknown/missing falls back to default WP. Legacy `style_prompts`/`length_prompts` removed; loader tolerates malformed files.
 
@@ -67,33 +70,12 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 ## Retrieval & UI
 
 - Default backend `msearch`; hybrid already implemented. mSearch can return very short keyword snippets — watch grounding quality.
-- UI controls: `top_k` 0–50 (`0` disables retrieval), dense/BM25 weights, min score, min relative score, backend, mSearch collection/mode/confidence floor, retrieve-only mode, LLM model + custom base URL/key.
-- Implemented UX: dark mode, help modal, streaming `/chat/stream`, conversation threads + history in `localStorage`, random question (`/questions/random`), editable presets (`/prompt-presets`), expandable sources, lexical query-term highlighting (not embedding-similarity).
+- UI controls: `top_k` 0–50 (`0` disables retrieval), dense/BM25 weights, min score, min relative score, backend, mSearch collection/mode/confidence floor, retrieve-only mode, reranking controls, LLM provider/model + custom base URL/key.
+- Optional cross-encoder reranking runs after first-stage retrieval when enabled and available (`RERANKER_ENABLED`, `RERANKER_WEIGHT`, `RERANKER_CANDIDATES`, default model `BAAI/bge-reranker-v2-m3`). It uses `local_files_only=True`, so developers must pre-download the model; otherwise rerank controls stay hidden.
+- Streaming `/chat/stream` can emit preliminary first-stage sources before reranking finishes, then final reranked sources. Responses may include `baseline_chunks` for comparing pre/post-rerank ordering in the UI.
+- Implemented UX: dark mode, help modal, streaming `/chat/stream`, conversation threads + history in `localStorage`, random question (`/questions/random`), prepared questions (`/questions`), editable presets (`/prompt-presets`), expandable sources, lexical query-term highlighting (not embedding-similarity).
 
 ## Prompting
 
-- Prompt lives in `app/rag/prompts.py`, currently a Czech historical-assistant prompt — update text/examples for other domains. Model is asked to: answer in the question's language, separate sourced info from general knowledge, cite only used sources, avoid weak chunks, not force a rigid `Podle nalezených zdrojů...` opener. For non-history questions: answer briefly, note it's primarily a historical assistant, don't force citations.
+- Base prompt helpers live in `app/rag/prompts.py`; WP-specific built-in prompts live in `app/rag/wp_config.py`. WP1 still uses Czech-history personas, while WP2–WP4 use generic domain prompts. Model is asked to: answer in the question's language, separate sourced info from general knowledge, cite only used sources, avoid weak chunks, not force a rigid `Podle nalezených zdrojů...` opener, and not generate its own final source list.
 
-## WP1 subset (special data)
-
-- `data/raw/WP1-2026-02-subset/` has nested folders with PDFs + folder-level `meta.md` (ingestion parses these).
-- UI shows generated storage links for WP1 files; source paths omit the `data/raw/` prefix. Link format:
-  `https://storage.ufal.mff.cuni.cz/lib/2e093cea-cdcd-401d-a664-d1ca05112e55/file/v2026-02/<folder>/<filename>`
-
-## Operational notes
-
-- Re-ingest when: `data/raw/` docs change, `EMBEDDING_MODEL` changes, chunking/metadata-parsing changes, or `data/raw/agent.md` changes. Never mix embedding models in one collection.
-- `data/raw/agent.md` is intentionally tracked — it grounds answers to `Kdo jsi?`. Re-ingest if edited.
-- Each run writes a fresh timestamped log under `logs/` (API, ingest, ask, downloader). FastAPI lifespan closes the pipeline/vector store on shutdown (fixed a leaked-semaphore warning on Ctrl+C; if it returns, suspect `uvicorn --reload`).
-- `scripts/download_wikipedia.py` is test-data only (curated list → search from questions.txt, skips existing, tolerates 403/429). Don't make the project Wikipedia-dependent.
-- Ignored scratch: `answers_avatar*.txt`, `notes.md`, most of `data/raw/`, `data/collections/.obsidian/`, `.../topics/`, `.../wiki/`, `data/topics.txt`. The file is tracked as `agents.md` (case-insensitive FS may show `AGENTS.md`).
-
-## Debug first
-
-`pipeline.py`, `retrieval.py`, `documents.py`, `prompts.py`, `llm.py`, `vector_store.py` (in `app/rag/`); `app/main.py`; `app/static/{index.html,app.js,styles.css}`.
-
-## Open issues / next steps
-
-- Conversation retrieval: rewrite follow-ups into standalone queries before retrieval, keep original wording for the answer.
-- Markdown rendering: custom `renderMarkdown()` in `app.js` doesn't render pipe tables; citations expect `[^Z1]` but models sometimes emit bare numbers that don't link.
-- Frontend can't persist/send non-custom provider base-URL overrides despite the UI shape suggesting it can (`persistLlmSettings()` / `selectedProviderBaseUrl()`).

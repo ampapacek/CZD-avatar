@@ -2,7 +2,7 @@
 
 `rag-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
 
-The app is organized around a top-level **WP (work package) selector** (`WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`). Each WP scopes its own built-in prompts and document collections. WP1 carries the Czech-history setup; the other WPs ship neutral starter prompts. A few places are still hardcoded for the Czech-history collection (random questions, some collection assets, helper scripts). The underlying RAG pipeline is topic-agnostic.
+The app is organized around a top-level **WP (work package) selector** (`WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`). Each WP scopes its own built-in prompts, document collections, and optional prepared/random question file. WP1 carries the Czech-history setup; the other WPs ship neutral starter prompts. A few places are still hardcoded for the Czech-history collection (some collection assets, example questions, helper scripts). The underlying RAG pipeline is topic-agnostic.
 
 ## Quick Start
 
@@ -177,7 +177,7 @@ Czech Wikipedia is only for testing the current Czech-history collection before 
 uv run python scripts/download_wikipedia.py --limit 100
 ```
 
-The script reads `data/collections/czech_history/questions/questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`.
+By default, the script reads the legacy downloader seed file at `data/collections/czech_history/questions/questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`. You can point it at another seed file with `--questions`; the app's own random/prepared questions now live separately under `data/questions/`.
 
 ## Ingest Local Documents
 
@@ -197,6 +197,8 @@ API endpoints:
 - `GET /health`
 - `GET /settings`
 - `GET /questions/random` (per-WP; reads the private files under `data/questions/`, see [Random Questions](#random-questions))
+- `GET /questions` (per-WP prepared-question list)
+- `POST /llm-providers/refresh`
 - `GET /prompt-presets`
 - `POST /prompt-presets`
 - `DELETE /prompt-presets/{preset_id}`
@@ -330,6 +332,9 @@ Important `.env` variables:
 - `RERANKER_MODEL`
 - `RERANKER_WEIGHT`
 - `RERANKER_CANDIDATES`
+- `RERANKER_MAX_LENGTH`
+- `RERANKER_BATCH_SIZE`
+- `RERANKER_DEVICE`
 - `MSEARCH_BASE_URL`
 - `MSEARCH_USERNAME`
 - `MSEARCH_PASSWORD`
@@ -338,6 +343,13 @@ Important `.env` variables:
 - `MSEARCH_MODE`
 - `MSEARCH_MIN_CONFIDENCE`
 - `MSEARCH_TIMEOUT`
+- `CONTEXT_WINDOW_TOKENS`
+- `OUTPUT_TOKEN_BUDGET_SHORT`
+- `OUTPUT_TOKEN_BUDGET_MEDIUM`
+- `OUTPUT_TOKEN_BUDGET_LONG`
+- `MIN_PROMPT_CHUNKS`
+- `TOKEN_BUDGET_SAFETY_MARGIN`
+- `CONVERSATION_SUMMARY_TRIGGER_TOKENS`
 - `RAW_DATA_DIR`
 - `CHUNK_CATALOG_PATH`
 - `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
@@ -411,7 +423,7 @@ The chat request carries `selections` (a generic `{name: value}` map) and `place
 
 > Inline placeholder defs edited on a **server** preset persist only when the prompt is saved; the UI shows an amber warning until then.
 
-Browser state lives under three `localStorage` keys: `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, and `czdemos4ai-history-v2` (history).
+Browser state lives in `localStorage`. Important keys include `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, `czdemos4ai-history-v2`, `czdemos4ai-conversations`, `czdemos4ai-llm-settings`, `czdemos4ai-token-budget`, `czdemos4ai-browser-owner-id`, and `theme`.
 
 ## Random Questions
 
@@ -441,7 +453,7 @@ The app can be adapted to any topic, but this is not fully configuration-driven 
 
 - Configure additional providers by adding another `LLM_PROVIDER_<ID>_*` block.
 - Manage context-window size more explicitly for providers with large model catalogs:
-  - add a manual context-window limit in Advanced options
+  - the Settings dialog already has manual token-budget/context-window controls
   - later, derive defaults from the selected model and its known maximum context length
   - for now, keep the retrieval set small, roughly Top10, and trim it to the model's context window
   - ideally use the same tokenizer as the selected model when counting tokens
