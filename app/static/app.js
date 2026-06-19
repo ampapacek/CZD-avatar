@@ -85,6 +85,9 @@ const denseWeight = document.querySelector("#denseWeight");
 const denseWeightValue = document.querySelector("#denseWeightValue");
 const bm25Weight = document.querySelector("#bm25Weight");
 const bm25WeightValue = document.querySelector("#bm25WeightValue");
+const msearchRescore = document.querySelector("#msearchRescore");
+const msearchRescoreNote = document.querySelector("#msearchRescoreNote");
+const rescoreThresholdNote = document.querySelector("#rescoreThresholdNote");
 const rerankEnabled = document.querySelector("#rerankEnabled");
 const rerankToggleField = document.querySelector("#rerankToggleField");
 const rerankOptions = document.querySelector("#rerankOptions");
@@ -179,6 +182,9 @@ let currentRetrievedChunks = [];
 let currentOmittedChunks = [];
 let currentBaselineChunks = [];
 let baselineVisible = false;
+// Whether the last query asked mSearch to rescore server-side; drives the small
+// "reordered by mSearch" note (which has no baseline comparison to show).
+let currentMsearchRescoreUsed = false;
 let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
@@ -347,6 +353,7 @@ async function loadSettings() {
   rerankAvailable = settings.retrieval_defaults?.rerank_available ?? false;
   rerankWeight.value = settings.retrieval_defaults?.rerank_weight ?? 0;
   rerankCandidates.value = settings.retrieval_defaults?.rerank_candidates ?? 40;
+  msearchRescore.checked = Boolean(settings.retrieval_defaults?.msearch_rescore);
   updateMsearchConfidenceLabel();
   updateWeightLabels();
   updateThresholdLabels();
@@ -375,6 +382,7 @@ async function runQuery(retrieveOnlyMode) {
   currentOmittedChunks = [];
   currentBaselineChunks = [];
   baselineVisible = false;
+  currentMsearchRescoreUsed = retrievalBackend.value === "msearch" && msearchRescore.checked;
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
@@ -923,6 +931,7 @@ function buildRequestPayload(overrides = {}) {
     msearch_collection: msearchCollection.value,
     msearch_mode: msearchMode.value,
     msearch_min_confidence: nullableNumber(msearchMinConfidence.value),
+    msearch_rescore: msearchRescore.checked,
     dense_weight: Number(denseWeight.value),
     bm25_weight: Number(bm25Weight.value),
     min_score: nullableNumber(minScore.value),
@@ -946,6 +955,7 @@ function buildRetrievePayload(overrides = {}) {
     msearch_collection: msearchCollection.value,
     msearch_mode: msearchMode.value,
     msearch_min_confidence: nullableNumber(msearchMinConfidence.value),
+    msearch_rescore: msearchRescore.checked,
     dense_weight: Number(denseWeight.value),
     bm25_weight: Number(bm25Weight.value),
     min_score: nullableNumber(minScore.value),
@@ -2988,6 +2998,7 @@ function updateRetrievalControls({ resetValues = false } = {}) {
     embeddingField.classList.toggle("is-hidden", isMsearch);
     embeddingField.hidden = isMsearch;
   }
+  updateRescoreThresholdNote();
 }
 
 function updateWeightLabels() {
@@ -3009,9 +3020,17 @@ function updateRerankControls() {
   rerankWeightValue.value = Number(rerankWeight.value).toFixed(1);
 }
 
+function updateRescoreThresholdNote() {
+  // mSearch rescoring rescales scores onto a lower range, so the min-score /
+  // relative-score thresholds can over-filter. Warn only when it is actually in
+  // effect (mSearch backend + checkbox on).
+  rescoreThresholdNote.hidden = !(retrievalBackend.value === "msearch" && msearchRescore.checked);
+}
+
 rerankEnabled.addEventListener("change", updateRerankControls);
 rerankCandidates.addEventListener("input", updateRerankControls);
 rerankWeight.addEventListener("input", updateRerankControls);
+msearchRescore.addEventListener("change", updateRescoreThresholdNote);
 
 denseWeight.addEventListener("input", () => {
   bm25Weight.value = (1 - Number(denseWeight.value)).toFixed(2);
@@ -3125,6 +3144,9 @@ function renderSources(sources, chunks, answerText = streamedAnswerText) {
 }
 
 function renderBaselineComparison() {
+  // Server-side mSearch rescoring returns only the reordered list, so there is no
+  // baseline to compare — just confirm it ran with a small note.
+  msearchRescoreNote.hidden = !(currentMsearchRescoreUsed && currentAnswerSources.length > 0);
   const hasBaseline = Array.isArray(currentBaselineChunks) && currentBaselineChunks.length > 0;
   toggleBaselineBtn.hidden = !hasBaseline;
   if (!hasBaseline) {
@@ -4178,6 +4200,7 @@ function applyHistoryEntryToForm(entry) {
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;
   msearchMode.value = entry.settings?.msearch_mode || msearchMode.value;
   msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? msearchMinConfidence.value;
+  msearchRescore.checked = Boolean(entry.settings?.msearch_rescore);
   topK.value = entry.settings?.top_k ?? topK.value;
   topKValue.value = topK.value;
   denseWeight.value = entry.settings?.dense_weight ?? denseWeight.value;

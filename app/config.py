@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     msearch_mode: str = Field(default="hybrid", alias="MSEARCH_MODE")
     msearch_min_confidence: float | None = Field(default=None, alias="MSEARCH_MIN_CONFIDENCE")
     msearch_timeout: float = Field(default=60.0, alias="MSEARCH_TIMEOUT")
+    # Ask mSearch to rescore results server-side with its cross-encoder. Faster
+    # and usually better than the local CrossEncoderReranker, but returns only the
+    # reordered list (no score-blend / baseline comparison). The two are
+    # independent: either, both, or neither can run on a single query.
+    msearch_rescore: bool = Field(default=False, alias="MSEARCH_RESCORE")
 
     context_window_tokens: int = Field(default=32768, alias="CONTEXT_WINDOW_TOKENS")
     output_token_budget_short: int = Field(default=384, alias="OUTPUT_TOKEN_BUDGET_SHORT")

@@ -100,6 +100,7 @@ class MSearchRetriever:
         min_confidence: float | None = None,
         min_score: float | None = None,
         min_relative_score: float | None = None,
+        rescore_method: str | None = None,
     ) -> list[dict[str, Any]]:
         if top_k <= 0:
             return []
@@ -120,6 +121,12 @@ class MSearchRetriever:
         )
         if resolved_min_confidence is not None:
             payload["min_confidence"] = resolved_min_confidence
+        # cross_encoder/llm rescoring reorders the list server-side and rescales the
+        # scores; "none" (or omitting it) keeps mSearch's default ordering. The
+        # rescaled scores are what _filter_by_thresholds below then sees, so
+        # min_score/min_relative_score apply to the rescored values.
+        if rescore_method and rescore_method != "none":
+            payload["rescore_method"] = rescore_method
 
         with httpx.Client(timeout=self.settings.msearch_timeout) as client:
             response = client.post(

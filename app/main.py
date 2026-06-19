@@ -277,6 +277,9 @@ def get_public_settings() -> dict[str, object]:
             "rerank_model": settings.reranker_model,
             "rerank_candidates": settings.reranker_candidates,
             "rerank_available": reranker_model_available(settings.reranker_model),
+            # Server-side mSearch cross-encoder rescoring is always available (no
+            # local model needed); only meaningful for the mSearch backend.
+            "msearch_rescore": settings.msearch_rescore,
         },
         "token_budget_defaults": {
             "context_window_tokens": settings.context_window_tokens,
@@ -606,6 +609,7 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             msearch_collection=request.msearch_collection,
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
+            msearch_rescore=request.msearch_rescore,
             rerank_enabled=request.rerank_enabled,
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
@@ -675,6 +679,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             msearch_collection=request.msearch_collection,
             msearch_mode=request.msearch_mode,
             msearch_min_confidence=request.msearch_min_confidence,
+            msearch_rescore=request.msearch_rescore,
             rerank_enabled=request.rerank_enabled,
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
@@ -713,6 +718,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 msearch_collection=request.msearch_collection,
                 msearch_mode=request.msearch_mode,
                 msearch_min_confidence=request.msearch_min_confidence,
+                msearch_rescore=request.msearch_rescore,
                 rerank_enabled=request.rerank_enabled,
                 rerank_weight=request.rerank_weight,
                 rerank_candidates=request.rerank_candidates,

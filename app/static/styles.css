@@ -1484,6 +1484,17 @@ button:hover {
   color: var(--text);
 }
 
+.msearch-rescore-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted, var(--text));
+}
+
+.rescore-threshold-note {
+  margin: 4px 0 0;
+  color: var(--accent, var(--text));
+}
+
 .sources-columns {
   display: flex;
   gap: 16px;

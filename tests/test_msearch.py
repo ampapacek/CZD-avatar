@@ -1,6 +1,8 @@
 import unittest
 
+from app.config import get_settings
 from app.rag.msearch import _group_collections_by_prefix, _records_from_response
+from app.rag.pipeline import RAGPipeline
 
 
 # Shape mirrors a real mSearch hybrid response: when `highlight: true` is sent,
@@ -70,6 +72,42 @@ class CollectionGroupingTests(unittest.TestCase):
         self.assertEqual([entry["collection_id"] for entry in grouped["wp3"]], ["c"])
         self.assertNotIn("wp2", grouped)
         self.assertNotIn("wp4", grouped)
+
+
+class _RecordingMSearchRetriever:
+    """Captures the kwargs the pipeline passes to mSearch retrieval."""
+
+    def __init__(self):
+        self.calls = []
+
+    def retrieve(self, question, top_k, **kwargs):
+        self.calls.append(kwargs)
+        return []
+
+
+class MSearchRescoreWiringTests(unittest.TestCase):
+    def _pipeline(self):
+        pipeline = RAGPipeline(get_settings())
+        recorder = _RecordingMSearchRetriever()
+        pipeline._msearch_retriever = recorder
+        return pipeline, recorder
+
+    def test_rescore_enabled_passes_cross_encoder(self):
+        pipeline, recorder = self._pipeline()
+        pipeline.retrieve_candidates("q", top_k=5, retrieval_backend="msearch", msearch_rescore=True)
+        self.assertEqual(recorder.calls[0]["rescore_method"], "cross_encoder")
+
+    def test_rescore_disabled_passes_none(self):
+        pipeline, recorder = self._pipeline()
+        pipeline.retrieve_candidates("q", top_k=5, retrieval_backend="msearch", msearch_rescore=False)
+        self.assertIsNone(recorder.calls[0]["rescore_method"])
+
+    def test_rescore_default_follows_settings(self):
+        pipeline, recorder = self._pipeline()
+        # msearch_rescore=None means "use the configured default" (False by default).
+        pipeline.retrieve_candidates("q", top_k=5, retrieval_backend="msearch")
+        expected = "cross_encoder" if pipeline.settings.msearch_rescore else None
+        self.assertEqual(recorder.calls[0]["rescore_method"], expected)
 
 
 if __name__ == "__main__":

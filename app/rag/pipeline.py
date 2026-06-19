@@ -150,6 +150,7 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        msearch_rescore: bool | None = None,
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
@@ -166,6 +167,7 @@ class RAGPipeline:
             msearch_collection=msearch_collection,
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,
+            msearch_rescore=msearch_rescore,
             rerank_enabled=rerank_enabled,
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,
@@ -185,15 +187,19 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        msearch_rescore: bool | None = None,
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Retrieve chunks and, when reranking is active, the pre-rerank ordering.
 
-        The second list is the top_k the user would have seen without the
+        The second list is the top_k the user would have seen without the local
         cross-encoder (a snapshot taken before blending), so the UI can show the
-        two orderings side by side. It is empty when reranking is inactive.
+        two orderings side by side. It is empty when local reranking is inactive.
+        Note that when ``msearch_rescore`` is on, the candidate pool is already
+        cross-encoder-reordered by mSearch, so the baseline reflects that order and
+        the local rerank only shows what it adds on top.
         """
         candidates = self.retrieve_candidates(
             question,
@@ -207,6 +213,7 @@ class RAGPipeline:
             msearch_collection=msearch_collection,
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,
+            msearch_rescore=msearch_rescore,
             rerank_enabled=rerank_enabled,
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,
@@ -227,6 +234,7 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        msearch_rescore: bool | None = None,
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
@@ -261,6 +269,9 @@ class RAGPipeline:
         candidate_k = max(resolved_top_k, resolved_candidates) if rerank_active else resolved_top_k
 
         if resolved_backend == "msearch":
+            resolved_msearch_rescore = (
+                self.settings.msearch_rescore if msearch_rescore is None else msearch_rescore
+            )
             chunks = self.msearch_retriever.retrieve(
                 question,
                 candidate_k,
@@ -269,9 +280,10 @@ class RAGPipeline:
                 min_confidence=msearch_min_confidence,
                 min_score=resolved_min_score,
                 min_relative_score=resolved_min_relative_score,
+                rescore_method="cross_encoder" if resolved_msearch_rescore else None,
             )
             logger.info(
-                "Retrieved %s chunks from mSearch for question=%r top_k=%s candidates=%s collection=%s mode=%s min_confidence=%s",
+                "Retrieved %s chunks from mSearch for question=%r top_k=%s candidates=%s collection=%s mode=%s min_confidence=%s rescore=%s",
                 len(chunks),
                 question,
                 resolved_top_k,
@@ -279,6 +291,7 @@ class RAGPipeline:
                 effective_msearch_collection,
                 msearch_mode or self.settings.msearch_mode,
                 self.settings.msearch_min_confidence if msearch_min_confidence is None else msearch_min_confidence,
+                "cross_encoder" if resolved_msearch_rescore else "none",
             )
         elif resolved_backend == "local":
             chunks = self.retriever.retrieve(
@@ -439,6 +452,7 @@ class RAGPipeline:
         msearch_collection: str | None = None,
         msearch_mode: str | None = None,
         msearch_min_confidence: float | None = None,
+        msearch_rescore: bool | None = None,
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
@@ -475,6 +489,7 @@ class RAGPipeline:
             msearch_collection=msearch_collection,
             msearch_mode=msearch_mode,
             msearch_min_confidence=msearch_min_confidence,
+            msearch_rescore=msearch_rescore,
             rerank_enabled=rerank_enabled,
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,

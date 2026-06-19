@@ -26,6 +26,7 @@ class RetrieveRequest(BaseModel):
     msearch_collection: str | None = None
     msearch_mode: MSearchMode | None = None
     msearch_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    msearch_rescore: bool | None = None
     dense_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -63,6 +64,7 @@ class ChatRequest(BaseModel):
     msearch_collection: str | None = None
     msearch_mode: MSearchMode | None = None
     msearch_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    msearch_rescore: bool | None = None
     model: str | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
