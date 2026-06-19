@@ -106,6 +106,7 @@ const minRelativeScore = document.querySelector("#minRelativeScore");
 const minRelativeScoreValue = document.querySelector("#minRelativeScoreValue");
 const embeddingModel = document.querySelector("#embeddingModel");
 const submitButton = document.querySelector("#submitButton");
+const cancelButton = document.querySelector("#cancelButton");
 const randomQuestionButton = document.querySelector("#randomQuestionButton");
 const statusEl = document.querySelector("#status");
 const loadingIndicator = document.querySelector("#loadingIndicator");
@@ -134,6 +135,7 @@ const conversationSources = document.querySelector("#conversationSources");
 const conversationForm = document.querySelector("#conversationForm");
 const conversationQuestion = document.querySelector("#conversationQuestion");
 const conversationSubmitButton = document.querySelector("#conversationSubmitButton");
+const conversationCancelButton = document.querySelector("#conversationCancelButton");
 const newConversationButton = document.querySelector("#newConversationButton");
 const deleteConversationButton = document.querySelector("#deleteConversationButton");
 const closeConversationButton = document.querySelector("#closeConversationButton");
@@ -163,6 +165,8 @@ const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
+const MAX_STORED_HISTORY_ENTRIES = 40;
+const COMPACT_STORED_CHUNK_TEXT_LIMIT = 1200;
 // System placeholders are filled by the server and never warned about; the two
 // parameter placeholders shipped in the code floor (length, custom_instructions)
 // are also "known" so they do not trigger the unknown-variable warning.
@@ -372,9 +376,18 @@ async function loadSettings() {
 
 // Shared by the "Odpovědět" form submit (full answer) and the "Pouze vyhledat
 // zdroje" button (retrieval only). `retrieveOnlyMode` picks the branch.
+// Tracks the in-flight main-panel request so the cancel button can abort it.
+// Aborting the fetch also disconnects the SSE stream, which makes the backend
+// generator stop retrieval / reranking / generation at its next yield.
+let activeQueryController = null;
+
 async function runQuery(retrieveOnlyMode) {
+  const controller = new AbortController();
+  activeQueryController = controller;
   submitButton.disabled = true;
   retrieveButton.disabled = true;
+  cancelButton.hidden = false;
+  cancelButton.disabled = false;
   statusEl.className = "status";
   statusEl.textContent = retrieveOnlyMode
     ? "Vyhledávám zdroje..."
@@ -399,29 +412,41 @@ async function runQuery(retrieveOnlyMode) {
   try {
     if (retrieveOnlyMode) {
       const payload = buildRetrievePayload();
-      const response = await fetch("retrieve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Request failed");
-      }
+      const data = await streamRetrieveWithHandlers(payload, {
+        onPreliminarySources(prelimData) {
+          currentRetrievedChunks = prelimData.retrieved_chunks || [];
+          currentBaselineChunks = [];
+          currentAnswerSources = prelimData.sources || chunksToSources(currentRetrievedChunks);
+          renderSources(currentAnswerSources, currentRetrievedChunks, "");
+          statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} dokumentů, přeřazuji (re-ranking)...`;
+        },
+        onRerankProgress(progress) {
+          statusEl.textContent = "Přeřazuji (re-ranking)...";
+          onRerankProgressUpdate(progress);
+        },
+        onSources(sourceData) {
+          stopRerankCountdown();
+          currentRetrievedChunks = sourceData.retrieved_chunks || [];
+          currentBaselineChunks = sourceData.baseline_chunks || [];
+          currentAnswerSources = sourceData.sources || chunksToSources(currentRetrievedChunks);
+          renderSources(currentAnswerSources, currentRetrievedChunks, "");
+          statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků.`;
+        },
+      }, { signal: controller.signal });
       renderAnswer("Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.");
       statusEl.textContent = `Nalezeno ${data.retrieved_chunks.length} chunků.`;
-      currentRetrievedChunks = data.retrieved_chunks;
+      currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
       currentBaselineChunks = data.baseline_chunks || [];
-      currentAnswerSources = chunksToSources(data.retrieved_chunks);
+      currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
       renderSources(currentAnswerSources, currentRetrievedChunks, "");
       saveHistoryEntry({
         question: question.value,
         mode: "retrieve",
         answer: "Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.",
-        sourceCount: data.retrieved_chunks.length,
+        sourceCount: currentRetrievedChunks.length,
         settings: payload,
-        retrieved_chunks: data.retrieved_chunks,
-        sources: chunksToSources(data.retrieved_chunks),
+        retrieved_chunks: currentRetrievedChunks,
+        sources: currentAnswerSources,
       });
     } else {
       const payload = buildRequestPayload();
@@ -467,7 +492,7 @@ async function runQuery(retrieveOnlyMode) {
           currentConversationSummary = doneData.conversation_summary || currentConversationSummary;
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
         },
-      });
+      }, { signal: controller.signal });
       streamedAnswerText = data.answer || streamedAnswerText;
       renderAnswer(streamedAnswerText);
       currentAnswerSources = data.sources || currentAnswerSources;
@@ -498,11 +523,20 @@ async function runQuery(retrieveOnlyMode) {
       });
     }
   } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
+    if (error.name === "AbortError") {
+      statusEl.className = "status";
+      statusEl.textContent = "Zrušeno.";
+    } else {
+      statusEl.className = "status error";
+      statusEl.textContent = error.message;
+    }
   } finally {
+    if (activeQueryController === controller) {
+      activeQueryController = null;
+    }
     stopRerankCountdown();
     loadingIndicator.hidden = true;
+    cancelButton.hidden = true;
     submitButton.disabled = false;
     retrieveButton.disabled = false;
   }
@@ -514,6 +548,13 @@ form.addEventListener("submit", (event) => {
 });
 
 retrieveButton.addEventListener("click", () => runQuery(true));
+
+cancelButton.addEventListener("click", () => {
+  cancelButton.disabled = true;
+  statusEl.className = "status";
+  statusEl.textContent = "Ruším...";
+  activeQueryController?.abort();
+});
 
 randomQuestionButton.addEventListener("click", async () => {
   randomQuestionButton.disabled = true;
@@ -687,6 +728,10 @@ conversationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitConversationTurn();
 });
+conversationCancelButton?.addEventListener("click", () => {
+  conversationCancelButton.disabled = true;
+  activeConversationController?.abort();
+});
 document.addEventListener("click", pulseSourceCardFromCitation);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
 conversationQuestion.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, conversationForm));
@@ -702,7 +747,12 @@ deleteHistoryItemButton.addEventListener("click", () => {
     return;
   }
   const remainingHistory = getHistoryEntries().filter((entry) => entry.id !== selectedHistoryId);
-  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(remainingHistory));
+  saveEntryListWithQuotaPruning(
+    HISTORY_STORAGE_KEY,
+    remainingHistory,
+    compactStoredHistoryEntry,
+    "history entries",
+  );
   selectedHistoryId = remainingHistory[0]?.id ?? null;
   renderHistory();
 });
@@ -1563,11 +1613,11 @@ function updateModelContextWindowNote() {
     `Pro tento model nemáme uložené maximum. Výchozí hodnota aplikace: ${formatTokenCount(defaultContextWindowTokens())} tokenů.`;
 }
 
-async function chatRequest(payload, handlers = {}) {
+async function chatRequest(payload, handlers = {}, { signal } = {}) {
   if (providerSupportsStreaming(payload.llm_provider)) {
-    return streamChatWithHandlers(payload, handlers);
+    return streamChatWithHandlers(payload, handlers, { signal });
   }
-  const data = await fetchChat(payload);
+  const data = await fetchChat(payload, { signal });
   handlers.onSources?.(data);
   if (data.answer) {
     handlers.onToken?.(data.answer, data);
@@ -1576,17 +1626,73 @@ async function chatRequest(payload, handlers = {}) {
   return data;
 }
 
-async function fetchChat(payload) {
+async function fetchChat(payload, { signal } = {}) {
   const response = await fetch("chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   const data = await safeJson(response);
   if (!response.ok) {
     throw new Error(formatErrorDetail(data.detail || "Request failed"));
   }
   return data;
+}
+
+async function streamRetrieveWithHandlers(payload, handlers = {}, { signal } = {}) {
+  const response = await fetch("retrieve/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    const data = await safeJson(response);
+    throw new Error(formatErrorDetail(data.detail || "Request failed"));
+  }
+  if (!response.body) {
+    throw new Error("Streaming is not supported by this browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let donePayload = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+    }
+    let separatorIndex = buffer.indexOf("\n\n");
+    while (separatorIndex !== -1) {
+      const rawEvent = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const event = parseSseEvent(rawEvent);
+      if (event.event === "preliminary_sources") {
+        handlers.onPreliminarySources?.(event.data);
+      } else if (event.event === "rerank_progress") {
+        handlers.onRerankProgress?.(event.data);
+      } else if (event.event === "sources") {
+        handlers.onSources?.(event.data);
+      } else if (event.event === "done") {
+        donePayload = event.data;
+        handlers.onDone?.(donePayload);
+      } else if (event.event === "error") {
+        throw new Error(formatErrorDetail(event.data.detail || "Streaming retrieve failed"));
+      }
+      separatorIndex = buffer.indexOf("\n\n");
+    }
+    if (done) {
+      break;
+    }
+  }
+
+  if (!donePayload) {
+    throw new Error("Streaming finished without retrieval results.");
+  }
+  return donePayload;
 }
 
 function providerSupportsStreaming(providerId = null) {
@@ -1596,11 +1702,12 @@ function providerSupportsStreaming(providerId = null) {
   return provider?.supports_streaming !== false;
 }
 
-async function streamChatWithHandlers(payload, handlers = {}) {
+async function streamChatWithHandlers(payload, handlers = {}, { signal } = {}) {
   const response = await fetch("chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   if (!response.ok) {
     const data = await safeJson(response);
@@ -3221,6 +3328,87 @@ function nullableString(value) {
   return trimmed ? trimmed : null;
 }
 
+function isStorageQuotaError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.name === "QuotaExceededError" ||
+    error?.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+    error?.code === 22 ||
+    error?.code === 1014 ||
+    message.includes("quota")
+  );
+}
+
+function trySetLocalStorageJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (!isStorageQuotaError(error)) {
+      throw error;
+    }
+    return false;
+  }
+}
+
+function compactStoredChunk(chunk) {
+  if (!chunk || typeof chunk !== "object") {
+    return chunk;
+  }
+  return {
+    ...chunk,
+    text: shortenText(chunk.text || "", COMPACT_STORED_CHUNK_TEXT_LIMIT),
+  };
+}
+
+function compactStoredHistoryEntry(entry) {
+  return {
+    ...entry,
+    retrieved_chunks: (entry.retrieved_chunks || []).map(compactStoredChunk),
+    omitted_chunks: [],
+  };
+}
+
+function compactStoredConversationMessage(message) {
+  if (message?.role !== "assistant") {
+    return message;
+  }
+  return {
+    ...message,
+    retrieved_chunks: (message.retrieved_chunks || []).map(compactStoredChunk),
+    omitted_chunks: [],
+  };
+}
+
+function compactStoredConversation(entry) {
+  return {
+    ...entry,
+    messages: (entry.messages || []).map(compactStoredConversationMessage),
+  };
+}
+
+function saveEntryListWithQuotaPruning(key, entries, compactEntry, label) {
+  let candidate = entries;
+  while (candidate.length) {
+    if (trySetLocalStorageJson(key, candidate)) {
+      return candidate;
+    }
+    candidate = candidate.slice(0, -1);
+  }
+
+  candidate = entries.map(compactEntry);
+  while (candidate.length) {
+    if (trySetLocalStorageJson(key, candidate)) {
+      console.warn(`[rag-avatar] ${label} was compacted to fit browser storage.`);
+      return candidate;
+    }
+    candidate = candidate.slice(0, -1);
+  }
+
+  console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full.`);
+  return [];
+}
+
 function updateCustomModelVisibility(unlocked) {
   if (!customModelField) {
     return;
@@ -3580,7 +3768,12 @@ function getConversationEntries() {
 }
 
 function setConversationEntries(entries) {
-  localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify(entries));
+  return saveEntryListWithQuotaPruning(
+    CONVERSATION_STORAGE_KEY,
+    entries,
+    compactStoredConversation,
+    "conversation entries",
+  );
 }
 
 function createConversation() {
@@ -3592,10 +3785,12 @@ function createConversation() {
 	    updatedAt: new Date().toISOString(),
 	    conversation_summary: "",
 	    messages: [],
-	  };
+  };
   conversations.unshift(conversation);
-  setConversationEntries(conversations);
-  selectedConversationId = conversation.id;
+  const savedConversations = setConversationEntries(conversations);
+  selectedConversationId = savedConversations.some((entry) => entry.id === conversation.id)
+    ? conversation.id
+    : savedConversations[0]?.id ?? conversation.id;
   return conversation;
 }
 
@@ -3616,8 +3811,11 @@ function updateConversation(updatedConversation) {
     entry.id === updatedConversation.id ? updatedConversation : entry,
   );
   nextConversations.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  setConversationEntries(nextConversations);
+  const savedConversations = setConversationEntries(nextConversations);
   selectedConversationId = updatedConversation.id;
+  if (!savedConversations.some((entry) => entry.id === selectedConversationId)) {
+    selectedConversationId = savedConversations[0]?.id ?? null;
+  }
 }
 
 function deleteSelectedConversation() {
@@ -3626,8 +3824,8 @@ function deleteSelectedConversation() {
     return;
   }
   const remaining = conversations.filter((entry) => entry.id !== selectedConversationId);
-  setConversationEntries(remaining);
-  selectedConversationId = remaining[0]?.id ?? null;
+  const savedConversations = setConversationEntries(remaining);
+  selectedConversationId = savedConversations[0]?.id ?? null;
   renderConversationWorkspace();
 }
 
@@ -3828,12 +4026,21 @@ function renderConversationContextStatus(message) {
   `;
 }
 
+// In-flight conversation request, aborted by the conversation cancel button.
+let activeConversationController = null;
+
 async function submitConversationTurn() {
   const prompt = conversationQuestion.value.trim();
   if (!prompt) {
     return;
   }
+  const controller = new AbortController();
+  activeConversationController = controller;
   conversationSubmitButton.disabled = true;
+  if (conversationCancelButton) {
+    conversationCancelButton.hidden = false;
+    conversationCancelButton.disabled = false;
+  }
   const conversation = ensureSelectedConversation();
   const userMessage = {
     role: "user",
@@ -3965,8 +4172,11 @@ async function submitConversationTurn() {
         });
         renderConversationWorkspace();
       },
-    });
+    }, { signal: controller.signal });
   } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
     const failedConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
     updateConversation({
       ...failedConversation,
@@ -3988,7 +4198,13 @@ async function submitConversationTurn() {
     });
     renderConversationWorkspace();
   } finally {
+    if (activeConversationController === controller) {
+      activeConversationController = null;
+    }
     conversationSubmitButton.disabled = false;
+    if (conversationCancelButton) {
+      conversationCancelButton.hidden = true;
+    }
   }
 }
 
@@ -4028,9 +4244,14 @@ function saveHistoryEntry(entry) {
     response_time_seconds: entry.response_time_seconds ?? null,
     createdAt: new Date().toISOString(),
   });
-  const trimmed = history.slice(0, 40);
-  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
-  selectedHistoryId = trimmed[0]?.id ?? null;
+  const trimmed = history.slice(0, MAX_STORED_HISTORY_ENTRIES);
+  const savedHistory = saveEntryListWithQuotaPruning(
+    HISTORY_STORAGE_KEY,
+    trimmed,
+    compactStoredHistoryEntry,
+    "history entries",
+  );
+  selectedHistoryId = savedHistory[0]?.id ?? null;
   renderHistory();
 }
 
