@@ -11,6 +11,7 @@ __pycache__/
 *.egg-info/
 
 logs/
+answers/
 answers_avatar*.txt
 notes.md
 prompt_preset_refactor_plan.md
@@ -29,3 +30,6 @@ data/topics.txt
 data/collections/.obsidian/
 data/collections/czech_history/topics/
 data/collections/czech_history/wiki/
+
+scripts/run_wp1_experiments.py
+uv.lock
