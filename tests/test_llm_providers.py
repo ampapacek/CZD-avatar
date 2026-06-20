@@ -43,8 +43,14 @@ class LLMProviderTests(unittest.TestCase):
                 "LLM_PROVIDER_AIUFAL_NAME": "AI Ufal",
                 "LLM_PROVIDER_AIUFAL_BASE_URL": "https://ai.ufal.mff.cuni.cz/api",
                 "LLM_PROVIDER_AIUFAL_DEFAULT_MODEL": "LLM1-A40.llama3.3:latest",
-                "LLM_PROVIDER_AIUFAL_PUBLIC_MODELS": "LLM1-A40.llama3.3:latest,rag-helper,openwebuidocs",
-                "LLM_PROVIDER_AIUFAL_MODELS": "rag-helper,openwebuidocs,LLM1-A40.llama3.3:latest",
+                "LLM_PROVIDER_AIUFAL_PUBLIC_MODELS": (
+                    "LLM1-A40.llama3.3:latest,rag-helper,openwebdocs,openwebuidocs,"
+                    "LLM6-2xRTX5000.gemma3:12b-it-qat"
+                ),
+                "LLM_PROVIDER_AIUFAL_MODELS": (
+                    "rag-helper,openwebdocs,openwebuidocs,LLM6-2xRTX5000.gemma3:12b-it-qat,"
+                    "LLM1-A40.llama3.3:latest"
+                ),
             }
         )
 

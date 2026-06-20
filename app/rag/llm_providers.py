@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ENV_PATTERN = re.compile(
     r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|DISCOVER_MODELS|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
 )
-_EXCLUDED_MODEL_PATTERNS = ("rag-*", "openwebuidocs")
+_EXCLUDED_MODEL_PATTERNS = (
+    "rag-*",
+    "openwebdocs",
+    "openwebuidocs",
+    "llm6-2xrtx5000.gemma3:12b-it-qat",
+)
 _DEFAULT_MODELS_CACHE_TTL_SECONDS = 3600.0
 _PUBLIC_ALL_MODELS = "*"
 
