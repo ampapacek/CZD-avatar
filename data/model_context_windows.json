@@ -11,6 +11,7 @@
   },
   "provider_defaults": {
     "AI Ufal": 16000,
-    "OpenRouter": 50000
+    "e-infra": 60000,
+    "OpenRouter": 60000
   }
 }

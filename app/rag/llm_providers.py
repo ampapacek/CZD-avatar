@@ -16,7 +16,7 @@ from app.rag.model_metadata import filter_model_context_windows
 logger = logging.getLogger(__name__)
 
 _PROVIDER_ENV_PATTERN = re.compile(
-    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|DISCOVER_MODELS|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
+    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|MODEL_INFO_URL|DISCOVER_MODELS|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
 )
 _EXCLUDED_MODEL_PATTERNS = (
     "rag-*",
@@ -35,7 +35,15 @@ class ModelDiscoveryCacheEntry:
     error: str = ""
 
 
+@dataclass(slots=True)
+class ModelContextDiscoveryCacheEntry:
+    context_windows: dict[str, int]
+    refreshed_at: float
+    error: str = ""
+
+
 _model_discovery_cache: dict[str, ModelDiscoveryCacheEntry] = {}
+_model_context_discovery_cache: dict[str, ModelContextDiscoveryCacheEntry] = {}
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -148,6 +156,57 @@ def _extract_model_names(payload: Any) -> list[str]:
     return names
 
 
+def _model_name_from_record(record: dict[str, Any]) -> str:
+    for key in ("id", "name", "model", "model_name", "model_id", "base_model_id"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _context_size_from_model_info(record: dict[str, Any]) -> int | None:
+    model_info = record.get("model_info")
+    if isinstance(model_info, dict):
+        raw_tokens = model_info.get("context_size")
+        try:
+            tokens = int(raw_tokens)
+        except (TypeError, ValueError):
+            return None
+        if tokens >= 1024:
+            return tokens
+    return None
+
+
+def _extract_model_context_windows(payload: Any, model_names: list[str] | tuple[str, ...]) -> dict[str, int]:
+    windows: dict[str, int] = {}
+    known_models = tuple(dict.fromkeys(model for model in model_names if model))
+    known_model_set = set(known_models)
+
+    def visit(value: Any, inherited_name: str = "") -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit(item, inherited_name)
+            return
+        if not isinstance(value, dict):
+            return
+
+        name = _model_name_from_record(value) or inherited_name
+        context_size = _context_size_from_model_info(value)
+        if context_size is not None:
+            if name and name in known_model_set:
+                windows[name] = context_size
+            elif not name and len(known_models) == 1:
+                windows[known_models[0]] = context_size
+
+        for key in ("data", "models", "items"):
+            child = value.get(key)
+            if isinstance(child, (list, dict)):
+                visit(child, name)
+
+    visit(payload)
+    return windows
+
+
 def _is_excluded_model_name(model_name: str) -> bool:
     normalized = model_name.strip().lower()
     return any(fnmatchcase(normalized, pattern) for pattern in _EXCLUDED_MODEL_PATTERNS)
@@ -175,8 +234,31 @@ def _discover_models(base_url: str, api_key: str, timeout: float = 20.0, models_
         raise RuntimeError(f"Could not discover models from {resolved_url}: {exc}") from exc
 
 
-def _discovery_cache_key(provider_id: str, base_url: str, models_url: str | None) -> str:
-    return "|".join([provider_id, base_url.strip().rstrip("/"), (models_url or "").strip().rstrip("/")])
+def _discover_model_context_windows(
+    base_url: str,
+    api_key: str,
+    model_names: list[str] | tuple[str, ...],
+    timeout: float = 20.0,
+    model_info_url: str | None = None,
+) -> dict[str, int]:
+    resolved_url = (model_info_url or f"{base_url.rstrip('/')}/model/info").rstrip("/")
+    headers = {
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:8000",
+        "X-Title": "rag-avatar",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        response = httpx.get(resolved_url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return _extract_model_context_windows(response.json(), model_names)
+    except Exception as exc:
+        raise RuntimeError(f"Could not discover model context windows from {resolved_url}: {exc}") from exc
+
+
+def _discovery_cache_key(provider_id: str, base_url: str, endpoint_url: str | None) -> str:
+    return "|".join([provider_id, base_url.strip().rstrip("/"), (endpoint_url or "").strip().rstrip("/")])
 
 
 def _models_cache_ttl_seconds(env: dict[str, str], provider_id: str) -> float:
@@ -212,8 +294,58 @@ def _discover_models_cached(
         return ModelDiscoveryCacheEntry(models=(), refreshed_at=now, error=str(exc))
 
 
+def _discover_model_context_windows_cached(
+    provider_id: str,
+    base_url: str,
+    api_key: str,
+    model_names: list[str] | tuple[str, ...],
+    model_info_url: str | None,
+    ttl_seconds: float,
+    force_refresh: bool,
+) -> ModelContextDiscoveryCacheEntry:
+    cache_key = _discovery_cache_key(provider_id, base_url, model_info_url)
+    cached = _model_context_discovery_cache.get(cache_key)
+    now = time.time()
+    if cached and not force_refresh and now - cached.refreshed_at < ttl_seconds:
+        return cached
+
+    try:
+        context_windows = _discover_model_context_windows(
+            base_url,
+            api_key,
+            model_names,
+            model_info_url=model_info_url,
+        )
+        entry = ModelContextDiscoveryCacheEntry(context_windows=context_windows, refreshed_at=now)
+        _model_context_discovery_cache[cache_key] = entry
+        return entry
+    except RuntimeError as exc:
+        logger.debug("%s", exc)
+        if cached:
+            return ModelContextDiscoveryCacheEntry(
+                context_windows=cached.context_windows,
+                refreshed_at=cached.refreshed_at,
+                error=str(exc),
+            )
+        return ModelContextDiscoveryCacheEntry(context_windows={}, refreshed_at=now, error=str(exc))
+
+
 def clear_model_discovery_cache() -> None:
     _model_discovery_cache.clear()
+    _model_context_discovery_cache.clear()
+
+
+def _supports_model_info_context_discovery(provider_id: str, label: str, base_url: str, model_info_url: str | None) -> bool:
+    if model_info_url:
+        return True
+    provider_keys = {_normalize_provider_id(provider_id), _normalize_provider_id(label)}
+    base_url_lower = base_url.lower()
+    return (
+        "einfra" in provider_keys
+        or "e_infra" in provider_keys
+        or "chat.ai.e-infra.cz" in base_url_lower
+        or "llm.ai.e-infra.cz" in base_url_lower
+    )
 
 
 def _provider_context_window_default(
@@ -250,6 +382,7 @@ def load_provider_configs(
         public_models = _filter_model_names(_split_csv(public_models_raw)) if not public_all_models else ()
         static_models = _filter_model_names(_split_csv(_env_value(resolved_env, provider_id, "MODELS")))
         models_url = _env_value(resolved_env, provider_id, "MODELS_URL") or None
+        model_info_url = _env_value(resolved_env, provider_id, "MODEL_INFO_URL") or None
         discover_models = _parse_bool(resolved_env.get(_env_key(provider_id, "DISCOVER_MODELS")), default=False)
         cache_ttl_seconds = _models_cache_ttl_seconds(resolved_env, provider_id)
         supports_streaming = _parse_bool(
@@ -293,6 +426,22 @@ def load_provider_configs(
             label,
         )
         resolved_model_context_windows = filter_model_context_windows(model_context_windows, resolved_model_presets)
+        if base_url and resolved_model_presets and _supports_model_info_context_discovery(
+            provider_id,
+            label,
+            base_url,
+            model_info_url,
+        ):
+            context_discovery_entry = _discover_model_context_windows_cached(
+                provider_id,
+                base_url,
+                api_key,
+                resolved_model_presets,
+                model_info_url,
+                cache_ttl_seconds,
+                force_model_refresh,
+            )
+            resolved_model_context_windows.update(context_discovery_entry.context_windows)
         if default_context_window_tokens:
             resolved_model_context_windows = {
                 model: resolved_model_context_windows.get(model, default_context_window_tokens)

@@ -114,6 +114,49 @@ class LLMProviderTests(unittest.TestCase):
             },
         )
 
+    def test_einfra_model_info_context_windows_are_discovered(self) -> None:
+        models_response = Mock()
+        models_response.json.return_value = {
+            "data": [
+                {"id": "mini"},
+                {"id": "thinker"},
+            ]
+        }
+        models_response.raise_for_status.return_value = None
+        model_info_response = Mock()
+        model_info_response.json.return_value = {
+            "data": [
+                {"model_name": "mini", "model_info": {"context_size": 128000}},
+                {"model_name": "thinker", "model_info": {"context_size": "64000"}},
+            ]
+        }
+        model_info_response.raise_for_status.return_value = None
+
+        with patch("app.rag.llm_providers.httpx.get", side_effect=[models_response, model_info_response]) as get:
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "einfra",
+                    "LLM_PROVIDER_EINFRA_NAME": "e-infra",
+                    "LLM_PROVIDER_EINFRA_BASE_URL": "https://llm.ai.e-infra.cz/v1",
+                    "LLM_PROVIDER_EINFRA_API_KEY": "secret-token",
+                    "LLM_PROVIDER_EINFRA_DEFAULT_MODEL": "mini",
+                    "LLM_PROVIDER_EINFRA_PUBLIC_MODELS": "*",
+                    "LLM_PROVIDER_EINFRA_DISCOVER_MODELS": "true",
+                }
+            )
+
+        einfra = providers[0]
+
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(einfra["model_presets"], ["mini", "thinker"])
+        self.assertEqual(
+            einfra["model_context_windows"],
+            {
+                "mini": 128000,
+                "thinker": 64000,
+            },
+        )
+
     def test_provider_api_key_can_read_private_config(self) -> None:
         providers = load_provider_configs(
             {

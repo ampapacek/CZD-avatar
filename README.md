@@ -22,7 +22,7 @@ For the default hosted `msearch` flow, define one or more providers in `.env`. A
 ```env
 LLM_PROVIDER=aiufal
 LLM_MODELS_CACHE_TTL_SECONDS=3600
-LLM_PROVIDERS=aiufal,openrouter
+LLM_PROVIDERS=aiufal,openrouter,einfra
 
 LLM_PROVIDER_AIUFAL_NAME=AI Ufal
 LLM_PROVIDER_AIUFAL_BASE_URL=https://ai.ufal.mff.cuni.cz/api
@@ -37,6 +37,13 @@ LLM_PROVIDER_OPENROUTER_API_KEY=your_openrouter_key
 LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL=openrouter/free
 LLM_PROVIDER_OPENROUTER_PUBLIC_MODELS=openrouter/free
 LLM_PROVIDER_OPENROUTER_DISCOVER_MODELS=true
+
+LLM_PROVIDER_EINFRA_NAME=e-infra
+LLM_PROVIDER_EINFRA_BASE_URL=https://llm.ai.e-infra.cz/v1
+LLM_PROVIDER_EINFRA_API_KEY=your_einfra_key
+LLM_PROVIDER_EINFRA_DEFAULT_MODEL=mini
+LLM_PROVIDER_EINFRA_PUBLIC_MODELS=*
+LLM_PROVIDER_EINFRA_DISCOVER_MODELS=true
 
 RETRIEVAL_BACKEND=msearch
 MSEARCH_USERNAME=your_username
@@ -56,6 +63,7 @@ Each provider can define:
 - an API key
 - a default model
 - a static model list, or `DISCOVER_MODELS=true` to fetch models from `MODELS_URL` or the provider’s `/models` endpoint
+- optional context-window discovery from `MODEL_INFO_URL` or the provider’s `/model/info` endpoint, using `model_info.context_size`
 - an optional public model list for browser use without an API key
 - an optional API key label for the UI
 
@@ -316,6 +324,7 @@ Important `.env` variables:
 - `LLM_PROVIDER_<ID>_PUBLIC_MODELS`
 - `LLM_PROVIDER_<ID>_MODELS`
 - `LLM_PROVIDER_<ID>_MODELS_URL`
+- `LLM_PROVIDER_<ID>_MODEL_INFO_URL`
 - `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
 - `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
 - `LLM_PROVIDER_<ID>_API_KEY_LABEL`
