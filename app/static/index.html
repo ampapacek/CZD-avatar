@@ -278,7 +278,7 @@
           </div>
           <div class="help-card">
             <h3>Prompty a {proměnné}</h3>
-            <p>Prompt může obsahovat proměnné ve tvaru <code>{length}</code>, <code>{custom_instructions}</code> nebo jiné vlastní proměnné (placeholdery). Aplikace z nich vytvoří ovládací prvky na hlavní stránce. Globální proměnné platí pro více promptů, <code>inline</code> proměnné patří jen ke konkrétnímu promptu. Pokud existuje globální i inline proměnná se stejným názvem, inline má přednost.</p>
+            <p>Prompt může obsahovat proměnné ve tvaru <code>{length}</code>, <code>{custom_instructions}</code> nebo jiné vlastní proměnné (placeholdery). Aplikace z nich vytvoří ovládací prvky na hlavní stránce. Globální proměnné platí pro více promptů, vlastní proměnné promptu patří jen ke konkrétnímu promptu. Pokud existuje globální i promptová proměnná se stejným názvem, promptová verze má přednost.</p>
           </div>
           <div class="help-card">
             <h3>Lokální a sdílené úpravy</h3>
@@ -332,8 +332,7 @@
         <div class="history-dialog-header">
           <div>
             <h2>Nastavení</h2>
-            <p>LLM API, lokální klíče, vlastní poskytovatel a prompty.</p>
-            <p>API klíče a admin heslo se ukládají jen v tomto prohlížeči.</p>
+            <p>Prompty, proměnné, tokenový rozpočet a přístup k modelům.</p>
           </div>
           <button id="closeSettingsButton" class="icon-button help-close" type="button" aria-label="Zavřít nastavení" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -343,39 +342,90 @@
           </button>
         </div>
         <div class="settings-body">
-          <section class="settings-section api-section-body">
-            <h3>API klíče providerů</h3>
-            <input id="llmBaseUrl" type="hidden" />
-            <input id="llmApiKey" type="hidden" />
-            <div id="providerApiKeyList" class="provider-key-list"></div>
-            <div class="inline-actions">
-              <button id="refreshModelsButton" class="secondary" type="button">Obnovit modely a kolekce</button>
-              <p id="modelRefreshStatus" class="field-note" role="status" aria-live="polite"></p>
-            </div>
-            <p class="field-note">Zkontroluje na serveru aktuálně dostupné modely providerů a kolekce mSearch a aktualizuje rozbalovací seznamy. API klíče zůstávají na serveru.</p>
-            <p class="field-note" id="llmPolicyNote">
-              Veřejné modely jsou jediná volba v rozbalovacím seznamu.
-            </p>
-            <p class="field-note">Klíč uložený v prohlížeči se použije místo klíče z `.env` pro daného providera. Klíče z `.env` se do polí nikdy nevypisují.</p>
+          <section class="settings-section settings-wp-section">
+            <label class="field">
+              <span>Pracovní balíček (WP)</span>
+              <select id="settingsWpSelect"></select>
+            </label>
+            <p class="field-note">Vybraný WP určuje, které prompty se zde upravují a pod jaký WP se ukládají. Hlavní stránku to nemění.</p>
           </section>
-
-          <section class="settings-section">
-            <h3>Admin přístup</h3>
-            <p class="field-note">Admin heslo zpřístupní všechny modely a dovolí upravovat sdílené prompty a proměnné na serveru.</p>
-            <div class="inline-actions">
-              <div class="secret-field">
-                <input id="llmUnlockPassword" type="password" placeholder="Admin heslo z .env" autocomplete="off" />
-                <button id="toggleUnlockPasswordButton" class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit heslo" title="Zobrazit heslo">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </button>
-              </div>
-              <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
-              <button id="logoutAdminButton" class="secondary" type="button">Odhlásit admina</button>
+          <section class="settings-section placeholder-defs-section">
+            <h3>Proměnné promptu</h3>
+            <p class="field-note">
+              Proměnné promptu se dají v promptu používat ve tvaru <code>{nazev}</code>.
+              Při dotazu se nahradí vybranou hodnotou. Například proměnná <code>{length}</code>
+              může na hlavní stránce vytvořit výběr délky odpovědi; textová proměnná zase pole,
+              kam uživatel napíše vlastní instrukce. Aplikace vytvoří ovládací prvky pro každou
+              použitou proměnnou, která má definici.
+            </p>
+            <p class="field-note">
+              Globální proměnné se dají použít ve více promptech, např. <code>{length}</code>
+              nebo <code>{custom_instructions}</code>. Sdílené proměnné jsou uložené na serveru
+              pro všechny uživatele; lokální proměnné platí jen v tomto prohlížeči. Pro sdílení
+              zaškrtni v editoru proměnné „Sdílet s ostatními“.
+            </p>
+            <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
+            <p id="globalPlaceholderDefsStatus" class="field-note placeholder-defs-status" role="status" aria-live="polite"></p>
+            <div class="prompt-actions">
+              <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
             </div>
-            <p id="unlockModelsStatus" class="field-note unlock-status" role="status" aria-live="polite"></p>
+          </section>
+          <section class="settings-section prompt-section-body">
+            <h3>Prompty</h3>
+            <p class="field-note">
+              Klikni na „Nový prázdný“, pokud chceš vytvořit nový prompt/profil. Můžeš také upravit
+              vybraný prompt přímo v textových polích a uložit ho jako nový. Zaškrtnutí
+              „Sdílet s ostatními“ uloží prompt/profil na server, aby ho mohli používat i ostatní.
+            </p>
+            <div class="prompt-controls">
+              <label class="field">
+                <span>Uložený prompt</span>
+                <select id="promptPreset"></select>
+              </label>
+              <div class="prompt-actions">
+                <button id="newPromptButton" class="secondary" type="button">Nový prázdný</button>
+                <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
+              </div>
+            </div>
+            <label class="field prompt-editor">
+              <span>Systémový prompt</span>
+              <textarea id="systemPrompt" rows="12"></textarea>
+            </label>
+            <label class="field prompt-editor">
+              <span>Uživatelský prompt</span>
+              <textarea id="userPromptTemplate" rows="8"></textarea>
+            </label>
+            <p class="field-note">
+              Systémový prompt nastavuje roli a pravidla odpovídání. Uživatelský prompt je šablona dotazu,
+              do které se obvykle vkládá <code>{question}</code>, <code>{retrieved_snippets}</code>
+              a další proměnné.
+            </p>
+            <p id="promptTemplateWarning" class="prompt-template-warning" hidden></p>
+            <div class="prompt-save-panel">
+              <div class="prompt-save-row">
+                <div class="prompt-actions">
+                  <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
+                  <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
+                </div>
+                <label class="field inline-field prompt-share-toggle">
+                  <input id="sharePromptOnServer" type="checkbox" />
+                  <span>Sdílet s ostatními</span>
+                </label>
+              </div>
+              <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
+              <p id="promptPresetStatus" class="field-note prompt-preset-status" role="status" aria-live="polite"></p>
+            </div>
+            <div class="placeholder-defs-inline">
+              <h4>Vlastní proměnné promptu</h4>
+              <p class="field-note">
+                Tyto proměnné patří jen k vybranému promptu. Pokud mají stejný název jako
+                nějaká globální proměnná, použije se tato promptová verze.
+              </p>
+              <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
+              <div class="prompt-actions">
+                <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat proměnnou promptu</button>
+              </div>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -411,6 +461,42 @@
               </label>
             </div>
             <p class="field-note">Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>Admin přístup</h3>
+            <p class="field-note">Admin heslo zpřístupní všechny modely a dovolí upravovat sdílené prompty a proměnné na serveru. Ukládá se jen v tomto prohlížeči.</p>
+            <div class="inline-actions">
+              <div class="secret-field">
+                <input id="llmUnlockPassword" type="password" placeholder="Admin heslo z .env" autocomplete="off" />
+                <button id="toggleUnlockPasswordButton" class="secret-toggle" type="button" data-toggle-secret aria-label="Zobrazit heslo" title="Zobrazit heslo">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </button>
+              </div>
+              <button id="unlockModelsButton" class="secondary" type="button">Odemknout</button>
+              <button id="logoutAdminButton" class="secondary" type="button">Odhlásit admina</button>
+            </div>
+            <p id="unlockModelsStatus" class="field-note unlock-status" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-section api-section-body">
+            <h3>API klíče providerů</h3>
+            <p class="field-note">API klíče se ukládají jen v tomto prohlížeči.</p>
+            <input id="llmBaseUrl" type="hidden" />
+            <input id="llmApiKey" type="hidden" />
+            <div id="providerApiKeyList" class="provider-key-list"></div>
+            <div class="inline-actions">
+              <button id="refreshModelsButton" class="secondary" type="button">Obnovit modely a kolekce</button>
+              <p id="modelRefreshStatus" class="field-note" role="status" aria-live="polite"></p>
+            </div>
+            <p class="field-note">Zkontroluje na serveru aktuálně dostupné modely providerů a kolekce mSearch a aktualizuje rozbalovací seznamy. API klíče zůstávají na serveru.</p>
+            <p class="field-note" id="llmPolicyNote">
+              Veřejné modely jsou jediná volba v rozbalovacím seznamu.
+            </p>
+            <p class="field-note">Klíč uložený v prohlížeči se použije místo klíče z `.env` pro daného providera. Klíče z `.env` se do polí nikdy nevypisují.</p>
           </section>
 
           <section class="settings-section">
@@ -450,75 +536,6 @@
               <textarea id="customProviderModels" rows="4" placeholder="Jeden model na řádek, nebo oddělené čárkou."></textarea>
             </label>
             <p class="field-note">Vlastní poskytovatel se objeví v rozbalovacím seznamu `Poskytovatel` na hlavní stránce. U něj je volba `Jiný model` dostupná vždy.</p>
-          </section>
-
-          <section class="settings-section settings-wp-section">
-            <label class="field">
-              <span>Pracovní balíček (WP)</span>
-              <select id="settingsWpSelect"></select>
-            </label>
-            <p class="field-note">Vybraný WP určuje, které prompty se zde upravují a pod jaký WP se ukládají. Hlavní stránku to nemění.</p>
-          </section>
-          <section class="settings-section placeholder-defs-section">
-            <h3>Proměnné promptu</h3>
-            <p class="field-note">
-              Globální proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>.
-              Sdílené proměnné se ukládají na serveru pro všechny; lokální jen v tomto prohlížeči.
-              Pokud má prompt vlastní proměnnou se stejným názvem jako globální proměnná,
-              použije se verze z promptu.
-            </p>
-            <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
-            <p id="globalPlaceholderDefsStatus" class="field-note placeholder-defs-status" role="status" aria-live="polite"></p>
-            <div class="prompt-actions">
-              <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
-            </div>
-          </section>
-          <section class="settings-section prompt-section-body">
-            <h3>Prompty</h3>
-            <div class="prompt-controls">
-              <label class="field">
-                <span>Uložený prompt</span>
-                <select id="promptPreset"></select>
-              </label>
-              <div class="prompt-actions">
-                <button id="newPromptButton" class="secondary" type="button">Nový prázdný</button>
-                <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
-              </div>
-            </div>
-            <label class="field prompt-editor">
-              <span>Systémový prompt</span>
-              <textarea id="systemPrompt" rows="12"></textarea>
-            </label>
-            <label class="field prompt-editor">
-              <span>Plný prompt</span>
-              <textarea id="userPromptTemplate" rows="8"></textarea>
-            </label>
-            <p id="promptTemplateWarning" class="prompt-template-warning" hidden></p>
-            <div class="placeholder-defs-inline">
-              <h4>Vlastní proměnné tohoto promptu (inline)</h4>
-              <p class="field-note">
-                Inline proměnné přebijí globální. Uloží se do promptu při „Uložit jako nový“
-                nebo „Aktualizovat vybraný“.
-              </p>
-              <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
-              <div class="prompt-actions">
-                <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat inline proměnnou</button>
-              </div>
-            </div>
-            <div class="prompt-save-panel">
-              <div class="prompt-save-row">
-                <div class="prompt-actions">
-                  <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
-                  <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
-                </div>
-                <label class="field inline-field prompt-share-toggle">
-                  <input id="sharePromptOnServer" type="checkbox" />
-                  <span>Sdílet s ostatními</span>
-                </label>
-              </div>
-              <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
-              <p id="promptPresetStatus" class="field-note prompt-preset-status" role="status" aria-live="polite"></p>
-            </div>
           </section>
         </div>
       </div>
@@ -578,7 +595,7 @@
             <div class="placeholder-def-footer-row">
               <label class="field inline-field" id="placeholderDefShareField" hidden>
                 <input id="placeholderDefShareOnServer" type="checkbox" />
-                <span>Sdílet na serveru</span>
+                <span>Sdílet s ostatními</span>
               </label>
               <div class="prompt-actions" id="placeholderDefActions"></div>
             </div>
