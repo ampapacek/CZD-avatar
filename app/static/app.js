@@ -178,6 +178,7 @@ const KNOWN_PROMPT_VARIABLES = new Set([
   "custom_instructions",
 ]);
 const CODE_FLOOR_PLACEHOLDERS = new Set(["length", "custom_instructions"]);
+const SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE = "Nejdřív ulož prompt jako nový. Abys mohl přidat nové proměnné.";
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
@@ -2180,23 +2181,22 @@ function renderInlinePlaceholderDefs() {
   if (!inlinePlaceholderDefsList) {
     return;
   }
-  const editable = Boolean(getPromptPresetById(activePromptPresetId));
+  const preset = getPromptPresetById(activePromptPresetId);
+  const editable = canEditPromptSpecificPlaceholders(activePromptPresetId);
   if (newInlinePlaceholderButton) {
     newInlinePlaceholderButton.disabled = !editable;
   }
-  if (!editable) {
+  if (!preset) {
     inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Nejdřív vyber prompt.</p>`;
     return;
   }
   const inline = activePromptInlinePlaceholderDefs();
   const names = Object.keys(inline).sort();
-  // Inline defs on server/built-in/draft prompts live only in memory until the
-  // prompt itself is saved.
-  const unsavedNote = (!isLocalPromptPreset(activePromptPresetId) || isServerPromptPreset(activePromptPresetId))
-    ? `<p class="field-note unsaved-note">Změny inline proměnných se uloží až po uložení promptu („Uložit jako nový“ / „Aktualizovat“).</p>`
+  const disabledNote = !editable
+    ? `<p class="field-note unsaved-note">${SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE}</p>`
     : "";
   if (!names.length) {
-    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>${unsavedNote}`;
+    inlinePlaceholderDefsList.innerHTML = `<p class="field-note">Tento prompt nemá žádné vlastní proměnné.</p>${disabledNote}`;
     return;
   }
   inlinePlaceholderDefsList.innerHTML = `${names
@@ -2208,15 +2208,17 @@ function renderInlinePlaceholderDefs() {
           <div class="placeholder-def-meta">
             <strong>${escapeHtml(def.label || name)}</strong>
             <code>{${escapeHtml(name)}}</code>
-            <span class="field-note">${escapeHtml(kindLabel)} · inline</span>
+            <span class="field-note">${escapeHtml(kindLabel)}</span>
           </div>
           <div class="inline-actions">
-            <button class="secondary" type="button" data-edit-inline="${escapeHtml(name)}">Upravit</button>
-            <button class="secondary danger-lite" type="button" data-delete-inline="${escapeHtml(name)}">Smazat</button>
+            ${editable
+              ? `<button class="secondary" type="button" data-edit-inline="${escapeHtml(name)}">Upravit</button>
+                 <button class="secondary danger-lite" type="button" data-delete-inline="${escapeHtml(name)}">Smazat</button>`
+              : ""}
           </div>
         </div>`;
     })
-    .join("")}${unsavedNote}`;
+    .join("")}${disabledNote}`;
 }
 
 // --- shared dialog editor ---------------------------------------------------
@@ -2254,7 +2256,7 @@ function placeholderScopeNote(scope) {
   if (scope === "global") {
     return "Globální proměnná. Může být lokální jen pro tento prohlížeč, nebo sdílená na serveru.";
   }
-  return "Inline proměnná tohoto promptu. Pokud má stejný název jako globální proměnná, použije se tato promptová verze.";
+  return "Promptová proměnná patří jen k vybranému promptu. Pokud má stejný název jako globální proměnná, použije se tato promptová verze.";
 }
 
 function updatePlaceholderShareVisibility() {
@@ -2286,7 +2288,7 @@ function updatePlaceholderShareVisibility() {
 }
 
 function renderPlaceholderDefActions(scope) {
-  const saveLabel = scope === "inline" ? "Uložit inline proměnnou" : "Uložit";
+  const saveLabel = scope === "inline" ? "Uložit proměnnou promptu" : "Uložit";
   placeholderDefActions.innerHTML =
     `<button class="primary" type="button" data-def-action="save">${escapeHtml(saveLabel)}</button>`;
 }
@@ -2383,7 +2385,7 @@ async function submitPlaceholderDefEditor() {
         setGlobalPlaceholderDefsStatus(`Proměnná "{${targetName}}" byla uložena lokálně.`, "success");
       }
     } else {
-      saveInlinePlaceholderDef(targetName, result.def);
+      await saveInlinePlaceholderDef(targetName, result.def);
     }
   } catch (error) {
     setPlaceholderDefError(error.message);
@@ -2424,32 +2426,37 @@ async function saveSharedGlobalPlaceholderDef(name, def) {
   }
 }
 
-// Inline defs live on the selected prompt preset. We mutate the in-memory preset's
-// placeholders map; the change persists when the user saves the prompt (save-as-new
-// / update), matching how the rest of the prompt editor works.
-function saveInlinePlaceholderDef(name, def) {
+// Prompt-scoped defs live on the selected prompt preset. Local and shared prompts
+// are persisted immediately; built-ins and unsaved drafts must first be saved as a
+// new prompt.
+async function saveInlinePlaceholderDef(name, def) {
   let preset = getPromptPresetById(activePromptPresetId);
   if (!preset) {
     throw new Error("Nejdřív vyber prompt.");
   }
-  if (!isLocalPromptPreset(activePromptPresetId) && !isServerPromptPreset(activePromptPresetId) && !isDraftPromptPreset(activePromptPresetId)) {
-    draftPromptPreset = currentPromptDraft({ id: preset.id, name: preset.name });
-    activePromptPresetId = draftPromptPreset.id;
-    preset = draftPromptPreset;
+  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
+    throw new Error(SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE);
   }
   if (!preset.placeholders || typeof preset.placeholders !== "object" || Array.isArray(preset.placeholders)) {
     preset.placeholders = {};
   }
+  const previousPlaceholders = { ...preset.placeholders };
   const normalized = normalizePlaceholderDef(name, def);
   if (!normalized) {
     throw new Error("Proměnnou se nepodařilo uložit.");
   }
   preset.placeholders[normalized.name] = normalized.def;
-  // Persist immediately for editable local presets so an inline def is not lost if
-  // the user forgets to re-save; server/built-in/draft prompts persist on the
-  // next prompt save.
   if (isLocalPromptPreset(activePromptPresetId)) {
     persistLocalPromptPresets();
+    setPromptPresetStatus("Proměnná promptu byla uložena lokálně.", "success");
+  } else if (isServerPromptPreset(activePromptPresetId)) {
+    try {
+      await saveCurrentPromptPreset({ mode: "update" });
+    } catch (error) {
+      preset.placeholders = previousPlaceholders;
+      throw error;
+    }
+    setPromptPresetStatus("Proměnná promptu byla uložena do sdíleného promptu.", "success");
   }
 }
 
@@ -2478,14 +2485,27 @@ async function deleteSharedGlobalPlaceholderDef(name) {
   }
 }
 
-function deleteInlinePlaceholderDef(name) {
+async function deleteInlinePlaceholderDef(name) {
   const preset = getPromptPresetById(activePromptPresetId);
   if (!preset || !preset.placeholders) {
     return;
   }
+  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
+    throw new Error(SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE);
+  }
+  const previousPlaceholders = { ...preset.placeholders };
   delete preset.placeholders[name];
   if (isLocalPromptPreset(activePromptPresetId)) {
     persistLocalPromptPresets();
+    setPromptPresetStatus("Proměnná promptu byla smazána lokálně.", "success");
+  } else if (isServerPromptPreset(activePromptPresetId)) {
+    try {
+      await saveCurrentPromptPreset({ mode: "update" });
+    } catch (error) {
+      preset.placeholders = previousPlaceholders;
+      throw error;
+    }
+    setPromptPresetStatus("Proměnná promptu byla smazána ze sdíleného promptu.", "success");
   }
 }
 
@@ -2494,7 +2514,8 @@ newGlobalPlaceholderButton?.addEventListener("click", () => {
   openPlaceholderDefEditor({ scope: "global", originalName: "" }, null);
 });
 newInlinePlaceholderButton?.addEventListener("click", () => {
-  if (!getPromptPresetById(activePromptPresetId)) {
+  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
+    setPromptPresetStatus(SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE, "error");
     return;
   }
   openPlaceholderDefEditor({ scope: "inline", originalName: "" }, null);
@@ -2554,11 +2575,15 @@ inlinePlaceholderDefsList?.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest("[data-delete-inline]");
   if (deleteButton) {
     const name = deleteButton.dataset.deleteInline;
-    if (!window.confirm(`Smazat inline proměnnou "${name}"?`)) {
+    if (!window.confirm(`Smazat proměnnou promptu "${name}"?`)) {
       return;
     }
-    deleteInlinePlaceholderDef(name);
-    await refreshAfterPlaceholderDefChange();
+    try {
+      await deleteInlinePlaceholderDef(name);
+      await refreshAfterPlaceholderDefChange();
+    } catch (error) {
+      setPromptPresetStatus(error.message, "error");
+    }
   }
 });
 
@@ -2736,6 +2761,9 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   deletePromptButton.disabled = !canDeletePromptPreset(resolvedId);
   updatePromptButton.disabled = !getPromptPresetById(resolvedId);
   updatePromptButton.title = "";
+  if (newInlinePlaceholderButton) {
+    newInlinePlaceholderButton.disabled = !canEditPromptSpecificPlaceholders(resolvedId);
+  }
 }
 
 function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
@@ -2813,6 +2841,10 @@ function isDraftPromptPreset(presetId) {
 
 function canDeletePromptPreset(presetId) {
   return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId) || isDraftPromptPreset(presetId);
+}
+
+function canEditPromptSpecificPlaceholders(presetId) {
+  return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
 }
 
 // Built-in prompts are shipped per WP by the backend (appSettings.wps). Each may
