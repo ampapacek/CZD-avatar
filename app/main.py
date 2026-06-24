@@ -333,6 +333,15 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
         live = grouped.get(wp_collection_prefix(wp["id"])) or []
         if not live:
             continue
+        static_collections = wp["collections"]
+        configured_default = next(
+            (
+                collection
+                for collection in static_collections
+                if collection["id"] == wp["default_collection_id"]
+            ),
+            None,
+        )
         wp["collections"] = [
             {
                 "id": entry["collection_id"],
@@ -341,9 +350,28 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
             }
             for entry in live
         ]
-        # Default to the newest live version (the static default id no longer maps).
-        wp["default_collection_id"] = live[0]["collection_id"]
+        default_live = _configured_default_live_collection(configured_default, live)
+        # Prefer the configured default when it is present in the live list;
+        # otherwise default to the newest live version.
+        wp["default_collection_id"] = (default_live or live[0])["collection_id"]
     return payload
+
+
+def _configured_default_live_collection(
+    configured: object,
+    live: list[dict[str, str]],
+) -> dict[str, str] | None:
+    if not isinstance(configured, dict):
+        return None
+
+    configured_label = str(configured.get("label") or "").strip()
+    configured_msearch_id = str(configured.get("msearch_collection_id") or "").strip()
+    for entry in live:
+        if configured_label and entry["collection_name"] == configured_label:
+            return entry
+        if configured_msearch_id and entry["collection_id"] == configured_msearch_id:
+            return entry
+    return None
 
 
 @app.post("/llm-providers/refresh")

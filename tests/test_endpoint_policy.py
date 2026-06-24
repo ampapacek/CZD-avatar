@@ -83,6 +83,36 @@ class PolicyErrorStatusTests(unittest.TestCase):
             all(isinstance(provider.get("model_context_windows"), dict) for provider in payload["llm_providers"])
         )
 
+    def test_settings_prefers_configured_collection_over_newest_live(self) -> None:
+        original_live_collections = main.pipeline.msearch_retriever.live_collections_by_prefix
+        main.pipeline.msearch_retriever.live_collections_by_prefix = lambda: {
+            "wp1": [
+                {
+                    "collection_id": "newest-id",
+                    "collection_name": "wp1-histoedu-2026-06-01",
+                    "last_modified": "2026-06-01",
+                },
+                {
+                    "collection_id": "configured-id",
+                    "collection_name": "wp1-histoedu-v2026-02",
+                    "last_modified": "2026-02-01",
+                },
+                {
+                    "collection_id": "older-id",
+                    "collection_name": "wp1-histoedu-2025-10-22",
+                    "last_modified": "2025-10-22",
+                },
+            ]
+        }
+        try:
+            response = self.client.get("/settings")
+        finally:
+            main.pipeline.msearch_retriever.live_collections_by_prefix = original_live_collections
+
+        self.assertEqual(response.status_code, 200, response.text)
+        wp1 = next(wp for wp in response.json()["wps"] if wp["id"] == "WP1-historie")
+        self.assertEqual(wp1["default_collection_id"], "configured-id")
+
 
 if __name__ == "__main__":
     unittest.main()
