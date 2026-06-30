@@ -1,6 +1,6 @@
-# rag-avatar
+# CZD-avatar
 
-`rag-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
+`czd-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
 
 The app is organized around a top-level **WP (work package) selector** (`WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`). Each WP scopes its own built-in prompts, document collections, and optional prepared/random question file. WP1 carries the Czech-history setup; the other WPs ship neutral starter prompts. A few places are still hardcoded for the Czech-history collection (some collection assets, example questions, helper scripts). The underlying RAG pipeline is topic-agnostic.
 
