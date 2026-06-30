@@ -132,6 +132,8 @@ const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
 const conversationSources = document.querySelector("#conversationSources");
+const conversationRetrievalInfo = document.querySelector("#conversationRetrievalInfo");
+const conversationRewriteQuery = document.querySelector("#conversationRewriteQuery");
 const conversationForm = document.querySelector("#conversationForm");
 const conversationQuestion = document.querySelector("#conversationQuestion");
 const conversationSubmitButton = document.querySelector("#conversationSubmitButton");
@@ -732,6 +734,15 @@ conversationForm.addEventListener("submit", async (event) => {
 conversationCancelButton?.addEventListener("click", () => {
   conversationCancelButton.disabled = true;
   activeConversationController?.abort();
+});
+conversationRewriteQuery?.addEventListener("change", () => {
+  const conversation = ensureSelectedConversation();
+  updateConversation({
+    ...conversation,
+    rewrite_query_for_retrieval: conversationRewriteQuery.checked,
+    updatedAt: new Date().toISOString(),
+  });
+  renderConversationWorkspace();
 });
 document.addEventListener("click", pulseSourceCardFromCitation);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
@@ -3813,10 +3824,11 @@ function createConversation() {
   const conversation = {
     id: Date.now(),
     title: "Nová konverzace",
-	    createdAt: new Date().toISOString(),
-	    updatedAt: new Date().toISOString(),
-	    conversation_summary: "",
-	    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    conversation_summary: "",
+    rewrite_query_for_retrieval: true,
+    messages: [],
   };
   conversations.unshift(conversation);
   const savedConversations = setConversationEntries(conversations);
@@ -3835,6 +3847,10 @@ function ensureSelectedConversation() {
     selectedConversationId = conversations[0].id;
   }
   return conversations.find((entry) => entry.id === selectedConversationId) || conversations[0];
+}
+
+function conversationRewriteEnabled(conversation) {
+  return conversation?.rewrite_query_for_retrieval !== false;
 }
 
 function updateConversation(updatedConversation) {
@@ -3906,6 +3922,9 @@ function renderConversationDetail(conversation) {
   const latestSources =
     latestAssistant?.sources?.length ? latestAssistant.sources : chunksToSources(latestAssistant?.retrieved_chunks || []);
   const latestChunks = latestAssistant?.retrieved_chunks || [];
+  if (conversationRewriteQuery) {
+    conversationRewriteQuery.checked = conversationRewriteEnabled(conversation);
+  }
 
   conversationMeta.innerHTML = `
     <div>
@@ -3929,10 +3948,66 @@ function renderConversationDetail(conversation) {
     conversationSources,
     latestSources,
     latestChunks,
-    latestAssistant?.question || conversationQuestion.value,
+    conversationRetrievalQuery(latestAssistant, conversationQuestion.value),
     extractCitationIds(latestAssistant?.content || ""),
     "conversation-source",
   );
+  renderConversationRetrievalInfo(latestAssistant);
+}
+
+function conversationOriginalQuestion(message, fallback = "") {
+  return message?.original_question || message?.question || fallback || "";
+}
+
+function conversationRetrievalQuery(message, fallback = "") {
+  return message?.retrieval_query || conversationOriginalQuestion(message, fallback);
+}
+
+function renderConversationRetrievalInfo(message) {
+  if (!conversationRetrievalInfo) {
+    return;
+  }
+  if (!message) {
+    conversationRetrievalInfo.hidden = true;
+    conversationRetrievalInfo.innerHTML = "";
+    return;
+  }
+  const originalQuestion = conversationOriginalQuestion(message);
+  const retrievalQuery = conversationRetrievalQuery(message);
+  if (!originalQuestion && !retrievalQuery) {
+    conversationRetrievalInfo.hidden = true;
+    conversationRetrievalInfo.innerHTML = "";
+    return;
+  }
+  const rewritten = message.retrieval_query_was_rewritten === true;
+  conversationRetrievalInfo.hidden = false;
+  conversationRetrievalInfo.innerHTML = `
+    <div class="conversation-retrieval-info-row">
+      <span>Původní dotaz</span>
+      <strong>${escapeHtml(originalQuestion || retrievalQuery)}</strong>
+    </div>
+    <div class="conversation-retrieval-info-row">
+      <span>Dotaz pro vyhledávání</span>
+      <strong>${escapeHtml(retrievalQuery || originalQuestion)}</strong>
+    </div>
+    ${rewritten ? `<p>Dotaz byl upraven pro lepší vyhledání zdrojů.</p>` : ""}
+  `;
+}
+
+function retrievalInfoFromEvent(data = {}, fallbackQuestion = "", previous = null) {
+  const originalQuestion = data.original_question || data.question || previous?.original_question || fallbackQuestion || "";
+  const retrievalQuery = data.retrieval_query || previous?.retrieval_query || originalQuestion;
+  const rewritten =
+    data.retrieval_query_was_rewritten === true
+      ? true
+      : data.retrieval_query_was_rewritten === false
+        ? false
+        : previous?.retrieval_query_was_rewritten === true;
+  return {
+    original_question: originalQuestion,
+    retrieval_query: retrievalQuery,
+    retrieval_query_was_rewritten: rewritten,
+  };
 }
 
 function renderConversationMessage(message) {
@@ -4074,6 +4149,7 @@ async function submitConversationTurn() {
     conversationCancelButton.disabled = false;
   }
   const conversation = ensureSelectedConversation();
+  const rewriteQueryForRetrieval = conversationRewriteEnabled(conversation);
   const userMessage = {
     role: "user",
     content: prompt,
@@ -4083,6 +4159,7 @@ async function submitConversationTurn() {
     ...conversation,
     title: conversation.messages.length ? conversation.title : shortenText(prompt, 64),
     updatedAt: new Date().toISOString(),
+    rewrite_query_for_retrieval: rewriteQueryForRetrieval,
     messages: [...conversation.messages, userMessage],
   };
   updateConversation(workingConversation);
@@ -4092,9 +4169,11 @@ async function submitConversationTurn() {
   let assistantText = "";
   let latestSources = [];
   let latestChunks = [];
+  let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
   const payload = buildRequestPayload({
     question: prompt,
     conversation_summary: conversation.conversation_summary || null,
+    rewrite_query_for_retrieval: rewriteQueryForRetrieval,
     conversation_history: conversation.messages.map((message) => ({
       role: message.role,
       content: message.content,
@@ -4103,21 +4182,70 @@ async function submitConversationTurn() {
   const sanitizedPayload = sanitizeHistorySettings(payload);
 
   try {
+    const handleConversationSources = (data) => {
+      latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
+      latestChunks = data.retrieved_chunks || [];
+      latestSources = data.sources || chunksToSources(latestChunks);
+      const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
+      const messages = [...liveConversation.messages];
+      const placeholderAssistant = messages[messages.length - 1];
+      if (placeholderAssistant?.role === "assistant") {
+        placeholderAssistant.content = assistantText;
+        placeholderAssistant.sources = latestSources;
+        placeholderAssistant.retrieved_chunks = latestChunks;
+        Object.assign(placeholderAssistant, latestRetrievalInfo);
+      } else {
+        messages.push({
+          role: "assistant",
+          question: prompt,
+          ...latestRetrievalInfo,
+          content: assistantText,
+          settings: sanitizedPayload,
+          sources: latestSources,
+          retrieved_chunks: latestChunks,
+          omitted_chunks: [],
+          token_budget: null,
+          chunk_budget_warnings: [],
+          conversation_summary: liveConversation.conversation_summary || null,
+          model_used: payload.model,
+          upstream_model: null,
+          response_time_seconds: null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      updateConversation({
+        ...liveConversation,
+        rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+        updatedAt: new Date().toISOString(),
+        messages,
+      });
+      renderConversationWorkspace();
+    };
     await chatRequest(payload, {
+      onPreliminarySources(data) {
+        handleConversationSources(data);
+      },
       onSources(data) {
-        latestChunks = data.retrieved_chunks || [];
-        latestSources = data.sources || chunksToSources(latestChunks);
-        const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
+        handleConversationSources(data);
+      },
+      onToken(token) {
+        assistantText += token;
+        const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
+        if (!liveConversation) {
+          return;
+        }
         const messages = [...liveConversation.messages];
-        const placeholderAssistant = messages[messages.length - 1];
-        if (placeholderAssistant?.role === "assistant") {
-          placeholderAssistant.content = assistantText;
-          placeholderAssistant.sources = latestSources;
-          placeholderAssistant.retrieved_chunks = latestChunks;
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage?.role === "assistant") {
+          lastMessage.content = assistantText;
+          lastMessage.sources = latestSources;
+          lastMessage.retrieved_chunks = latestChunks;
+          Object.assign(lastMessage, latestRetrievalInfo);
         } else {
           messages.push({
             role: "assistant",
             question: prompt,
+            ...latestRetrievalInfo,
             content: assistantText,
             settings: sanitizedPayload,
             sources: latestSources,
@@ -4134,50 +4262,20 @@ async function submitConversationTurn() {
         }
         updateConversation({
           ...liveConversation,
+          rewrite_query_for_retrieval: rewriteQueryForRetrieval,
           updatedAt: new Date().toISOString(),
           messages,
         });
         renderConversationWorkspace();
       },
-      onToken(token) {
-        assistantText += token;
-        const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
-        if (!liveConversation) {
-          return;
-        }
-        const messages = [...liveConversation.messages];
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage?.role === "assistant") {
-          lastMessage.content = assistantText;
-          lastMessage.sources = latestSources;
-          lastMessage.retrieved_chunks = latestChunks;
-        } else {
-          messages.push({
-            role: "assistant",
-            question: prompt,
-            content: assistantText,
-            settings: sanitizedPayload,
-            sources: latestSources,
-            retrieved_chunks: latestChunks,
-            omitted_chunks: [],
-            token_budget: null,
-            chunk_budget_warnings: [],
-            conversation_summary: liveConversation.conversation_summary || null,
-            model_used: payload.model,
-            upstream_model: null,
-            response_time_seconds: null,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        updateConversation({ ...liveConversation, updatedAt: new Date().toISOString(), messages });
-        renderConversationWorkspace();
-      },
       onDone(data) {
+        latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
         const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
         const messages = [...liveConversation.messages];
         const assistantMessage = {
           role: "assistant",
           question: prompt,
+          ...latestRetrievalInfo,
           content: data.answer || assistantText,
           settings: sanitizedPayload,
           sources: data.sources || latestSources,
@@ -4199,6 +4297,7 @@ async function submitConversationTurn() {
         updateConversation({
           ...liveConversation,
           conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
+          rewrite_query_for_retrieval: rewriteQueryForRetrieval,
           updatedAt: new Date().toISOString(),
           messages,
         });
@@ -4213,11 +4312,13 @@ async function submitConversationTurn() {
     updateConversation({
       ...failedConversation,
       updatedAt: new Date().toISOString(),
+      rewrite_query_for_retrieval: rewriteQueryForRetrieval,
       messages: [
         ...failedConversation.messages,
         {
           role: "assistant",
           question: prompt,
+          ...latestRetrievalInfo,
           content: `Nepodařilo se dokončit odpověď: ${error.message}`,
           settings: sanitizedPayload,
           sources: [],

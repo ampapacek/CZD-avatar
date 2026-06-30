@@ -670,7 +670,17 @@
             </form>
           </section>
           <aside class="conversation-sources-panel">
-            <h3>Zdroje poslední odpovědi</h3>
+            <div class="conversation-sources-header">
+              <h3>Zdroje poslední odpovědi</h3>
+              <label class="conversation-rewrite-toggle">
+                <input id="conversationRewriteQuery" type="checkbox" checked />
+                <span class="conversation-rewrite-copy">
+                  <strong>Upravit dotazy pro vyhledání zdrojů</strong>
+                  <small>Nejdříve model přeformuluje otázku pro lepší vyhledání relevantních dokumentů.</small>
+                </span>
+              </label>
+            </div>
+            <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
             <div id="conversationSources" class="sources conversation-sources"></div>
           </aside>
         </div>

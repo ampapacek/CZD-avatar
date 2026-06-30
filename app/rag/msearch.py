@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,7 @@ from app.rag.wp_config import gated_wp_collection_prefixes
 # discovery cache (``llm_providers._discover_models_cached``): each page load
 # reads the settings payload, which reuses the cached list unless it is stale.
 _COLLECTIONS_CACHE_TTL_SECONDS = 3600.0
+_MIN_FALLBACK_UNIQUE_WORDS = 10
 
 
 @dataclass
@@ -128,6 +130,19 @@ class MSearchRetriever:
         if rescore_method and rescore_method != "none":
             payload["rescore_method"] = rescore_method
 
+        data = self._search(payload)
+        records = _records_from_response(data, top_k)
+        if len(records) < top_k and _document_count(data) >= top_k:
+            expanded_payload = {**payload, "max_results": top_k * 2}
+            data = self._search(expanded_payload)
+            records = _records_from_response(data, top_k * 2)
+        return _filter_by_thresholds(records, min_score, min_relative_score)[:top_k]
+
+    @property
+    def base_url(self) -> str:
+        return self.settings.msearch_base_url.rstrip("/")
+
+    def _search(self, payload: dict[str, Any]) -> dict[str, Any]:
         with httpx.Client(timeout=self.settings.msearch_timeout) as client:
             response = client.post(
                 f"{self.base_url}/msearch/collections/search",
@@ -136,13 +151,7 @@ class MSearchRetriever:
             )
             response.raise_for_status()
             data = response.json()
-
-        records = _records_from_response(data, max(top_k * 3, top_k))
-        return _filter_by_thresholds(records, min_score, min_relative_score)[:top_k]
-
-    @property
-    def base_url(self) -> str:
-        return self.settings.msearch_base_url.rstrip("/")
+        return data if isinstance(data, dict) else {}
 
 
 def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, Any]]:
@@ -160,6 +169,8 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
         score = _float(item.get("score"))
         text = _document_text(item, document)
         if not text:
+            continue
+        if not _string(document.get("content")) and _unique_word_count(text) < _MIN_FALLBACK_UNIQUE_WORDS:
             continue
 
         url = _string(document.get("url")).replace("https://storage.ufal.mff.cuni.cz//", "https://storage.ufal.mff.cuni.cz/")
@@ -188,6 +199,11 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
             }
         )
     return records
+
+
+def _document_count(data: dict[str, Any]) -> int:
+    documents = data.get("documents") if isinstance(data, dict) else None
+    return len(documents) if isinstance(documents, list) else 0
 
 
 def _document_text(item: dict[str, Any], document: dict[str, Any]) -> str:
@@ -224,6 +240,10 @@ def _document_text(item: dict[str, Any], document: dict[str, Any]) -> str:
         return "\n\n".join(texts)
 
     return ""
+
+
+def _unique_word_count(text: str) -> int:
+    return len({word.casefold() for word in re.findall(r"[^\W_]+", text)})
 
 
 def _group_collections_by_prefix(collections: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:

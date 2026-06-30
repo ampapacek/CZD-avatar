@@ -796,6 +796,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             rerank_enabled=request.rerank_enabled,
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
+            rewrite_query_for_retrieval=request.rewrite_query_for_retrieval,
         )
     except PromptBudgetError as exc:
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
@@ -819,8 +820,17 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
-            candidates = pipeline.retrieve_candidates(
+            retrieval_query = pipeline.rewrite_query_for_retrieval(
                 request.question,
+                conversation_history=request.conversation_history,
+                conversation_summary=request.conversation_summary,
+                enabled=request.rewrite_query_for_retrieval,
+                model=resolved_model,
+                api_key=resolved_api_key,
+                base_url=resolved_base_url,
+            )
+            candidates = pipeline.retrieve_candidates(
+                retrieval_query,
                 request.top_k,
                 dense_weight=request.dense_weight,
                 bm25_weight=request.bm25_weight,
@@ -845,6 +855,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                     "preliminary_sources",
                     {
                         "question": request.question,
+                        "original_question": request.question,
+                        "retrieval_query": retrieval_query,
+                        "retrieval_query_was_rewritten": retrieval_query != request.question,
                         "retrieved_chunks": baseline_payload,
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
                     },
@@ -895,6 +908,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "sources",
                 {
                     "question": request.question,
+                    "original_question": request.question,
+                    "retrieval_query": retrieval_query,
+                    "retrieval_query_was_rewritten": retrieval_query != request.question,
                     "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
@@ -923,6 +939,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             upstream_model = getattr(stream, "upstream_model", None) or resolved_model
             response = {
                 "answer": answer,
+                "original_question": request.question,
+                "retrieval_query": retrieval_query,
+                "retrieval_query_was_rewritten": retrieval_query != request.question,
                 "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                 "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
@@ -938,8 +957,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "generation_time_seconds": round(generation_seconds, 3),
             }
             logger.info(
-                "Streamed answer question=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
+                "Streamed answer question=%r retrieval_query=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
                 request.question,
+                retrieval_query,
                 length,
                 resolved_model,
                 elapsed,

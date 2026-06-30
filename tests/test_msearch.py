@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 
-from app.config import get_settings
-from app.rag.msearch import _group_collections_by_prefix, _records_from_response
+from app.config import Settings, get_settings
+from app.rag.msearch import MSearchRetriever, _group_collections_by_prefix, _records_from_response
 from app.rag.pipeline import RAGPipeline
 
 
@@ -54,6 +55,51 @@ class MSearchTextTests(unittest.TestCase):
         # Every retrieved chunk should carry real context, not a few keywords.
         self.assertGreater(len(text.split()), 20)
 
+    def test_passage_only_keyword_fragments_are_omitted(self) -> None:
+        response = {
+            "documents": [
+                {
+                    "document_id": "tiny-1",
+                    "score": 0.9,
+                    "source": "key",
+                    "passages": [
+                        {"text": "Josefa Toufara"},
+                        {"text": "Josef-Toufar"},
+                        {"text": "Toufar a"},
+                    ],
+                    "document": {"id": "tiny-1", "title": "tiny.pdf", "content": ""},
+                },
+                {
+                    "document_id": "tiny-2",
+                    "score": 0.8,
+                    "source": "key",
+                    "passages": [
+                        {"text": "Josef Toufar Josef Toufar Josef Toufar Josef Toufar Josef Toufar Josef Toufar"},
+                    ],
+                    "document": {"id": "tiny-2", "title": "repeated.pdf", "content": ""},
+                },
+                {
+                    "document_id": "useful-1",
+                    "score": 0.7,
+                    "source": "key",
+                    "passages": [
+                        {
+                            "text": (
+                                "Během vyšetřování Josefa Toufara v únoru 1950 vznikla "
+                                "propaganda kolem událostí v Číhošti."
+                            )
+                        },
+                    ],
+                    "document": {"id": "useful-1", "title": "useful.pdf", "content": ""},
+                },
+            ],
+        }
+
+        records = _records_from_response(response, limit=10)
+
+        self.assertEqual([record["chunk_id"] for record in records], ["msearch:useful-1"])
+        self.assertEqual(records[0]["citation_id"], "Z1")
+
 
 class CollectionGroupingTests(unittest.TestCase):
     def test_groups_all_versions_per_wp_newest_first(self) -> None:
@@ -72,6 +118,101 @@ class CollectionGroupingTests(unittest.TestCase):
         self.assertEqual([entry["collection_id"] for entry in grouped["wp3"]], ["c"])
         self.assertNotIn("wp2", grouped)
         self.assertNotIn("wp4", grouped)
+
+
+def _full_doc(index: int) -> dict:
+    return {
+        "document_id": f"doc-{index}",
+        "score": 1.0 - (index / 100),
+        "source": "sem",
+        "document": {
+            "id": f"doc-{index}",
+            "title": f"doc-{index}.pdf",
+            "content": f"Full chunk text for document {index} with enough context.",
+        },
+    }
+
+
+def _tiny_doc(index: int) -> dict:
+    return {
+        "document_id": f"tiny-{index}",
+        "score": 1.0 - (index / 100),
+        "source": "key",
+        "passages": [{"text": "Josefa Toufara"}],
+        "document": {"id": f"tiny-{index}", "title": f"tiny-{index}.pdf", "content": ""},
+    }
+
+
+class _FakeMSearchResponse:
+    def __init__(self, data):
+        self.data = data
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.data
+
+
+class _FakeMSearchClient:
+    payloads = []
+    documents = []
+
+    def __init__(self, *args, **kwargs):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def post(self, *args, **kwargs):
+        payload = kwargs["json"]
+        self.payloads.append(payload)
+        return _FakeMSearchResponse({"documents": self.documents[: payload["max_results"]]})
+
+
+class MSearchRetrieveTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _FakeMSearchClient.payloads = []
+        _FakeMSearchClient.documents = []
+
+    def _retriever(self) -> MSearchRetriever:
+        settings = Settings(
+            MSEARCH_USERNAME="user",
+            MSEARCH_PASSWORD="password",
+            MSEARCH_BASE_URL="https://msearch.example.test",
+        )
+        return MSearchRetriever(settings)
+
+    def test_retrieve_asks_for_top_k_when_first_page_is_usable(self) -> None:
+        retriever = self._retriever()
+        _FakeMSearchClient.documents = [_full_doc(index) for index in range(8)]
+        with patch("app.rag.msearch.httpx.Client", _FakeMSearchClient):
+            records = retriever.retrieve("query", top_k=4)
+
+        self.assertEqual([payload["max_results"] for payload in _FakeMSearchClient.payloads], [4])
+        self.assertEqual(len(records), 4)
+
+    def test_retrieve_expands_once_when_first_page_loses_filtered_fragments(self) -> None:
+        retriever = self._retriever()
+        _FakeMSearchClient.documents = [
+            _tiny_doc(0),
+            _tiny_doc(1),
+            _full_doc(2),
+            _full_doc(3),
+            _full_doc(4),
+            _full_doc(5),
+            _full_doc(6),
+            _full_doc(7),
+        ]
+        with patch("app.rag.msearch.httpx.Client", _FakeMSearchClient):
+            records = retriever.retrieve("query", top_k=4)
+
+        self.assertEqual([payload["max_results"] for payload in _FakeMSearchClient.payloads], [4, 8])
+        self.assertEqual(len(records), 4)
+        self.assertEqual([record["chunk_id"] for record in records], ["msearch:doc-2", "msearch:doc-3", "msearch:doc-4", "msearch:doc-5"])
 
 
 class _RecordingMSearchRetriever:

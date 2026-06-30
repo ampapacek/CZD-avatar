@@ -39,6 +39,7 @@ class RetrieveRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     wp_id: str | None = None
+    rewrite_query_for_retrieval: bool = False
     # Generic {placeholderName: value} map for the parameter placeholders the
     # selected prompt uses (select -> chosen option name; text -> typed string).
     selections: dict[str, str] = Field(default_factory=dict)
@@ -191,6 +192,9 @@ class RetrieveResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    original_question: str | None = None
+    retrieval_query: str | None = None
+    retrieval_query_was_rewritten: bool = False
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]
     used_chunks: list[RetrievedChunk] = Field(default_factory=list)

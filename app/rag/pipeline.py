@@ -54,6 +54,16 @@ def _shorten(text: str, limit: int = 280) -> str:
     return compact[: limit - 1].rstrip() + "…"
 
 
+def _clean_retrieval_query(text: str) -> str:
+    query = " ".join((text or "").split()).strip()
+    if len(query) >= 2 and query[0] == query[-1] and query[0] in {'"', "'", "`"}:
+        query = query[1:-1].strip()
+    for prefix in ("Dotaz:", "Query:", "Search query:", "Vyhledávací dotaz:"):
+        if query.lower().startswith(prefix.lower()):
+            query = query[len(prefix) :].strip()
+    return query
+
+
 class RAGPipeline:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -456,6 +466,7 @@ class RAGPipeline:
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
+        rewrite_query_for_retrieval: bool = False,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -477,8 +488,17 @@ class RAGPipeline:
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
-        retrieved, baseline_retrieved = self.retrieve_with_baseline(
+        retrieval_query = self.rewrite_query_for_retrieval(
             question,
+            conversation_history=conversation_history or [],
+            conversation_summary=conversation_summary,
+            enabled=rewrite_query_for_retrieval,
+            model=resolved_model,
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+        )
+        retrieved, baseline_retrieved = self.retrieve_with_baseline(
+            retrieval_query,
             top_k,
             dense_weight=dense_weight,
             bm25_weight=bm25_weight,
@@ -519,8 +539,9 @@ class RAGPipeline:
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
-            "Generated answer question=%r length=%s model=%s response_time=%.2fs answer=%s",
+            "Generated answer question=%r retrieval_query=%r length=%s model=%s response_time=%.2fs answer=%s",
             question,
+            retrieval_query,
             length,
             resolved_model,
             elapsed,
@@ -528,6 +549,9 @@ class RAGPipeline:
         )
         return ChatResponse(
             answer=answer,
+            original_question=question,
+            retrieval_query=retrieval_query,
+            retrieval_query_was_rewritten=retrieval_query != question,
             sources=[_source_from_chunk(chunk) for chunk in budget.used_chunks],
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
             used_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
@@ -583,6 +607,66 @@ class RAGPipeline:
             budget.warnings.append(summary_warning)
         budget.conversation_summary_used = bool(effective_summary)
         return budget, effective_summary
+
+    def rewrite_query_for_retrieval(
+        self,
+        question: str,
+        *,
+        conversation_history: list[dict[str, str]] | None,
+        conversation_summary: str | None,
+        enabled: bool,
+        model: str,
+        api_key: str | None,
+        base_url: str | None,
+    ) -> str:
+        clean_question = question.strip()
+        if not enabled or not clean_question or not conversation_history:
+            return clean_question
+
+        context_parts: list[str] = []
+        clean_summary = (conversation_summary or "").strip()
+        if clean_summary:
+            context_parts.append(f"Shrnutí konverzace:\n{clean_summary}")
+
+        recent_turns = []
+        for turn in conversation_history[-8:]:
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                label = "Uživatel" if role == "user" else "Avatar"
+                recent_turns.append(f"{label}: {content}")
+        if recent_turns:
+            context_parts.append("Nedávné zprávy:\n" + "\n".join(recent_turns))
+        if not context_parts:
+            return clean_question
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite the latest user message into one standalone search query for document retrieval. "
+                    "Use only the provided conversation context. Include relevant names, events, dates, places, "
+                    "and concepts only when they appear in the context or are directly referred to by the latest "
+                    "message. Do not answer the question. Do not add outside facts or assumptions. Keep the same "
+                    "language as the latest user message. Return only the query text. If the latest message is "
+                    "already standalone, return it unchanged."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "\n\n".join(context_parts) + f"\n\nNejnovější zpráva uživatele:\n{clean_question}",
+            },
+        ]
+        try:
+            generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
+        except Exception as exc:
+            logger.warning("Retrieval query rewrite failed for question=%r: %s", clean_question, exc)
+            return clean_question
+
+        rewritten = _clean_retrieval_query(generation.answer)
+        if not rewritten:
+            return clean_question
+        return rewritten
 
     def close(self) -> None:
         if self._vector_store is not None:
