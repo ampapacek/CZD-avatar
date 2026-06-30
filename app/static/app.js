@@ -141,6 +141,15 @@ const conversationCancelButton = document.querySelector("#conversationCancelButt
 const newConversationButton = document.querySelector("#newConversationButton");
 const deleteConversationButton = document.querySelector("#deleteConversationButton");
 const closeConversationButton = document.querySelector("#closeConversationButton");
+const convWpSelect = document.querySelector("#convWpSelect");
+const convPromptSelect = document.querySelector("#convPromptSelect");
+const convProvider = document.querySelector("#convProvider");
+const convModel = document.querySelector("#convModel");
+const convCustomModelField = document.querySelector("#convCustomModelField");
+const convCustomModel = document.querySelector("#convCustomModel");
+const convContextWindowTokens = document.querySelector("#convContextWindowTokens");
+const convModelContextWindowNote = document.querySelector("#convModelContextWindowNote");
+const convPlaceholderControls = document.querySelector("#convPlaceholderControls");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsDialog = document.querySelector("#settingsDialog");
 const closeSettingsButton = document.querySelector("#closeSettingsButton");
@@ -211,6 +220,17 @@ let settingsWpId = "";
 // current control values (name -> value). Both are rebuilt on every prompt switch.
 let activePlaceholderDefs = {};
 let placeholderSelections = {};
+// Placeholder controls render into whichever container is active: the main page
+// by default, or the conversation settings bar while the conversation modal is
+// open. Swapping this lets the existing prompt/placeholder machinery target the
+// conversation container without duplicating it.
+let activePlaceholderContainer = placeholderControls;
+// While the conversation modal is open the global settings state (activeWpId,
+// active prompt, provider/model, placeholder selections, ...) represents the
+// ACTIVE conversation. mainSettingsBackup holds the main page's own settings so
+// they can be restored verbatim when the modal closes.
+let conversationSettingsActive = false;
+let mainSettingsBackup = null;
 // Browser-local global placeholder defs (name -> def), loaded from localStorage.
 let localPlaceholderDefs = {};
 let llmModelsUnlocked = false;
@@ -708,8 +728,7 @@ historyDialog.addEventListener("click", (event) => {
 });
 
 conversationButton.addEventListener("click", () => {
-  renderConversationWorkspace();
-  conversationDialog.showModal();
+  openConversationWorkspace();
 });
 closeConversationButton.addEventListener("click", () => {
   conversationDialog.close();
@@ -719,14 +738,68 @@ conversationDialog.addEventListener("click", (event) => {
     conversationDialog.close();
   }
 });
+// Centralize restore so it also covers closing via the Escape key.
+conversationDialog.addEventListener("close", () => {
+  restoreMainSettings();
+});
 newConversationButton.addEventListener("click", () => {
   createConversation();
+  if (conversationSettingsActive) {
+    applyConversationSettings(ensureSelectedConversation());
+  }
   renderConversationWorkspace();
   conversationQuestion.focus();
 });
 deleteConversationButton.addEventListener("click", () => {
   deleteSelectedConversation();
+  if (conversationSettingsActive) {
+    applyConversationSettings(ensureSelectedConversation());
+  }
 });
+convWpSelect?.addEventListener("change", () => {
+  // Changing WP resets prompt + collection to that WP's defaults. Uses a lighter
+  // apply than selectWp so the main page's shared retrieval controls (backend,
+  // top_k, weights) are never mutated from conversation mode.
+  applyConvWp(convWpSelect.value);
+  mirrorConversationControls();
+  updateConvModelContextWindowNote();
+  persistActiveConversationSettings();
+});
+convPromptSelect?.addEventListener("change", () => {
+  applyPromptPresetById(convPromptSelect.value);
+  mirrorConversationControls();
+  persistActiveConversationSettings();
+});
+convProvider?.addEventListener("change", () => {
+  llmProvider.value = convProvider.value;
+  loadProviderValues(convProvider.value, { preferStored: true });
+  refreshModelOptions(appSettings);
+  mirrorConversationControls();
+  resetConvContextWindowToSelectedModel();
+  updateConvModelContextWindowNote();
+  persistActiveConversationSettings();
+});
+convModel?.addEventListener("change", () => {
+  model.value = convModel.value;
+  updateCustomModelVisibility(customModelAllowed());
+  updateConvCustomModelVisibility();
+  resetConvContextWindowToSelectedModel();
+  updateConvModelContextWindowNote();
+  persistActiveConversationSettings();
+});
+convCustomModel?.addEventListener("input", () => {
+  customModel.value = convCustomModel.value;
+  updateConvModelContextWindowNote();
+  persistActiveConversationSettings();
+});
+convContextWindowTokens?.addEventListener("input", () => {
+  updateConvModelContextWindowNote();
+  persistActiveConversationSettings();
+});
+// Placeholder controls update the global placeholderSelections via their own
+// listeners; this delegated listener persists the result after they run.
+convPlaceholderControls?.addEventListener("input", persistActiveConversationSettings);
+convPlaceholderControls?.addEventListener("change", persistActiveConversationSettings);
 conversationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitConversationTurn();
@@ -1266,7 +1339,8 @@ function selectedProviderBaseUrl(providerId = llmProvider.value) {
   if (normalizedProviderId === CUSTOM_PROVIDER_ID) {
     return String(customProviderSettings().base_url || "").trim();
   }
-  return selectedProviderConfig()?.base_url || "";
+  const provider = getLlmProviders(appSettings).find((item) => item.id === normalizedProviderId);
+  return provider?.base_url || "";
 }
 
 function splitModelList(value) {
@@ -2624,16 +2698,16 @@ placeholderDefForm?.addEventListener("submit", (event) => event.preventDefault()
 function renderPlaceholderControls() {
   activePlaceholderDefs = resolveActivePlaceholderDefs();
   placeholderSelections = {};
-  if (!placeholderControls) {
+  if (!activePlaceholderContainer) {
     return;
   }
   const entries = Object.entries(activePlaceholderDefs);
-  placeholderControls.innerHTML = entries
+  activePlaceholderContainer.innerHTML = entries
     .map(([name, def]) => renderPlaceholderControl(name, def))
     .join("");
   for (const [name, def] of entries) {
     placeholderSelections[name] = placeholderDefaultValue(def);
-    const control = placeholderControls.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
+    const control = activePlaceholderContainer.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
     if (!control) {
       continue;
     }
@@ -2685,7 +2759,7 @@ function applyPlaceholderSelections(savedSelections) {
       continue;
     }
     const value = String(saved[name] ?? "");
-    const control = placeholderControls?.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
+    const control = activePlaceholderContainer?.querySelector(`[data-placeholder="${cssAttrEscape(name)}"]`);
     if (def.kind === "select") {
       const allowed = (Array.isArray(def.options) ? def.options : []).some((option) => option.name === value);
       if (!allowed) {
@@ -3828,6 +3902,8 @@ function createConversation() {
     updatedAt: new Date().toISOString(),
     conversation_summary: "",
     rewrite_query_for_retrieval: true,
+    // New conversations inherit the main page's current settings, then own them.
+    settings: currentMainSettings(),
     messages: [],
   };
   conversations.unshift(conversation);
@@ -3888,6 +3964,232 @@ function renderConversationWorkspace() {
   renderConversationDetail(conversation);
 }
 
+// ---------------------------------------------------------------------------
+// Per-conversation settings (WP / prompt / provider+model / context window /
+// placeholders). Each conversation owns its settings; the main page is left
+// untouched. While the conversation modal is open the global settings state
+// represents the active conversation, so the existing prompt/placeholder/model
+// machinery resolves everything; the main page's own settings are backed up on
+// open and restored on close.
+// ---------------------------------------------------------------------------
+
+// Snapshot the current global settings state into a plain settings object that
+// mirrors the chat-request fields a conversation owns.
+function captureSettingsSnapshot() {
+  return {
+    wp_id: activeWpId,
+    prompt_preset_id: activePromptPresetId,
+    prompt_preset_name: activePromptPresetMetadata().name,
+    system_prompt: systemPrompt.value,
+    user_prompt_template: userPromptTemplate.value,
+    selections: { ...placeholderSelections },
+    placeholder_defs: effectivePlaceholderDefsForRequest(),
+    llm_provider: llmProvider.value,
+    model: selectedModelValue(),
+    msearch_collection: msearchCollection.value,
+    context_window_tokens: nullableInteger(contextWindowTokens.value),
+  };
+}
+
+// The main page's settings: the backup taken when the modal opened, or the live
+// state if the modal is not open. Used to seed new conversations and as a
+// fallback for conversations saved before this feature existed.
+function currentMainSettings() {
+  return mainSettingsBackup || captureSettingsSnapshot();
+}
+
+function conversationSettingsFor(conversation) {
+  return (conversation && conversation.settings) || currentMainSettings();
+}
+
+// Apply a settings object onto the global state. Reused for both applying a
+// conversation (placeholders render into the conversation container) and
+// restoring the main page (placeholders render into the main container). Mirrors
+// the relevant subset of applyHistoryEntryToForm without touching retrieval
+// controls or the question field.
+function applySettingsToGlobals(settings) {
+  const s = settings || {};
+  const providerValue = normalizeProviderId(s.llm_provider || llmProvider.value || "");
+  if (providerValue) {
+    loadProviderValues(providerValue, { preferStored: true });
+  }
+  activeWpId = resolveWpId(s.wp_id);
+  wpSelect.value = activeWpId;
+  loadPredefinedQuestions(activeWpId);
+  populateMsearchCollections(s.msearch_collection || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
+  const savedPromptId = promptPresetIdFromSettings(s);
+  if (promptPresetExists(savedPromptId)) {
+    applyPromptPresetById(savedPromptId);
+  } else {
+    applyPromptPresetById(defaultPromptPresetId(activeWpId));
+  }
+  // Re-apply saved prompt-text overrides (which can change the active tokens),
+  // then re-render controls before restoring the saved selection values.
+  systemPrompt.value = s.system_prompt || systemPrompt.value;
+  userPromptTemplate.value = s.user_prompt_template || userPromptTemplate.value;
+  renderPlaceholderControls();
+  applyPlaceholderSelections(s.selections);
+  updatePromptTemplateWarning();
+  refreshModelOptions(appSettings);
+  const modelValue = s.model || "";
+  const unlocked = customModelAllowed();
+  if (modelValue && Array.from(model.options).some((option) => option.value === modelValue)) {
+    model.value = modelValue;
+  } else if (unlocked && modelValue) {
+    customModel.value = modelValue;
+    model.value = CUSTOM_MODEL_VALUE;
+  } else if (model.options.length > 0) {
+    model.value = model.options[0].value;
+  }
+  updateCustomModelVisibility(unlocked);
+  if (s.context_window_tokens != null) {
+    setContextWindowTokensValue(s.context_window_tokens);
+  }
+  updateModelContextWindowNote();
+}
+
+// Apply a WP for conversation mode: WP + its default collection + default
+// prompt, without touching the shared retrieval controls (unlike selectWp).
+function applyConvWp(wpId) {
+  activeWpId = resolveWpId(wpId);
+  wpSelect.value = activeWpId;
+  loadPredefinedQuestions(activeWpId);
+  populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
+  applyPromptPresetById(defaultPromptPresetId(activeWpId));
+}
+
+// Mirror the (single-sourced) main control option lists + values into the
+// compact conversation controls, avoiding duplicate population logic.
+function mirrorConversationControls() {
+  if (convWpSelect) {
+    convWpSelect.innerHTML = wpSelect.innerHTML;
+    convWpSelect.value = wpSelect.value;
+  }
+  if (convPromptSelect) {
+    convPromptSelect.innerHTML = activePromptPreset.innerHTML;
+    convPromptSelect.value = activePromptPreset.value;
+  }
+  if (convProvider) {
+    convProvider.innerHTML = llmProvider.innerHTML;
+    convProvider.value = llmProvider.value;
+  }
+  if (convModel) {
+    convModel.innerHTML = model.innerHTML;
+    convModel.value = model.value;
+  }
+  if (convCustomModel) {
+    convCustomModel.value = customModel.value;
+  }
+  updateConvCustomModelVisibility();
+}
+
+function updateConvCustomModelVisibility() {
+  if (!convCustomModelField) {
+    return;
+  }
+  const showCustom = convModel?.value === CUSTOM_MODEL_VALUE && customModelAllowed();
+  convCustomModelField.hidden = !showCustom;
+}
+
+function resetConvContextWindowToSelectedModel() {
+  if (!convContextWindowTokens) {
+    return;
+  }
+  const nextWindow = selectedModelContextWindow() ?? defaultContextWindowTokens();
+  convContextWindowTokens.value = nextWindow ?? "";
+}
+
+// Context-window note for the conversation bar: compares the conversation's own
+// context window against the conversation model's known maximum.
+function updateConvModelContextWindowNote() {
+  if (!convModelContextWindowNote) {
+    return;
+  }
+  const knownWindow = selectedModelContextWindow();
+  const currentWindow = nullableInteger(convContextWindowTokens?.value);
+  convModelContextWindowNote.classList.remove("warning");
+  if (knownWindow) {
+    if (currentWindow && currentWindow > knownWindow) {
+      convModelContextWindowNote.classList.add("warning");
+      convModelContextWindowNote.textContent =
+        `Známé maximum pro tento model: ${formatTokenCount(knownWindow)} tokenů. `
+        + `Aktuálně používáte ${formatTokenCount(currentWindow)} tokenů, takže se kontext nemusí vejít.`;
+      return;
+    }
+    const suffix =
+      currentWindow && currentWindow !== knownWindow
+        ? ` Aktuálně používáte ${formatTokenCount(currentWindow)} tokenů.`
+        : "";
+    convModelContextWindowNote.textContent = `Známé maximum pro tento model: ${formatTokenCount(knownWindow)} tokenů.${suffix}`;
+    return;
+  }
+  convModelContextWindowNote.textContent =
+    `Pro tento model nemáme uložené maximum. Výchozí hodnota aplikace: ${formatTokenCount(defaultContextWindowTokens())} tokenů.`;
+}
+
+// Apply a conversation's settings to the global state and reflect them into the
+// conversation settings bar. Called only on selection changes (open, switch,
+// new), never during streaming re-renders.
+function applyConversationSettings(conversation) {
+  const s = conversationSettingsFor(conversation);
+  applySettingsToGlobals(s);
+  if (convContextWindowTokens) {
+    const ctx = s.context_window_tokens ?? nullableInteger(contextWindowTokens.value);
+    convContextWindowTokens.value = ctx ?? "";
+  }
+  mirrorConversationControls();
+  updateConvModelContextWindowNote();
+}
+
+// Persist the current global state (plus the conversation context-window input)
+// onto the active conversation's settings, without bumping updatedAt or
+// reordering the list under the user.
+function persistActiveConversationSettings() {
+  if (!conversationSettingsActive || selectedConversationId === null) {
+    return;
+  }
+  const entries = getConversationEntries();
+  if (!entries.some((entry) => entry.id === selectedConversationId)) {
+    return;
+  }
+  const snapshot = captureSettingsSnapshot();
+  snapshot.context_window_tokens = nullableInteger(convContextWindowTokens?.value);
+  const next = entries.map((entry) =>
+    entry.id === selectedConversationId ? { ...entry, settings: snapshot } : entry,
+  );
+  setConversationEntries(next);
+}
+
+// Select a conversation and load its settings (used by list clicks and after
+// create/delete). Keeps settings application out of the streaming render path.
+function selectConversation(id) {
+  selectedConversationId = id;
+  if (conversationSettingsActive) {
+    applyConversationSettings(ensureSelectedConversation());
+  }
+  renderConversationWorkspace();
+}
+
+function openConversationWorkspace() {
+  mainSettingsBackup = captureSettingsSnapshot();
+  conversationSettingsActive = true;
+  activePlaceholderContainer = convPlaceholderControls;
+  renderConversationWorkspace();
+  applyConversationSettings(ensureSelectedConversation());
+  conversationDialog.showModal();
+}
+
+// Restore the main page's own settings after the conversation modal closes.
+function restoreMainSettings() {
+  conversationSettingsActive = false;
+  activePlaceholderContainer = placeholderControls;
+  if (!mainSettingsBackup) {
+    return;
+  }
+  applySettingsToGlobals(mainSettingsBackup);
+  mainSettingsBackup = null;
+}
+
 function renderConversationList(conversations) {
   if (!conversations.length) {
     conversationList.innerHTML = `<p class="history-empty">Zatím tu nejsou žádné konverzace.</p>`;
@@ -3910,8 +4212,7 @@ function renderConversationList(conversations) {
     .join("");
   for (const item of conversationList.querySelectorAll(".history-item")) {
     item.addEventListener("click", () => {
-      selectedConversationId = Number(item.dataset.conversationId);
-      renderConversationWorkspace();
+      selectConversation(Number(item.dataset.conversationId));
     });
   }
 }
@@ -4170,6 +4471,9 @@ async function submitConversationTurn() {
   let latestSources = [];
   let latestChunks = [];
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
+  // Build the payload from the conversation's own settings rather than the live
+  // main-page controls, so each turn uses the settings this conversation owns.
+  const convSettings = conversationSettingsFor(conversation);
   const payload = buildRequestPayload({
     question: prompt,
     conversation_summary: conversation.conversation_summary || null,
@@ -4178,6 +4482,19 @@ async function submitConversationTurn() {
       role: message.role,
       content: message.content,
     })),
+    wp_id: convSettings.wp_id,
+    prompt_preset_id: convSettings.prompt_preset_id,
+    prompt_preset_name: convSettings.prompt_preset_name,
+    system_prompt: promptOverride(convSettings.system_prompt, appSettings.prompt_defaults?.system_prompt),
+    user_prompt_template: promptOverride(convSettings.user_prompt_template, appSettings.prompt_defaults?.user_prompt_template),
+    selections: { ...(convSettings.selections || {}) },
+    placeholder_defs: convSettings.placeholder_defs || {},
+    llm_provider: convSettings.llm_provider,
+    model: convSettings.model,
+    llm_base_url: nullableString(selectedProviderBaseUrl(convSettings.llm_provider)),
+    llm_api_key: nullableString(selectedProviderApiKey(convSettings.llm_provider)),
+    msearch_collection: convSettings.msearch_collection,
+    context_window_tokens: convSettings.context_window_tokens,
   });
   const sanitizedPayload = sanitizeHistorySettings(payload);
 

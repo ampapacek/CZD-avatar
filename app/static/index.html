@@ -6,7 +6,7 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=model-context-1" />
+    <link rel="stylesheet" href="static/styles.css?v=conv-settings-1" />
   </head>
   <body>
     <main class="shell">
@@ -655,6 +655,40 @@
         <div class="conversation-dialog-body">
           <aside id="conversationList" class="history-list conversation-list-panel"></aside>
           <section class="conversation-main">
+            <details id="conversationSettings" class="conversation-settings">
+              <summary>Nastavení konverzace</summary>
+              <div class="conversation-settings-body">
+                <p class="field-note">Každá konverzace si pamatuje vlastní nastavení. Nové konverzace ho převezmou z hlavní stránky; změny na hlavní stránce už existující konverzace nemění.</p>
+                <div class="conversation-settings-grid">
+                  <label class="field">
+                    <span>WP</span>
+                    <select id="convWpSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Prompt</span>
+                    <select id="convPromptSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Poskytovatel</span>
+                    <select id="convProvider"></select>
+                  </label>
+                  <label class="field">
+                    <span>Model</span>
+                    <select id="convModel"></select>
+                  </label>
+                  <label class="field" id="convCustomModelField" hidden>
+                    <span>Jiný model</span>
+                    <input id="convCustomModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
+                  </label>
+                  <label class="field conversation-settings-context">
+                    <span>Kontextové okno (tokeny)</span>
+                    <input id="convContextWindowTokens" type="number" min="1024" step="1" />
+                    <span id="convModelContextWindowNote" class="field-note"></span>
+                  </label>
+                </div>
+                <div id="convPlaceholderControls" class="placeholder-controls conversation-placeholder-controls"></div>
+              </div>
+            </details>
             <div id="conversationMeta" class="conversation-meta"></div>
             <div id="conversationMessages" class="conversation-messages"></div>
             <form id="conversationForm" class="conversation-composer">
@@ -663,7 +697,7 @@
                 <textarea id="conversationQuestion" rows="3" placeholder="Zeptej se navazující otázku." required></textarea>
               </label>
               <div class="conversation-composer-actions">
-                <span class="conversation-note">Použijí se aktuální nastavení z hlavního formuláře.</span>
+                <span class="conversation-note">Použije se nastavení této konverzace (viz „Nastavení konverzace“ nahoře).</span>
                 <button id="conversationSubmitButton" class="primary" type="submit">Odeslat</button>
                 <button id="conversationCancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající generování odpovědi.">Zrušit</button>
               </div>
@@ -687,6 +721,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=model-context-1"></script>
+  <script src="static/app.js?v=conv-settings-1"></script>
 </body>
 </html>
