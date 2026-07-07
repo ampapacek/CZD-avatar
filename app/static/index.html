@@ -611,9 +611,20 @@
           <div>
             <h2>Historie</h2>
             <p>Uložené dotazy, použitá nastavení a nalezené dokumenty.</p>
-            <p>Historie se zatím ukládá jen lokálně v tomto prohlížeči.</p>
+            <div class="history-tabs" role="tablist">
+              <button id="historyTabMine" class="history-tab active" type="button" role="tab" aria-selected="true">Moje historie</button>
+              <button id="historyTabShared" class="history-tab" type="button" role="tab" aria-selected="false">Sdílené</button>
+            </div>
+            <p class="history-author-line">
+              Sdílím jako:
+              <button id="historyAuthorName" class="history-author-edit" type="button" title="Klikni pro změnu jména pro sdílení">
+                <span id="historyAuthorNameLabel">—</span>
+              </button>
+            </p>
+            <p id="historyShareStatus" class="history-share-status" role="status" aria-live="polite"></p>
           </div>
           <div class="history-dialog-actions">
+            <button id="shareSelectedButton" type="button" disabled>Sdílet vybrané (0)</button>
             <button id="deleteHistoryItemButton" type="button">Smazat položku</button>
             <button id="clearHistoryButton" type="button">Smazat vše</button>
             <button id="closeHistoryButton" class="icon-button help-close" type="button" aria-label="Zavřít historii" title="Zavřít">
@@ -721,6 +732,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=conv-settings-1"></script>
+  <script src="static/app.js?v=shared-history-2"></script>
 </body>
 </html>

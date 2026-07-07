@@ -1021,6 +1021,188 @@ button:hover {
   margin-top: 0;
 }
 
+/* History dialog: My / Shared tabs, share affordances, per-row select. */
+.history-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 3px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.history-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.history-tab:hover {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.history-tab.active {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.history-author-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.history-author-edit {
+  padding: 2px 10px;
+  font-size: 13px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+}
+
+.history-share-status {
+  min-height: 18px;
+}
+
+.history-share-status.success {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.history-share-status.error {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-select {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.history-row .history-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.history-shared-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--surface-3) 60%, var(--accent) 24%);
+  border: 1px solid var(--line);
+}
+
+.history-note-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field-bg);
+  color: var(--field-text);
+  font: inherit;
+}
+
+.history-note-input::placeholder {
+  color: var(--field-placeholder);
+}
+
+.history-verbatim {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-3);
+}
+
+.history-verbatim > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.history-verbatim-block {
+  margin-top: 10px;
+}
+
+.history-verbatim-block h5 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.history-verbatim-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.history-verbatim-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-detail-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history-shared-meta {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.history-shared-author {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.history-shared-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.history-unshare:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 .conversation-dialog {
   width: min(1440px, calc(100% - 20px));
   max-width: 1440px;
