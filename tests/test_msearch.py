@@ -55,6 +55,43 @@ class MSearchTextTests(unittest.TestCase):
         # Every retrieved chunk should carry real context, not a few keywords.
         self.assertGreater(len(text.split()), 20)
 
+    def test_url_gets_page_fragment_when_page_number_present(self) -> None:
+        records = _records_from_response(KEYWORD_HIT_RESPONSE, limit=10)
+
+        self.assertEqual(len(records), 1)
+        metadata = records[0]["metadata"]
+        self.assertEqual(metadata["page_number"], 108)
+        # The page fragment is baked into every URL field so PDF links open at
+        # the cited page.
+        for key in ("url", "document_url", "source_url"):
+            self.assertEqual(metadata[key], "https://storage.ufal.mff.cuni.cz/x.pdf#page=108")
+
+    def test_url_has_no_fragment_when_page_number_missing(self) -> None:
+        response = {
+            "documents": [
+                {
+                    "document_id": "doc-2",
+                    "score": 0.5,
+                    "source": "sem",
+                    "document": {
+                        "id": "some-doc.pdf",
+                        "title": "some-doc.pdf",
+                        "url": "https://storage.ufal.mff.cuni.cz/some-doc.pdf",
+                        "content": (
+                            "This is a full passage of real text with more than a "
+                            "handful of unique words so it survives the fallback filter."
+                        ),
+                    },
+                }
+            ]
+        }
+        records = _records_from_response(response, limit=10)
+
+        self.assertEqual(len(records), 1)
+        metadata = records[0]["metadata"]
+        self.assertIsNone(metadata["page_number"])
+        self.assertEqual(metadata["url"], "https://storage.ufal.mff.cuni.cz/some-doc.pdf")
+
     def test_passage_only_keyword_fragments_are_omitted(self) -> None:
         response = {
             "documents": [
