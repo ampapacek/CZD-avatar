@@ -114,6 +114,36 @@ class PromptPresetSaveRequest(BaseModel):
     admin_password: str | None = None
 
 
+class SharedHistoryItem(BaseModel):
+    id: str
+    owner_id: str = ""
+    author_name: str = ""
+    note: str = ""
+    question: str = ""
+    answer: str = ""
+    mode: str = ""
+    settings: dict[str, Any] = Field(default_factory=dict)
+    sources: list[Any] = Field(default_factory=list)
+    retrieved_chunks: list[Any] = Field(default_factory=list)
+    source_count: int = 0
+    created_at: str = ""
+    shared_at: str = ""
+
+
+class SharedHistorySaveRequest(BaseModel):
+    owner_id: str = ""
+    author_name: str = ""
+    note: str = ""
+    question: str = ""
+    answer: str = ""
+    mode: str = ""
+    settings: dict[str, Any] = Field(default_factory=dict)
+    sources: list[Any] = Field(default_factory=list)
+    retrieved_chunks: list[Any] = Field(default_factory=list)
+    source_count: int = 0
+    created_at: str = ""
+
+
 class Placeholder(BaseModel):
     name: str
     label: str

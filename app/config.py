@@ -70,6 +70,7 @@ class Settings(BaseSettings):
         alias="MODEL_CONTEXT_WINDOWS_PATH",
     )
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
+    shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")
     placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")
 
 @lru_cache

@@ -21,6 +21,7 @@ ignored
 data/qdrant/
 data/processed/
 data/prompt_presets.json
+data/shared_history.json
 data/placeholders.json
 data/questions/
 data/raw/*

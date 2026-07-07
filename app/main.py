@@ -27,6 +27,8 @@ from app.models import (
     PromptPresetSaveRequest,
     RetrieveRequest,
     RetrieveResponse,
+    SharedHistoryItem,
+    SharedHistorySaveRequest,
     UnlockRequest,
     UnlockResponse,
 )
@@ -35,6 +37,11 @@ from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
+from app.rag.shared_history import (
+    delete_shared_history_item,
+    load_shared_history,
+    save_shared_history_item,
+)
 from app.rag.placeholders import (
     DEFAULT_PLACEHOLDERS,
     delete_placeholder,
@@ -499,6 +506,71 @@ def remove_prompt_preset(
     if not _can_modify_prompt_preset(existing, owner_id, admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     delete_prompt_preset(settings.prompt_presets_path, preset_id)
+    return Response(status_code=204)
+
+
+SHARED_HISTORY_FORBIDDEN_DETAIL = (
+    "Tento sdílený záznam patří jinému prohlížeči. Odemkni ho sdíleným heslem, abys ho mohl smazat."
+)
+
+
+def _find_shared_history_item(item_id: str) -> dict[str, object] | None:
+    return next(
+        (item for item in load_shared_history(settings.shared_history_path) if item["id"] == item_id),
+        None,
+    )
+
+
+def _can_modify_shared_history_item(
+    item: dict[str, object], owner_id: str | None, password: str | None
+) -> bool:
+    owner = (str(item.get("owner_id") or "")).strip()
+    requester = (owner_id or "").strip()
+    if owner and requester and _secure_eq(owner, requester):
+        return True
+    if settings.admin_password and _secure_eq(
+        (password or "").strip(), settings.admin_password
+    ):
+        return True
+    return False
+
+
+@app.get("/shared-history", response_model=list[SharedHistoryItem])
+def get_shared_history() -> list[SharedHistoryItem]:
+    return [SharedHistoryItem(**item) for item in load_shared_history(settings.shared_history_path)]
+
+
+@app.post("/shared-history", response_model=SharedHistoryItem)
+def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
+    item = save_shared_history_item(
+        settings.shared_history_path,
+        owner_id=request.owner_id,
+        author_name=request.author_name,
+        note=request.note,
+        question=request.question,
+        answer=request.answer,
+        mode=request.mode,
+        settings=request.settings,
+        sources=request.sources,
+        retrieved_chunks=request.retrieved_chunks,
+        source_count=request.source_count,
+        created_at=request.created_at,
+    )
+    return SharedHistoryItem(**item)
+
+
+@app.delete("/shared-history/{item_id}", status_code=204)
+def remove_shared_history_item(
+    item_id: str,
+    owner_id: str | None = None,
+    admin_password: str | None = None,
+) -> Response:
+    existing = _find_shared_history_item(item_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Shared history item not found.")
+    if not _can_modify_shared_history_item(existing, owner_id, admin_password):
+        raise HTTPException(status_code=403, detail=SHARED_HISTORY_FORBIDDEN_DETAIL)
+    delete_shared_history_item(settings.shared_history_path, item_id)
     return Response(status_code=204)
 
 
