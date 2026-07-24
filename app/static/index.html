@@ -91,9 +91,14 @@
               </button>
               <ul id="predefinedQuestionList" class="predefined-question-list" role="listbox" aria-label="Připravené otázky" hidden></ul>
             </div>
-            <button id="retrieveButton" class="secondary retrieve-button" type="button" title="Pouze vyhledá relevantní zdroje pro otázku bez generování odpovědi.">
-              Pouze vyhledat zdroje
-            </button>
+            <div class="query-run-actions">
+              <button id="retrieveButton" class="secondary" type="button" title="Pouze vyhledá relevantní zdroje pro otázku bez generování odpovědi.">
+                Pouze vyhledat zdroje
+              </button>
+              <button id="submitButton" class="primary" type="submit">Odpovědět</button>
+              <button id="queryTransformButton" class="secondary" type="button" hidden>Upravit dotaz</button>
+              <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
+            </div>
           </div>
 
           <div class="controls">
@@ -205,10 +210,6 @@
             </div>
           </details>
 
-          <div class="form-actions">
-            <button id="submitButton" class="primary" type="submit">Odpovědět</button>
-            <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
-          </div>
         </form>
 
         <section class="answer-panel" aria-live="polite">
@@ -270,6 +271,10 @@
           <div class="help-card">
             <h3>Jak aplikace odpovídá</h3>
             <p>Aplikace nejdřív vyhledá relevantní úryvky dokumentů (snippets) a potom z nich složí odpověď pomocí vybraného jazykového modelu. Citace v odpovědi odkazují na zdroje zobrazené v pravém panelu. Pokud chceš samotné vyhledávání bez generování odpovědi, klikni na tlačítko <code>Pouze vyhledat zdroje</code>.</p>
+          </div>
+          <div class="help-card">
+            <h3>Úprava dotazu</h3>
+            <p>Pokud ji vybraný WP nebo prompt nabízí, tlačítko <code>Upravit dotaz</code> umožní dotaz před vyhledáváním přeložit nebo upravit. Ve výchozím nastavení se upravený dotaz používá pouze k vyhledání podkladů v databázi; model generující odpověď dostane původní dotaz.</p>
           </div>
           <div class="help-card">
             <h3>Zdroje: mSearch / lokální databáze</h3>
@@ -603,6 +608,52 @@
           </div>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="queryTransformDialog" class="settings-dialog query-transform-dialog">
+      <div class="query-transform-shell">
+        <div class="history-dialog-header">
+          <div>
+            <h2>Upravit vyhledávací dotaz</h2>
+            <p>Vyber způsob úpravy a výsledek před použitím zkontroluj.</p>
+          </div>
+          <button id="closeQueryTransformButton" class="icon-button help-close" type="button" aria-label="Zavřít" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="query-transform-body">
+          <label class="field">
+            <span>Původní dotaz</span>
+            <textarea id="queryTransformOriginal" rows="2" readonly></textarea>
+          </label>
+          <div>
+            <span class="query-transform-section-label">Způsob úpravy</span>
+            <div id="queryTransformActions" class="query-transform-actions"></div>
+          </div>
+          <label id="queryTransformPromptField" class="field" hidden>
+            <span>Instrukce pro LLM</span>
+            <textarea id="queryTransformPrompt" rows="4"></textarea>
+            <small class="field-note">Instrukce je předvyplněná z profilu a pro tento dotaz ji můžeš upravit.</small>
+          </label>
+          <p id="queryTransformStatus" class="field-note query-transform-status" role="status" aria-live="polite"></p>
+          <label class="field">
+            <span>Upravený dotaz</span>
+            <textarea id="queryTransformResult" rows="3"></textarea>
+          </label>
+          <label class="field inline-field query-transform-answer-toggle" title="Ve výchozím nastavení se upravený dotaz používá pouze k vyhledání podkladů v databázi. Model generující odpověď dostane původní dotaz.">
+            <input id="useTransformedForAnswer" type="checkbox" />
+            <span>Použít upravený dotaz i pro generování odpovědi</span>
+          </label>
+          <p class="field-note">Bez zaškrtnutí se upravený dotaz použije pouze pro vyhledávání v databázi a odpověď se vygeneruje podle původního dotazu.</p>
+          <div class="query-transform-footer">
+            <button id="cancelQueryTransformButton" class="secondary" type="button">Zrušit</button>
+            <button id="applyQueryTransformButton" class="primary" type="button">Použít upravený dotaz</button>
+          </div>
+        </div>
+      </div>
     </dialog>
 
     <dialog id="historyDialog" class="history-dialog">

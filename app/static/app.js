@@ -32,6 +32,18 @@ const clearCustomProviderApiKeyButton = document.querySelector("#clearCustomProv
 const customProviderDefaultModel = document.querySelector("#customProviderDefaultModel");
 const customProviderModels = document.querySelector("#customProviderModels");
 const retrieveButton = document.querySelector("#retrieveButton");
+const queryTransformButton = document.querySelector("#queryTransformButton");
+const queryTransformDialog = document.querySelector("#queryTransformDialog");
+const closeQueryTransformButton = document.querySelector("#closeQueryTransformButton");
+const cancelQueryTransformButton = document.querySelector("#cancelQueryTransformButton");
+const applyQueryTransformButton = document.querySelector("#applyQueryTransformButton");
+const queryTransformOriginal = document.querySelector("#queryTransformOriginal");
+const queryTransformActions = document.querySelector("#queryTransformActions");
+const queryTransformPromptField = document.querySelector("#queryTransformPromptField");
+const queryTransformPrompt = document.querySelector("#queryTransformPrompt");
+const queryTransformResult = document.querySelector("#queryTransformResult");
+const queryTransformStatus = document.querySelector("#queryTransformStatus");
+const useTransformedForAnswer = document.querySelector("#useTransformedForAnswer");
 const predefinedQuestionWrap = document.querySelector("#predefinedQuestionWrap");
 const predefinedQuestionButton = document.querySelector("#predefinedQuestionButton");
 const predefinedQuestionList = document.querySelector("#predefinedQuestionList");
@@ -211,6 +223,7 @@ const selectedShareIds = new Set();
 let streamedAnswerText = "";
 let currentAnswerSources = [];
 let currentRetrievedChunks = [];
+let currentRetrievalQuery = "";
 let currentOmittedChunks = [];
 let currentBaselineChunks = [];
 let baselineVisible = false;
@@ -220,6 +233,7 @@ let currentMsearchRescoreUsed = false;
 let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
+let appliedQueryTransform = null;
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
@@ -276,6 +290,72 @@ function resolveWpId(wpId) {
     return appSettings.default_wp;
   }
   return configs[0]?.id || "";
+}
+
+// Query-transform configuration uses tri-state persona inheritance:
+// missing/null inherits the WP default, while an explicit object (including
+// {enabled:false}) replaces it wholesale.
+function resolvedQueryTransformConfig() {
+  const preset = getPromptPresetById(activePromptPresetId);
+  const hasPresetOverride = preset
+    && Object.prototype.hasOwnProperty.call(preset, "query_transform")
+    && preset.query_transform !== null;
+  const raw = hasPresetOverride
+    ? preset.query_transform
+    : getWpConfig(activeWpId)?.query_transform;
+  if (!raw || typeof raw !== "object" || raw.enabled !== true) {
+    return null;
+  }
+  const actions = Array.isArray(raw.actions)
+    ? raw.actions.filter((action) => (
+      action
+      && typeof action === "object"
+      && String(action.id || "").trim()
+      && ["lindat", "llm"].includes(String(action.type || "").toLowerCase())
+    ))
+    : [];
+  return actions.length ? { ...raw, actions } : null;
+}
+
+function clearAppliedQueryTransform({ refreshButton = true } = {}) {
+  appliedQueryTransform = null;
+  if (refreshButton) {
+    refreshQueryTransformButton();
+  }
+}
+
+function refreshQueryTransformButton() {
+  if (!queryTransformButton) {
+    return;
+  }
+  const config = resolvedQueryTransformConfig();
+  queryTransformButton.hidden = !config;
+  const hasAppliedQuery = Boolean(
+    appliedQueryTransform
+    && appliedQueryTransform.originalQuestion === question.value
+    && appliedQueryTransform.retrievalQuery,
+  );
+  queryTransformButton.classList.toggle("is-applied", hasAppliedQuery);
+  queryTransformButton.title = hasAppliedQuery
+    ? "Upravený dotaz je připravený. Kliknutím ho můžeš zkontrolovat nebo změnit."
+    : "Přeloží nebo jinak upraví dotaz používaný pro vyhledávání.";
+}
+
+function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
+  if (
+    !appliedQueryTransform
+    || appliedQueryTransform.originalQuestion !== question.value
+    || !String(appliedQueryTransform.retrievalQuery || "").trim()
+  ) {
+    return {};
+  }
+  const payload = {
+    retrieval_query: appliedQueryTransform.retrievalQuery.trim(),
+  };
+  if (includeAnswerFlag) {
+    payload.use_retrieval_query_for_answer = Boolean(appliedQueryTransform.useForAnswer);
+  }
+  return payload;
 }
 
 function wpDefaultCollectionMsearchId(wp) {
@@ -423,6 +503,7 @@ async function runQuery(retrieveOnlyMode) {
   activeQueryController = controller;
   submitButton.disabled = true;
   retrieveButton.disabled = true;
+  queryTransformButton.disabled = true;
   cancelButton.hidden = false;
   cancelButton.disabled = false;
   statusEl.className = "status";
@@ -432,6 +513,7 @@ async function runQuery(retrieveOnlyMode) {
   streamedAnswerText = "";
   currentAnswerSources = [];
   currentRetrievedChunks = [];
+  currentRetrievalQuery = question.value;
   currentOmittedChunks = [];
   currentBaselineChunks = [];
   baselineVisible = false;
@@ -449,8 +531,10 @@ async function runQuery(retrieveOnlyMode) {
   try {
     if (retrieveOnlyMode) {
       const payload = buildRetrievePayload();
+      currentRetrievalQuery = payload.retrieval_query || payload.question;
       const data = await streamRetrieveWithHandlers(payload, {
         onPreliminarySources(prelimData) {
+          currentRetrievalQuery = prelimData.retrieval_query || currentRetrievalQuery;
           currentRetrievedChunks = prelimData.retrieved_chunks || [];
           currentBaselineChunks = [];
           currentAnswerSources = prelimData.sources || chunksToSources(currentRetrievedChunks);
@@ -462,6 +546,7 @@ async function runQuery(retrieveOnlyMode) {
           onRerankProgressUpdate(progress);
         },
         onSources(sourceData) {
+          currentRetrievalQuery = sourceData.retrieval_query || currentRetrievalQuery;
           stopRerankCountdown();
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
           currentBaselineChunks = sourceData.baseline_chunks || [];
@@ -473,6 +558,7 @@ async function runQuery(retrieveOnlyMode) {
       renderAnswer("Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.");
       statusEl.textContent = `Nalezeno ${data.retrieved_chunks.length} chunků.`;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
+      currentRetrievalQuery = data.retrieval_query || currentRetrievalQuery;
       currentBaselineChunks = data.baseline_chunks || [];
       currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
       renderSources(currentAnswerSources, currentRetrievedChunks, "");
@@ -487,6 +573,7 @@ async function runQuery(retrieveOnlyMode) {
       });
     } else {
       const payload = buildRequestPayload();
+      currentRetrievalQuery = payload.retrieval_query || payload.question;
       // Record the verbatim prompt actually used so history/sharing can always
       // show it. The payload sends null when the prompt equals the built-in
       // default (the server fills it in), so read the resolved text directly.
@@ -496,6 +583,7 @@ async function runQuery(retrieveOnlyMode) {
       };
       const data = await chatRequest(payload, {
         onPreliminarySources(prelimData) {
+          currentRetrievalQuery = prelimData.retrieval_query || currentRetrievalQuery;
           // First-stage hits shown while the cross-encoder runs; replaced by the
           // reranked order once the "sources" event arrives.
           currentRetrievedChunks = prelimData.retrieved_chunks || [];
@@ -509,6 +597,7 @@ async function runQuery(retrieveOnlyMode) {
           onRerankProgressUpdate(progress);
         },
         onSources(sourceData) {
+          currentRetrievalQuery = sourceData.retrieval_query || currentRetrievalQuery;
           stopRerankCountdown();
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
           currentBaselineChunks = sourceData.baseline_chunks || [];
@@ -525,6 +614,7 @@ async function runQuery(retrieveOnlyMode) {
           renderAnswer(streamedAnswerText);
         },
         onDone(doneData) {
+          currentRetrievalQuery = doneData.retrieval_query || currentRetrievalQuery;
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
           statusEl.textContent = formatTimingLabel(doneData, modelLabel);
           currentAnswerSources = doneData.sources || currentAnswerSources;
@@ -541,6 +631,7 @@ async function runQuery(retrieveOnlyMode) {
       renderAnswer(streamedAnswerText);
       currentAnswerSources = data.sources || currentAnswerSources;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
+      currentRetrievalQuery = data.retrieval_query || currentRetrievalQuery;
       currentBaselineChunks = data.baseline_chunks || currentBaselineChunks;
       currentOmittedChunks = data.omitted_chunks || currentOmittedChunks;
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
@@ -583,6 +674,7 @@ async function runQuery(retrieveOnlyMode) {
     cancelButton.hidden = true;
     submitButton.disabled = false;
     retrieveButton.disabled = false;
+    queryTransformButton.disabled = false;
   }
 }
 
@@ -592,6 +684,156 @@ form.addEventListener("submit", (event) => {
 });
 
 retrieveButton.addEventListener("click", () => runQuery(true));
+
+function closeQueryTransformDialog() {
+  queryTransformDialog?.close();
+}
+
+function setQueryTransformBusy(busy) {
+  queryTransformActions?.querySelectorAll("button").forEach((button) => {
+    button.disabled = busy;
+  });
+  applyQueryTransformButton.disabled = busy;
+}
+
+function setQueryTransformStatus(message, variant = "") {
+  queryTransformStatus.textContent = message || "";
+  queryTransformStatus.classList.toggle("error", variant === "error");
+}
+
+function queryTransformActionLabel(action) {
+  if (action.label) {
+    return String(action.label);
+  }
+  if (String(action.type).toLowerCase() === "lindat") {
+    const source = String(action.source_language || "").toUpperCase();
+    const target = String(action.target_language || "").toUpperCase();
+    return source && target ? `Přeložit ${source} → ${target}` : "Přeložit";
+  }
+  return "Upravit pomocí LLM";
+}
+
+function renderQueryTransformDialog(config) {
+  const previous = appliedQueryTransform?.originalQuestion === question.value
+    ? appliedQueryTransform
+    : null;
+  queryTransformOriginal.value = question.value;
+  queryTransformResult.value = previous?.retrievalQuery || question.value;
+  useTransformedForAnswer.checked = previous
+    ? Boolean(previous.useForAnswer)
+    : Boolean(config.use_transformed_for_answer);
+  setQueryTransformStatus("");
+
+  const llmActions = config.actions.filter((action) => String(action.type).toLowerCase() === "llm");
+  const firstLlmAction = llmActions[0] || null;
+  queryTransformPromptField.hidden = !firstLlmAction;
+  queryTransformPrompt.value = String(firstLlmAction?.prompt || firstLlmAction?.instruction || "");
+  queryTransformPrompt.dataset.actionId = String(firstLlmAction?.id || "");
+
+  queryTransformActions.innerHTML = config.actions
+    .map((action) => `
+      <button
+        class="secondary"
+        type="button"
+        data-transform-action-id="${escapeHtml(String(action.id))}"
+      >${escapeHtml(queryTransformActionLabel(action))}</button>
+    `)
+    .join("");
+}
+
+async function executeQueryTransform(action) {
+  const actionType = String(action.type || "").toLowerCase();
+  if (actionType === "llm" && queryTransformPrompt.dataset.actionId !== String(action.id)) {
+    queryTransformPrompt.value = String(action.prompt || action.instruction || "");
+    queryTransformPrompt.dataset.actionId = String(action.id);
+  }
+  const instruction = actionType === "llm" ? queryTransformPrompt.value.trim() : null;
+  setQueryTransformBusy(true);
+  setQueryTransformStatus(actionType === "lindat" ? "Překládám dotaz..." : "Upravuji dotaz pomocí LLM...");
+  try {
+    const activePrompt = activePromptPresetMetadata();
+    const response = await fetch("query-transform", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: question.value,
+        wp_id: activeWpId,
+        prompt_preset_id: activePrompt.id,
+        action_id: action.id,
+        // Local browser personas do not exist on the server, so include their
+        // resolved action definition as well as its stable id.
+        action,
+        instruction,
+        model: selectedModelValue(),
+        llm_provider: llmProvider.value,
+        llm_base_url: nullableString(selectedProviderBaseUrl()),
+        llm_api_key: nullableString(selectedProviderApiKey()),
+        admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
+      }),
+    });
+    const data = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(data.detail || `Dotaz se nepodařilo upravit (HTTP ${response.status}).`);
+    }
+    queryTransformResult.value = String(data.transformed_query || "");
+    setQueryTransformStatus("Upravený dotaz je připravený. Můžeš ho ještě ručně změnit.");
+  } catch (error) {
+    setQueryTransformStatus(error.message || "Dotaz se nepodařilo upravit.", "error");
+  } finally {
+    setQueryTransformBusy(false);
+  }
+}
+
+queryTransformButton?.addEventListener("click", () => {
+  const config = resolvedQueryTransformConfig();
+  if (!config) {
+    return;
+  }
+  if (!question.value.trim()) {
+    question.focus();
+    return;
+  }
+  renderQueryTransformDialog(config);
+  queryTransformDialog.showModal();
+});
+
+queryTransformActions?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-transform-action-id]");
+  const config = resolvedQueryTransformConfig();
+  if (!button || !config) {
+    return;
+  }
+  const action = config.actions.find((item) => String(item.id) === button.dataset.transformActionId);
+  if (action) {
+    executeQueryTransform(action);
+  }
+});
+
+applyQueryTransformButton?.addEventListener("click", () => {
+  const retrievalQuery = queryTransformResult.value.trim();
+  if (!retrievalQuery) {
+    setQueryTransformStatus("Upravený dotaz nesmí být prázdný.", "error");
+    queryTransformResult.focus();
+    return;
+  }
+  appliedQueryTransform = {
+    originalQuestion: question.value,
+    retrievalQuery,
+    useForAnswer: useTransformedForAnswer.checked,
+  };
+  refreshQueryTransformButton();
+  closeQueryTransformDialog();
+});
+
+closeQueryTransformButton?.addEventListener("click", closeQueryTransformDialog);
+cancelQueryTransformButton?.addEventListener("click", closeQueryTransformDialog);
+queryTransformDialog?.addEventListener("click", (event) => {
+  if (event.target === queryTransformDialog) {
+    closeQueryTransformDialog();
+  }
+});
+
+question.addEventListener("input", () => clearAppliedQueryTransform());
 
 cancelButton.addEventListener("click", () => {
   cancelButton.disabled = true;
@@ -612,6 +854,7 @@ randomQuestionButton.addEventListener("click", async () => {
       throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");
     }
     question.value = data.question || "";
+    clearAppliedQueryTransform();
     question.focus();
     statusEl.textContent = "Náhodná otázka je vložená. Spusť odpověď tlačítkem Odpovědět.";
   } catch (error) {
@@ -676,6 +919,7 @@ predefinedQuestionList?.addEventListener("click", (event) => {
     return;
   }
   question.value = item.textContent;
+  clearAppliedQueryTransform();
   closePredefinedQuestions();
   question.focus();
 });
@@ -1124,6 +1368,7 @@ function buildRequestPayload(overrides = {}) {
     rerank_weight: Number(rerankWeight.value),
     rerank_enabled: rerankAvailable && rerankEnabled.checked,
     rerank_candidates: nullableNumber(rerankCandidates.value),
+    ...activeQueryTransformPayload(),
     ...overrides,
   };
 }
@@ -1148,6 +1393,7 @@ function buildRetrievePayload(overrides = {}) {
     rerank_weight: Number(rerankWeight.value),
     rerank_enabled: rerankAvailable && rerankEnabled.checked,
     rerank_candidates: nullableNumber(rerankCandidates.value),
+    ...activeQueryTransformPayload({ includeAnswerFlag: false }),
     ...overrides,
   };
 }
@@ -2983,14 +3229,20 @@ function wpBuiltInPromptPresets(wp) {
   if (!wp) {
     return [];
   }
-  return (wp.builtin_prompts || []).map((preset) => ({
-    id: preset.id,
-    name: preset.name,
-    wp_id: wp.id,
-    system_prompt: preset.system_prompt || "",
-    user_prompt_template: preset.user_prompt_template || "",
-    placeholders: preset.placeholders && typeof preset.placeholders === "object" ? preset.placeholders : {},
-  }));
+  return (wp.builtin_prompts || []).map((preset) => {
+    const normalized = {
+      id: preset.id,
+      name: preset.name,
+      wp_id: wp.id,
+      system_prompt: preset.system_prompt || "",
+      user_prompt_template: preset.user_prompt_template || "",
+      placeholders: preset.placeholders && typeof preset.placeholders === "object" ? preset.placeholders : {},
+    };
+    if (Object.prototype.hasOwnProperty.call(preset, "query_transform")) {
+      normalized.query_transform = preset.query_transform;
+    }
+    return normalized;
+  });
 }
 
 function builtInPromptPresets(wpId = activeWpId) {
@@ -3032,12 +3284,14 @@ function applyPromptPresetById(presetId) {
   }
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
+  clearAppliedQueryTransform({ refreshButton: false });
   // Switching prompts resets controls to the new prompt's resolved defaults; no
   // prior values (including text placeholders) are preserved across the switch.
   renderPlaceholderControls();
   updatePromptTemplateWarning();
   renderInlinePlaceholderDefs();
   renderPromptPresets(resolvedId);
+  refreshQueryTransformButton();
 }
 
 function activePromptPresetMetadata() {
@@ -3049,7 +3303,7 @@ function activePromptPresetMetadata() {
 }
 
 function currentPromptDraft({ id = null, name }) {
-  return {
+  const draft = {
     id,
     name: name.trim(),
     wp_id: activePromptWpId(),
@@ -3059,6 +3313,11 @@ function currentPromptDraft({ id = null, name }) {
     // def editor (14d) mutates in place; saving the prompt persists them.
     placeholders: activePromptInlinePlaceholderDefs(),
   };
+  const sourcePreset = getPromptPresetById(promptPreset.value);
+  if (sourcePreset && Object.prototype.hasOwnProperty.call(sourcePreset, "query_transform")) {
+    draft.query_transform = sourcePreset.query_transform;
+  }
+  return draft;
 }
 
 function selectedPromptNameForSave() {
@@ -3225,7 +3484,7 @@ function normalizeLocalPromptPreset(item) {
   if (!id || id.startsWith("draft-") || !name) {
     return null;
   }
-  return {
+  const normalized = {
     id,
     name,
     wp_id: String(item.wp_id || appSettings.default_wp || ""),
@@ -3237,6 +3496,10 @@ function normalizeLocalPromptPreset(item) {
       ? item.placeholders
       : {},
   };
+  if (Object.prototype.hasOwnProperty.call(item, "query_transform")) {
+    normalized.query_transform = item.query_transform;
+  }
+  return normalized;
 }
 
 function persistLocalPromptPresets() {
@@ -3621,7 +3884,14 @@ function chunksToSources(chunks) {
 }
 
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
-  renderSourceCards(sourcesEl, sources, chunks, question.value, extractCitationIds(answerText), "main-source");
+  renderSourceCards(
+    sourcesEl,
+    sources,
+    chunks,
+    currentRetrievalQuery || question.value,
+    extractCitationIds(answerText),
+    "main-source",
+  );
   renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
   renderBaselineComparison();
 }
@@ -3644,7 +3914,14 @@ function renderBaselineComparison() {
     : "Porovnat s pořadím bez re-rankingu";
   if (show) {
     const baselineSources = chunksToSources(currentBaselineChunks);
-    renderSourceCards(baselineSourcesEl, baselineSources, currentBaselineChunks, question.value, new Set(), "baseline-source");
+    renderSourceCards(
+      baselineSourcesEl,
+      baselineSources,
+      currentBaselineChunks,
+      currentRetrievalQuery || question.value,
+      new Set(),
+      "baseline-source",
+    );
   } else {
     baselineSourcesEl.innerHTML = "";
   }
@@ -4738,6 +5015,11 @@ function saveHistoryEntry(entry) {
   history.unshift({
     id: Date.now(),
     question: entry.question,
+    original_question: entry.original_question || entry.question,
+    retrieval_query: entry.retrieval_query || entry.settings?.retrieval_query || entry.question,
+    use_retrieval_query_for_answer: Boolean(
+      entry.use_retrieval_query_for_answer ?? entry.settings?.use_retrieval_query_for_answer,
+    ),
     mode: entry.mode,
     answer: entry.answer,
     sourceCount: entry.sourceCount,
@@ -5135,6 +5417,7 @@ function renderSharedHistoryDetail(item) {
       <h4>Otázka</h4>
       <p class="history-question">${escapeHtml(item.question)}</p>
     </section>
+    ${renderHistoryQueryTransform(item)}
     ${renderHistorySettingsAndAnswer(item)}
   `;
 
@@ -5254,6 +5537,7 @@ function renderHistoryDetail(entry) {
       <h4>Otázka</h4>
       <p class="history-question">${escapeHtml(entry.question)}</p>
     </section>
+    ${renderHistoryQueryTransform(entry)}
     <section class="history-block">
       <h4>Poznámka (uloží se při sdílení)</h4>
       <textarea id="historyNoteInput" class="history-note-input" rows="2" placeholder="Volitelná poznámka ke sdílení…">${escapeHtml(entry.note || "")}</textarea>
@@ -5276,6 +5560,28 @@ function renderHistoryDetail(entry) {
   });
 
   mountHistoryDetailSources(entry);
+}
+
+function renderHistoryQueryTransform(entry) {
+  const originalQuestion = String(entry.original_question || entry.question || "").trim();
+  const retrievalQuery = String(entry.retrieval_query || entry.settings?.retrieval_query || "").trim();
+  if (!retrievalQuery || retrievalQuery === originalQuestion) {
+    return "";
+  }
+  const usedForAnswer = Boolean(
+    entry.use_retrieval_query_for_answer ?? entry.settings?.use_retrieval_query_for_answer,
+  );
+  return `
+    <section class="history-block">
+      <h4>Upravený dotaz pro vyhledávání</h4>
+      <p class="history-question">${escapeHtml(retrievalQuery)}</p>
+      <p class="field-note">${
+        usedForAnswer
+          ? "Upravený dotaz byl použit také pro generování odpovědi."
+          : "Pro generování odpovědi byl použit původní dotaz."
+      }</p>
+    </section>
+  `;
 }
 
 // Shared between local (renderHistoryDetail) and server (renderSharedHistoryDetail)
@@ -5358,7 +5664,8 @@ function mountHistoryDetailSources(entry) {
   if (!historySources) {
     return;
   }
-  renderSourceCards(historySources, sources, chunks, entry.question, usedCitationIds, "history-source");
+  const retrievalQuery = entry.retrieval_query || entry.settings?.retrieval_query || entry.question;
+  renderSourceCards(historySources, sources, chunks, retrievalQuery, usedCitationIds, "history-source");
   renderBudgetNotes(
     historySources,
     entry.chunk_budget_warnings || [],
@@ -5482,6 +5789,21 @@ function applyHistoryEntryToForm(entry) {
   updateThresholdLabels();
   updateRerankControls();
   updateRetrievalControls({ resetValues: false });
+  const restoredRetrievalQuery = String(
+    entry.retrieval_query || entry.settings?.retrieval_query || "",
+  ).trim();
+  if (restoredRetrievalQuery && restoredRetrievalQuery !== question.value.trim()) {
+    appliedQueryTransform = {
+      originalQuestion: question.value,
+      retrievalQuery: restoredRetrievalQuery,
+      useForAnswer: Boolean(
+        entry.use_retrieval_query_for_answer ?? entry.settings?.use_retrieval_query_for_answer,
+      ),
+    };
+  } else {
+    appliedQueryTransform = null;
+  }
+  refreshQueryTransformButton();
   restoreAnswerFromHistoryEntry(entry);
   question.focus();
 }
@@ -5496,6 +5818,7 @@ function restoreAnswerFromHistoryEntry(entry) {
   streamedAnswerText = entry.answer || "";
   currentAnswerSources = restoredSources;
   currentRetrievedChunks = restoredChunks;
+  currentRetrievalQuery = entry.retrieval_query || entry.settings?.retrieval_query || entry.question || "";
   currentOmittedChunks = entry.omitted_chunks || [];
   currentBudgetWarnings = entry.chunk_budget_warnings || [];
   currentTokenBudget = entry.token_budget || null;

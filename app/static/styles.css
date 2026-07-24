@@ -757,6 +757,24 @@ button:hover {
   margin-top: -6px;
 }
 
+.query-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.query-run-actions .primary {
+  min-width: 0;
+}
+
+#queryTransformButton.is-applied {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .predefined-question-control {
   position: relative;
   flex: 0 0 auto;
@@ -801,11 +819,6 @@ button:hover {
 
 .predefined-question-list .predefined-question-empty:hover {
   background: transparent;
-}
-
-/* Push the "Pouze vyhledat zdroje" action to the right edge of the row. */
-.retrieve-button {
-  margin-left: auto;
 }
 
 .primary {
@@ -2092,6 +2105,64 @@ body[data-theme="dark"] .source-highlight {
   margin-top: 16px;
   padding-right: 6px;
   overflow: auto;
+}
+
+.query-transform-dialog {
+  width: min(720px, calc(100% - 32px));
+}
+
+.query-transform-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(92vh, 820px);
+}
+
+.query-transform-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
+.query-transform-section-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.query-transform-actions,
+.query-transform-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.query-transform-actions button {
+  flex: 1 1 190px;
+}
+
+.query-transform-status {
+  min-height: 17px;
+  margin: 0;
+}
+
+.query-transform-status.error {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.query-transform-answer-toggle {
+  width: fit-content;
+}
+
+.query-transform-footer {
+  justify-content: flex-end;
+}
+
+.query-transform-footer .primary {
+  min-width: 0;
 }
 
 .settings-section {
