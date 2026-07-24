@@ -104,6 +104,36 @@ class PromptPresetStorageTests(unittest.TestCase):
         self.assertEqual(loaded["placeholders"]["length"]["options"][0]["text"], "INLINE short")
         self.assertEqual(loaded["placeholders"]["length"]["kind"], "select")
 
+    def test_save_round_trips_query_transform_override(self) -> None:
+        record = save_prompt_preset(
+            self.path,
+            name="Translated persona",
+            system_prompt="sys",
+            user_prompt_template="{question}",
+            query_transform={
+                "enabled": True,
+                "default_action": "translate",
+                "actions": [
+                    {
+                        "id": "translate",
+                        "label": "Translate",
+                        "type": "llm",
+                        "prompt": "Translate to English.",
+                    }
+                ],
+            },
+        )
+
+        self.assertTrue(record["query_transform"]["enabled"])
+        loaded = load_prompt_presets(self.path)[0]
+        self.assertEqual(loaded["query_transform"]["actions"][0]["prompt"], "Translate to English.")
+
+    def test_missing_query_transform_inherits_as_null(self) -> None:
+        record = self._save("Inherit WP")
+
+        self.assertIsNone(record["query_transform"])
+        self.assertIsNone(load_prompt_presets(self.path)[0]["query_transform"])
+
     def test_save_drops_legacy_length_prompts_field(self) -> None:
         record = self._save("Clean")
         self.assertNotIn("length_prompts", record)

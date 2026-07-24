@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.config import get_settings
 from app.rag.llm import LLMGeneration
@@ -88,6 +90,62 @@ class RetrievalQueryRewriteTests(unittest.TestCase):
         self.assertIn("Konverzace je o Janu Husovi.", prompt)
         self.assertIn("Jan Hus byl český reformátor.", prompt)
         self.assertIn("A jaký měl vliv?", prompt)
+
+    def test_explicit_retrieval_query_bypasses_conversation_rewrite(self) -> None:
+        pipeline, llm = self._pipeline("generated answer")
+        retrieved_queries: list[str] = []
+        pipeline.rewrite_query_for_retrieval = lambda *args, **kwargs: self.fail(
+            "Explicit retrieval query must bypass conversation rewriting"
+        )
+        pipeline.retrieve_with_baseline = lambda query, *args, **kwargs: (
+            retrieved_queries.append(query) or [],
+            [],
+        )
+        budget = SimpleNamespace(
+            messages=[{"role": "user", "content": "original"}],
+            used_chunks=[],
+            omitted_chunks=[],
+            warnings=[],
+            conversation_summary_used=False,
+            metadata=lambda: None,
+        )
+        with patch("app.rag.pipeline.prepare_prompt_budget", return_value=budget) as prepare:
+            response = pipeline.chat(
+                "Původní dotaz",
+                "medium",
+                model="selected-model",
+                retrieval_query_override="Translated retrieval query",
+            )
+
+        self.assertEqual(retrieved_queries, ["Translated retrieval query"])
+        self.assertEqual(prepare.call_args.kwargs["question"], "Původní dotaz")
+        self.assertEqual(response.original_question, "Původní dotaz")
+        self.assertEqual(response.retrieval_query, "Translated retrieval query")
+        self.assertEqual(response.answer_question, "Původní dotaz")
+        self.assertEqual(len(llm.calls), 1)
+
+    def test_explicit_retrieval_query_can_also_drive_answer_generation(self) -> None:
+        pipeline, _llm = self._pipeline("generated answer")
+        pipeline.retrieve_with_baseline = lambda *args, **kwargs: ([], [])
+        budget = SimpleNamespace(
+            messages=[{"role": "user", "content": "translated"}],
+            used_chunks=[],
+            omitted_chunks=[],
+            warnings=[],
+            conversation_summary_used=False,
+            metadata=lambda: None,
+        )
+        with patch("app.rag.pipeline.prepare_prompt_budget", return_value=budget) as prepare:
+            response = pipeline.chat(
+                "Původní dotaz",
+                "medium",
+                model="selected-model",
+                retrieval_query_override="Translated retrieval query",
+                use_retrieval_query_for_answer=True,
+            )
+
+        self.assertEqual(prepare.call_args.kwargs["question"], "Translated retrieval query")
+        self.assertEqual(response.answer_question, "Translated retrieval query")
 
 
 if __name__ == "__main__":

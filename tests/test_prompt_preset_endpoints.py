@@ -116,6 +116,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "system_prompt",
                 "user_prompt_template",
                 "placeholders",
+                "query_transform",
                 "owner_id",
                 "updated_at",
             },

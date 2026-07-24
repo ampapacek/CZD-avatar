@@ -1,0 +1,290 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import httpx
+from fastapi.testclient import TestClient
+
+from app import main
+from app.rag.llm import LLMGeneration
+from app.rag.query_transforms import load_query_transforms, resolve_query_transform
+
+
+class QueryTransformConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "query_transforms.json"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, payload: dict) -> None:
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_prompt_override_replaces_wp_actions_without_merging(self) -> None:
+        self._write(
+            {
+                "wp_defaults": {
+                    "WP4-adiktologie": {
+                        "enabled": True,
+                        "actions": [
+                            {"id": "wp-action", "label": "WP", "type": "llm", "prompt": "WP prompt"}
+                        ],
+                    }
+                },
+                "prompt_overrides": {
+                    "special": {
+                        "enabled": True,
+                        "actions": [
+                            {
+                                "id": "persona-action",
+                                "label": "Persona",
+                                "type": "llm",
+                                "prompt": "Persona prompt",
+                            }
+                        ],
+                    }
+                },
+            }
+        )
+
+        config = load_query_transforms(self.path)
+        resolved = resolve_query_transform(config, "WP4-adiktologie", "special")
+
+        self.assertEqual([action["id"] for action in resolved["actions"]], ["persona-action"])
+
+    def test_explicit_disabled_prompt_override_blocks_wp_default(self) -> None:
+        self._write(
+            {
+                "wp_defaults": {
+                    "WP4-adiktologie": {
+                        "enabled": True,
+                        "actions": [{"id": "translate", "label": "T", "type": "llm", "prompt": "P"}],
+                    }
+                },
+                "prompt_overrides": {"disabled-persona": {"enabled": False}},
+            }
+        )
+
+        config = load_query_transforms(self.path)
+
+        self.assertFalse(
+            resolve_query_transform(config, "WP4-adiktologie", "disabled-persona")["enabled"]
+        )
+        self.assertTrue(
+            resolve_query_transform(config, "WP4-adiktologie", "missing-persona")["enabled"]
+        )
+
+
+class QueryTransformEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._original_query_transforms_path = main.settings.query_transforms_path
+        main.settings.query_transforms_path = Path(self._tmp.name) / "query_transforms.json"
+        main.settings.query_transforms_path.write_text(
+            json.dumps(
+                {
+                    "wp_defaults": {
+                        "WP4-adiktologie": {
+                            "enabled": True,
+                            "default_action": "charles-cs-en",
+                            "use_transformed_for_answer": False,
+                            "actions": [
+                                {
+                                    "id": "charles-cs-en",
+                                    "label": "Přeložit CS → EN",
+                                    "type": "lindat",
+                                    "source_language": "cs",
+                                    "target_language": "en",
+                                    "model": "cs-en",
+                                },
+                                {
+                                    "id": "llm-translate-en",
+                                    "label": "Upravit pomocí LLM",
+                                    "type": "llm",
+                                    "prompt": "Translate the query into English.",
+                                },
+                            ],
+                        }
+                    },
+                    "prompt_overrides": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.client = TestClient(main.app, raise_server_exceptions=False)
+
+    def tearDown(self) -> None:
+        main.settings.query_transforms_path = self._original_query_transforms_path
+        self._tmp.cleanup()
+
+    @patch("app.main.httpx.post")
+    def test_wp4_lindat_action_sends_multipart_input_text(self, post: Mock) -> None:
+        post.return_value = httpx.Response(
+            200,
+            text="How does alcohol affect sleep?",
+            request=httpx.Request("POST", "https://lindat.example/cs-en"),
+        )
+
+        response = self.client.post(
+            "/query-transform",
+            json={
+                "question": "Jak alkohol ovlivňuje spánek?",
+                "wp_id": "WP4-adiktologie",
+                "action_id": "charles-cs-en",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["transformed_query"], "How does alcohol affect sleep?")
+        self.assertEqual(response.json()["action_type"], "lindat")
+        kwargs = post.call_args.kwargs
+        self.assertEqual(kwargs["files"]["input_text"], (None, "Jak alkohol ovlivňuje spánek?"))
+        self.assertEqual(kwargs["timeout"], main.settings.query_transform_timeout)
+        self.assertTrue(post.call_args.args[0].endswith("/cs-en"))
+
+    def test_inline_llm_action_uses_editable_instruction(self) -> None:
+        fake_llm = Mock()
+        fake_llm.generate.return_value = LLMGeneration(answer='"translated query"', model="selected-model")
+        original_llm = main.pipeline._llm
+        main.pipeline._llm = fake_llm
+        try:
+            with patch(
+                "app.main._resolve_llm_request",
+                return_value=("provider", "selected-model", "key", "https://llm.example/v1"),
+            ):
+                response = self.client.post(
+                    "/query-transform",
+                    json={
+                        "question": "Původní dotaz",
+                        "prompt_preset_id": "local-test-persona",
+                        "instruction": "Custom instruction",
+                        "action": {
+                            "id": "local-llm",
+                            "label": "Local",
+                            "type": "llm",
+                            "prompt": "Profile instruction",
+                        },
+                    },
+                )
+        finally:
+            main.pipeline._llm = original_llm
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["transformed_query"], "translated query")
+        call = fake_llm.generate.call_args
+        self.assertEqual(call.args[0][0]["content"], "Custom instruction")
+        self.assertEqual(call.args[0][1]["content"], "Původní dotaz")
+        self.assertEqual(call.kwargs["model"], "selected-model")
+
+    def test_inline_action_cannot_bypass_disabled_server_profile(self) -> None:
+        response = self.client.post(
+            "/query-transform",
+            json={
+                "question": "Kdo byl Jan Hus?",
+                "wp_id": "WP1-historie",
+                "prompt_preset_id": "wp1-ucitel",
+                "action": {
+                    "id": "inline-llm",
+                    "label": "Inline",
+                    "type": "llm",
+                    "prompt": "Translate",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("není pro tento profil povolena", response.json()["detail"])
+
+    @patch("app.main.httpx.post", side_effect=httpx.ConnectError("offline"))
+    def test_upstream_failure_returns_actionable_502(self, _post: Mock) -> None:
+        response = self.client.post(
+            "/query-transform",
+            json={
+                "question": "Jak alkohol ovlivňuje spánek?",
+                "wp_id": "WP4-adiktologie",
+                "action_id": "charles-cs-en",
+            },
+        )
+
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertIn("Původní dotaz zůstal beze změny", response.json()["detail"])
+
+    def test_disabled_wp_has_no_server_resolved_action(self) -> None:
+        response = self.client.post(
+            "/query-transform",
+            json={
+                "question": "Kdo byl Jan Hus?",
+                "wp_id": "WP1-historie",
+                "action_id": "charles-cs-en",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("není pro tento profil povolena", response.json()["detail"])
+
+    def test_wp4_configuration_is_exposed_without_hardcoded_endpoint_logic(self) -> None:
+        with patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}):
+            wps = main._wps_payload_with_live_collections()
+
+        wp4 = next(wp for wp in wps if wp["id"] == "WP4-adiktologie")
+        wp1 = next(wp for wp in wps if wp["id"] == "WP1-historie")
+        self.assertTrue(wp4["query_transform"]["enabled"])
+        self.assertEqual(
+            [action["id"] for action in wp4["query_transform"]["actions"]],
+            ["charles-cs-en", "llm-translate-en"],
+        )
+        self.assertFalse(wp1["query_transform"]["enabled"])
+
+    def test_missing_local_configuration_disables_wp4_transform(self) -> None:
+        main.settings.query_transforms_path.unlink()
+        with patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}):
+            wps = main._wps_payload_with_live_collections()
+
+        wp4 = next(wp for wp in wps if wp["id"] == "WP4-adiktologie")
+        self.assertFalse(wp4["query_transform"]["enabled"])
+
+
+class RetrievalQueryEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(main.app, raise_server_exceptions=False)
+
+    def test_retrieve_uses_explicit_query_and_preserves_original_metadata(self) -> None:
+        calls: list[str] = []
+        original = main.pipeline.retrieve_with_baseline
+
+        def fake_retrieve(question, *args, **kwargs):
+            calls.append(question)
+            return [], []
+
+        main.pipeline.retrieve_with_baseline = fake_retrieve
+        try:
+            response = self.client.post(
+                "/retrieve",
+                json={
+                    "question": "Jak alkohol ovlivňuje spánek?",
+                    "retrieval_query": "How does alcohol affect sleep?",
+                },
+            )
+        finally:
+            main.pipeline.retrieve_with_baseline = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(calls, ["How does alcohol affect sleep?"])
+        self.assertEqual(response.json()["original_question"], "Jak alkohol ovlivňuje spánek?")
+        self.assertEqual(response.json()["retrieval_query"], "How does alcohol affect sleep?")
+
+    def test_empty_explicit_chat_retrieval_query_returns_400(self) -> None:
+        response = self.client.post(
+            "/chat",
+            json={"question": "Original", "retrieval_query": "   "},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("nesmí být prázdný", response.json()["detail"])
+
+
+if __name__ == "__main__":
+    unittest.main()
