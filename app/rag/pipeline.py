@@ -467,6 +467,8 @@ class RAGPipeline:
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
         rewrite_query_for_retrieval: bool = False,
+        retrieval_query_override: str | None = None,
+        use_retrieval_query_for_answer: bool = False,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -488,15 +490,21 @@ class RAGPipeline:
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
-        retrieval_query = self.rewrite_query_for_retrieval(
-            question,
-            conversation_history=conversation_history or [],
-            conversation_summary=conversation_summary,
-            enabled=rewrite_query_for_retrieval,
-            model=resolved_model,
-            api_key=llm_api_key,
-            base_url=llm_base_url,
-        )
+        if retrieval_query_override is None:
+            retrieval_query = self.rewrite_query_for_retrieval(
+                question,
+                conversation_history=conversation_history or [],
+                conversation_summary=conversation_summary,
+                enabled=rewrite_query_for_retrieval,
+                model=resolved_model,
+                api_key=llm_api_key,
+                base_url=llm_base_url,
+            )
+        else:
+            retrieval_query = _clean_retrieval_query(retrieval_query_override)
+            if not retrieval_query:
+                raise ValueError("Retrieval query must not be empty.")
+        answer_question = retrieval_query if use_retrieval_query_for_answer else question
         retrieved, baseline_retrieved = self.retrieve_with_baseline(
             retrieval_query,
             top_k,
@@ -515,7 +523,7 @@ class RAGPipeline:
             rerank_candidates=rerank_candidates,
         )
         budget = prepare_prompt_budget(
-            question=question,
+            question=answer_question,
             retrieved_chunks=retrieved,
             length=length,
             model=resolved_model,
@@ -539,9 +547,10 @@ class RAGPipeline:
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
-            "Generated answer question=%r retrieval_query=%r length=%s model=%s response_time=%.2fs answer=%s",
+            "Generated answer question=%r retrieval_query=%r answer_question=%r length=%s model=%s response_time=%.2fs answer=%s",
             question,
             retrieval_query,
+            answer_question,
             length,
             resolved_model,
             elapsed,
@@ -551,6 +560,7 @@ class RAGPipeline:
             answer=answer,
             original_question=question,
             retrieval_query=retrieval_query,
+            answer_question=answer_question,
             retrieval_query_was_rewritten=retrieval_query != question,
             sources=[_source_from_chunk(chunk) for chunk in budget.used_chunks],
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],

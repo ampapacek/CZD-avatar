@@ -5,6 +5,7 @@ import logging
 import hmac
 import random
 import time
+import httpx
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -25,6 +26,8 @@ from app.models import (
     PlaceholderSaveRequest,
     PromptPreset,
     PromptPresetSaveRequest,
+    QueryTransformRequest,
+    QueryTransformResponse,
     RetrieveRequest,
     RetrieveResponse,
     SharedHistoryItem,
@@ -37,6 +40,11 @@ from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
+from app.rag.query_transforms import (
+    load_query_transforms,
+    resolve_query_transform,
+    valid_lindat_model,
+)
 from app.rag.shared_history import (
     delete_shared_history_item,
     load_shared_history,
@@ -336,7 +344,16 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
 
     grouped = pipeline.msearch_retriever.live_collections_by_prefix()
     payload = wp_public_payload()
+    query_transforms = load_query_transforms(settings.query_transforms_path)
     for wp in payload:
+        wp["query_transform"] = query_transforms["wp_defaults"].get(
+            wp["id"],
+            {"enabled": False, "actions": [], "use_transformed_for_answer": False},
+        )
+        for prompt in wp["builtin_prompts"]:
+            prompt_override = query_transforms["prompt_overrides"].get(prompt["id"])
+            if prompt_override is not None:
+                prompt["query_transform"] = prompt_override
         live = grouped.get(wp_collection_prefix(wp["id"])) or []
         if not live:
             continue
@@ -488,6 +505,11 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
         placeholders={
             name: definition.model_dump() for name, definition in request.placeholders.items()
         },
+        query_transform=(
+            request.query_transform.model_dump()
+            if request.query_transform is not None
+            else None
+        ),
         preset_id=request.id,
         owner_id=request.owner_id,
     )
@@ -507,6 +529,118 @@ def remove_prompt_preset(
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
     delete_prompt_preset(settings.prompt_presets_path, preset_id)
     return Response(status_code=204)
+
+
+def _effective_query_transform(
+    wp_id: str | None,
+    prompt_preset_id: str | None,
+) -> dict[str, object] | None:
+    prompt_id = (prompt_preset_id or "").strip()
+    if prompt_id:
+        saved = _find_prompt_preset(prompt_id)
+        if saved is not None and saved.get("query_transform") is not None:
+            return saved["query_transform"]
+    config = load_query_transforms(settings.query_transforms_path)
+    return resolve_query_transform(config, resolve_wp_id(wp_id), prompt_id)
+
+
+def _resolved_query_transform_action(request: QueryTransformRequest) -> dict[str, object]:
+    prompt_id = (request.prompt_preset_id or "").strip()
+    # Browser-local/draft personas are not stored on the server, so their
+    # configured action must travel with the request. Server-known and built-in
+    # personas are always resolved from server configuration; do not let a
+    # client-supplied action bypass an explicitly disabled profile.
+    if request.action is not None and prompt_id.startswith(("local-", "draft-")):
+        return request.action.model_dump()
+    transform = _effective_query_transform(request.wp_id, request.prompt_preset_id)
+    if not transform or not transform.get("enabled"):
+        raise HTTPException(status_code=400, detail="Úprava dotazu není pro tento profil povolena.")
+    actions = transform.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise HTTPException(status_code=400, detail="Profil nemá nakonfigurovanou žádnou úpravu dotazu.")
+    action_id = (request.action_id or transform.get("default_action") or "").strip()
+    action = next(
+        (item for item in actions if isinstance(item, dict) and item.get("id") == action_id),
+        None,
+    )
+    if action is None:
+        raise HTTPException(status_code=400, detail="Požadovaná úprava dotazu není v profilu dostupná.")
+    return action
+
+
+def _clean_transformed_query(value: str) -> str:
+    query = " ".join((value or "").split()).strip()
+    if len(query) >= 2 and query[0] == query[-1] and query[0] in {'"', "'", "`"}:
+        query = query[1:-1].strip()
+    for prefix in ("Dotaz:", "Query:", "Search query:", "Vyhledávací dotaz:"):
+        if query.lower().startswith(prefix.lower()):
+            query = query[len(prefix) :].strip()
+    return query
+
+
+@app.post("/query-transform", response_model=QueryTransformResponse)
+def transform_query(request: QueryTransformRequest) -> QueryTransformResponse:
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Dotaz nesmí být prázdný.")
+    action = _resolved_query_transform_action(request)
+    action_id = str(action.get("id") or "").strip()
+    action_type = str(action.get("type") or "").strip()
+    try:
+        if action_type == "lindat":
+            model = str(action.get("model") or "").strip()
+            if not valid_lindat_model(model):
+                raise HTTPException(status_code=400, detail="Neplatný model Charles Translatoru.")
+            base_url = settings.lindat_translation_base_url.strip().rstrip("/")
+            response = httpx.post(
+                f"{base_url}/{model}",
+                files={"input_text": (None, question)},
+                timeout=settings.query_transform_timeout,
+            )
+            response.raise_for_status()
+            transformed = response.text.strip()
+        elif action_type == "llm":
+            instruction = (request.instruction or str(action.get("prompt") or "")).strip()
+            if not instruction:
+                raise HTTPException(status_code=400, detail="Instrukce pro úpravu pomocí LLM nesmí být prázdná.")
+            resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
+            generation = pipeline.llm.generate(
+                [
+                    {"role": "system", "content": instruction},
+                    {"role": "user", "content": question},
+                ],
+                model=resolved_model,
+                api_key=resolved_api_key,
+                base_url=resolved_base_url,
+            )
+            transformed = _clean_transformed_query(generation.answer)
+            logger.info(
+                "Transformed query with provider=%s model=%s action=%s",
+                resolved_provider,
+                resolved_model,
+                action_id,
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Neznámý způsob úpravy dotazu.")
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        logger.warning("Query transform failed action=%s question=%r: %s", action_id, question, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Dotaz se nepodařilo upravit. Původní dotaz zůstal beze změny.",
+        ) from exc
+    if not transformed:
+        raise HTTPException(
+            status_code=502,
+            detail="Úprava dotazu vrátila prázdný výsledek. Původní dotaz zůstal beze změny.",
+        )
+    return QueryTransformResponse(
+        original_question=question,
+        transformed_query=transformed,
+        action_id=action_id,
+        action_type=action_type,
+    )
 
 
 SHARED_HISTORY_FORBIDDEN_DETAIL = (
@@ -711,8 +845,15 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
         # the selected provider is irrelevant for retrieval and must not cause a
         # spurious accept/reject based on the server's default provider.
         _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+        retrieval_query = (
+            request.retrieval_query.strip()
+            if request.retrieval_query is not None
+            else request.question
+        )
+        if not retrieval_query:
+            raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
         chunks, baseline_chunks = pipeline.retrieve_with_baseline(
-            request.question,
+            retrieval_query,
             request.top_k,
             dense_weight=request.dense_weight,
             bm25_weight=request.bm25_weight,
@@ -734,6 +875,8 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return RetrieveResponse(
         question=request.question,
+        original_question=request.question,
+        retrieval_query=retrieval_query,
         retrieved_chunks=[_serialize_retrieved_chunk(chunk) for chunk in chunks],
         baseline_chunks=[_serialize_retrieved_chunk(chunk) for chunk in baseline_chunks],
     )
@@ -746,8 +889,15 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
             # No mSearch provider gate here for the same reason as /retrieve:
             # retrieve-only never sends chunks to an LLM provider.
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            retrieval_query = (
+                request.retrieval_query.strip()
+                if request.retrieval_query is not None
+                else request.question
+            )
+            if not retrieval_query:
+                raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
             candidates = pipeline.retrieve_candidates(
-                request.question,
+                retrieval_query,
                 request.top_k,
                 dense_weight=request.dense_weight,
                 bm25_weight=request.bm25_weight,
@@ -768,6 +918,8 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
                     "preliminary_sources",
                     {
                         "question": request.question,
+                        "original_question": request.question,
+                        "retrieval_query": retrieval_query,
                         "retrieved_chunks": baseline_payload,
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
                     },
@@ -775,7 +927,7 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
 
             retrieved: list = []
             rerank_seconds = 0.0
-            for event in pipeline.apply_rerank_iter(request.question, candidates):
+            for event in pipeline.apply_rerank_iter(retrieval_query, candidates):
                 kind = event[0]
                 if kind == "eta":
                     yield _sse_event("rerank_progress", {"done": 0, "total": 0, "eta_seconds": event[1]})
@@ -791,6 +943,8 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
 
             payload = {
                 "question": request.question,
+                "original_question": request.question,
+                "retrieval_query": retrieval_query,
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in retrieved],
                 "baseline_chunks": baseline_payload,
                 "sources": [_serialize_source(chunk) for chunk in retrieved],
@@ -830,6 +984,8 @@ def chat(request: ChatRequest) -> ChatResponse:
     placeholder_defs, selections = _resolve_chat_placeholders(request)
     length = _output_budget_length(placeholder_defs, selections)
     try:
+        if request.retrieval_query is not None and not _clean_transformed_query(request.retrieval_query):
+            raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
         _enforce_msearch_collection_policy(
             request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
@@ -869,6 +1025,8 @@ def chat(request: ChatRequest) -> ChatResponse:
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
             rewrite_query_for_retrieval=request.rewrite_query_for_retrieval,
+            retrieval_query_override=request.retrieval_query,
+            use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
         )
     except PromptBudgetError as exc:
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
@@ -892,14 +1050,24 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
-            retrieval_query = pipeline.rewrite_query_for_retrieval(
-                request.question,
-                conversation_history=request.conversation_history,
-                conversation_summary=request.conversation_summary,
-                enabled=request.rewrite_query_for_retrieval,
-                model=resolved_model,
-                api_key=resolved_api_key,
-                base_url=resolved_base_url,
+            if request.retrieval_query is None:
+                retrieval_query = pipeline.rewrite_query_for_retrieval(
+                    request.question,
+                    conversation_history=request.conversation_history,
+                    conversation_summary=request.conversation_summary,
+                    enabled=request.rewrite_query_for_retrieval,
+                    model=resolved_model,
+                    api_key=resolved_api_key,
+                    base_url=resolved_base_url,
+                )
+            else:
+                retrieval_query = _clean_transformed_query(request.retrieval_query)
+                if not retrieval_query:
+                    raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
+            answer_question = (
+                retrieval_query
+                if request.use_retrieval_query_for_answer
+                else request.question
             )
             candidates = pipeline.retrieve_candidates(
                 retrieval_query,
@@ -929,6 +1097,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                         "question": request.question,
                         "original_question": request.question,
                         "retrieval_query": retrieval_query,
+                        "answer_question": answer_question,
                         "retrieval_query_was_rewritten": retrieval_query != request.question,
                         "retrieved_chunks": baseline_payload,
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
@@ -936,7 +1105,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 )
             retrieved: list = []
             rerank_seconds = 0.0
-            for event in pipeline.apply_rerank_iter(request.question, candidates):
+            for event in pipeline.apply_rerank_iter(retrieval_query, candidates):
                 kind = event[0]
                 if kind == "eta":
                     # Up-front estimate from past runs; None on the first ever run.
@@ -962,7 +1131,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
             )
             budget, conversation_summary = pipeline.build_chat_prompt(
-                question=request.question,
+                question=answer_question,
                 retrieved=retrieved,
                 length=length,
                 model=resolved_model,
@@ -982,6 +1151,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                     "question": request.question,
                     "original_question": request.question,
                     "retrieval_query": retrieval_query,
+                    "answer_question": answer_question,
                     "retrieval_query_was_rewritten": retrieval_query != request.question,
                     "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
@@ -1013,6 +1183,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "answer": answer,
                 "original_question": request.question,
                 "retrieval_query": retrieval_query,
+                "answer_question": answer_question,
                 "retrieval_query_was_rewritten": retrieval_query != request.question,
                 "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
@@ -1029,9 +1200,10 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "generation_time_seconds": round(generation_seconds, 3),
             }
             logger.info(
-                "Streamed answer question=%r retrieval_query=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
+                "Streamed answer question=%r retrieval_query=%r answer_question=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
                 request.question,
                 retrieval_query,
+                answer_question,
                 length,
                 resolved_model,
                 elapsed,

@@ -20,6 +20,7 @@ class IngestResponse(BaseModel):
 
 class RetrieveRequest(BaseModel):
     question: str
+    retrieval_query: str | None = None
     wp_id: str | None = None
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
@@ -38,6 +39,8 @@ class RetrieveRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+    retrieval_query: str | None = None
+    use_retrieval_query_for_answer: bool = False
     wp_id: str | None = None
     rewrite_query_for_retrieval: bool = False
     # Generic {placeholderName: value} map for the parameter placeholders the
@@ -92,6 +95,23 @@ class InlinePlaceholderDef(BaseModel):
     options: list[OptionDef] = Field(default_factory=list)
 
 
+class QueryTransformAction(BaseModel):
+    id: str
+    label: str = ""
+    type: Literal["lindat", "llm"]
+    model: str | None = None
+    source_language: str | None = None
+    target_language: str | None = None
+    prompt: str | None = None
+
+
+class QueryTransformConfig(BaseModel):
+    enabled: bool = False
+    actions: list[QueryTransformAction] = Field(default_factory=list)
+    default_action: str | None = None
+    use_transformed_for_answer: bool = False
+
+
 class PromptPreset(BaseModel):
     id: str
     name: str
@@ -99,6 +119,7 @@ class PromptPreset(BaseModel):
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
+    query_transform: QueryTransformConfig | None = None
     owner_id: str | None = None
     updated_at: str | None = None
 
@@ -110,6 +131,7 @@ class PromptPresetSaveRequest(BaseModel):
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
+    query_transform: QueryTransformConfig | None = None
     owner_id: str | None = None
     admin_password: str | None = None
 
@@ -174,6 +196,27 @@ class UnlockResponse(BaseModel):
     unlocked: bool
 
 
+class QueryTransformRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=10000)
+    wp_id: str | None = None
+    prompt_preset_id: str | None = None
+    action_id: str | None = None
+    action: QueryTransformAction | None = None
+    instruction: str | None = Field(default=None, max_length=10000)
+    llm_provider: str | None = None
+    model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    admin_password: str | None = None
+
+
+class QueryTransformResponse(BaseModel):
+    original_question: str
+    transformed_query: str
+    action_id: str
+    action_type: Literal["lindat", "llm"]
+
+
 class Source(BaseModel):
     citation_id: str
     chunk_id: str
@@ -216,6 +259,8 @@ class TokenBudgetMetadata(BaseModel):
 
 class RetrieveResponse(BaseModel):
     question: str
+    original_question: str | None = None
+    retrieval_query: str | None = None
     retrieved_chunks: list[RetrievedChunk]
     baseline_chunks: list[RetrievedChunk] = Field(default_factory=list)
 
@@ -224,6 +269,7 @@ class ChatResponse(BaseModel):
     answer: str
     original_question: str | None = None
     retrieval_query: str | None = None
+    answer_question: str | None = None
     retrieval_query_was_rewritten: bool = False
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]

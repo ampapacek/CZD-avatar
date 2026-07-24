@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.rag.query_transforms import normalize_query_transform
 from app.rag.wp_config import resolve_wp_id
 
 
@@ -29,6 +30,7 @@ def save_prompt_preset(
     user_prompt_template: str,
     wp_id: str | None = None,
     placeholders: dict[str, Any] | None = None,
+    query_transform: dict[str, Any] | None = None,
     preset_id: str | None = None,
     owner_id: str | None = None,
 ) -> dict[str, Any]:
@@ -54,6 +56,7 @@ def save_prompt_preset(
         "system_prompt": system_prompt,
         "user_prompt_template": user_prompt_template,
         "placeholders": _normalize_placeholders(placeholders),
+        "query_transform": normalize_query_transform(query_transform),
         "owner_id": resolved_owner,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -86,6 +89,7 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
         "system_prompt": str(item.get("system_prompt") or ""),
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
         "placeholders": _normalize_placeholders(item.get("placeholders")),
+        "query_transform": normalize_query_transform(item.get("query_transform")),
         "owner_id": str(item.get("owner_id") or ""),
         "updated_at": str(item.get("updated_at") or ""),
     }
