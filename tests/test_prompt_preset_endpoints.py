@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -120,6 +121,28 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "owner_id",
                 "updated_at",
             },
+        )
+
+    def test_write_failure_returns_structured_json_error(self) -> None:
+        with patch.object(
+            main,
+            "save_prompt_preset",
+            side_effect=PermissionError("permission denied"),
+        ):
+            response = self.client.post(
+                "/prompt-presets",
+                json={
+                    "name": "Cannot save",
+                    "system_prompt": "sys",
+                    "user_prompt_template": "{question}",
+                    "owner_id": "owner-a",
+                },
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"detail": "Sdílený prompt se nepodařilo uložit na server."},
         )
 
     def test_ownerless_preset_requires_password(self) -> None:

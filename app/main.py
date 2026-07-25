@@ -496,23 +496,30 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
     existing = _find_prompt_preset(request.id) if request.id else None
     if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
-    preset = save_prompt_preset(
-        settings.prompt_presets_path,
-        name=name,
-        system_prompt=request.system_prompt,
-        user_prompt_template=request.user_prompt_template,
-        wp_id=request.wp_id,
-        placeholders={
-            name: definition.model_dump() for name, definition in request.placeholders.items()
-        },
-        query_transform=(
-            request.query_transform.model_dump()
-            if request.query_transform is not None
-            else None
-        ),
-        preset_id=request.id,
-        owner_id=request.owner_id,
-    )
+    try:
+        preset = save_prompt_preset(
+            settings.prompt_presets_path,
+            name=name,
+            system_prompt=request.system_prompt,
+            user_prompt_template=request.user_prompt_template,
+            wp_id=request.wp_id,
+            placeholders={
+                name: definition.model_dump() for name, definition in request.placeholders.items()
+            },
+            query_transform=(
+                request.query_transform.model_dump()
+                if request.query_transform is not None
+                else None
+            ),
+            preset_id=request.id,
+            owner_id=request.owner_id,
+        )
+    except OSError as exc:
+        logger.exception("Could not save prompt preset to %s", settings.prompt_presets_path)
+        raise HTTPException(
+            status_code=500,
+            detail="Sdílený prompt se nepodařilo uložit na server.",
+        ) from exc
     return PromptPreset(**preset)
 
 

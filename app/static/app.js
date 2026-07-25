@@ -3368,9 +3368,9 @@ async function saveCurrentPromptPreset({ mode }) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
+  const data = await safeJson(response);
   if (!response.ok) {
-    throw new Error(data.detail || "Prompt preset save failed");
+    throw new Error(data.detail || `Sdílený prompt se nepodařilo uložit (HTTP ${response.status}).`);
   }
   removeLocalPromptPreset(data.id);
   draftPromptPreset = null;
