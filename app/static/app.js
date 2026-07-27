@@ -91,6 +91,7 @@ const queryTransformDisabledNote = document.querySelector("#queryTransformDisabl
 const queryTransformSettingsBody = document.querySelector("#queryTransformSettingsBody");
 const queryTransformActionDefsList = document.querySelector("#queryTransformActionDefsList");
 const newQueryTransformActionButton = document.querySelector("#newQueryTransformActionButton");
+const resetBuiltinQueryTransformButton = document.querySelector("#resetBuiltinQueryTransformButton");
 const queryTransformActionDialog = document.querySelector("#queryTransformActionDialog");
 const queryTransformActionTitle = document.querySelector("#queryTransformActionTitle");
 const closeQueryTransformActionButton = document.querySelector("#closeQueryTransformActionButton");
@@ -213,6 +214,7 @@ const KNOWN_PROMPT_VARIABLES = new Set([
 const CODE_FLOOR_PLACEHOLDERS = new Set(["length", "custom_instructions"]);
 const SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE = "Nejdřív ulož prompt jako nový. Abys mohl přidat nové proměnné.";
 const SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE = "Nejdřív ulož prompt jako nový (lokálně nebo sdíleně). Pak půjde zapnout úprava dotazu.";
+const UNLOCK_BUILTIN_QUERY_TRANSFORM_MESSAGE = "Transformaci vestavěného profilu může upravit administrátor. Nejdřív aktivuj admin přístup.";
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
@@ -1942,6 +1944,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
     updatePromptActionButtonStates(promptPreset.value);
+    renderQueryTransformSettings();
     if (!silent) {
       setUnlockStatus("Zadej admin heslo.", "error");
       statusEl.className = "status error";
@@ -1969,6 +1972,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     const persisted = persistLlmSettings();
     refreshModelOptions(appSettings);
     updatePromptActionButtonStates(promptPreset.value);
+    renderQueryTransformSettings();
     if (!silent) {
       if (persisted) {
         setUnlockStatus("Admin přístup je aktivní.", "success");
@@ -1988,6 +1992,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
     updatePromptActionButtonStates(promptPreset.value);
+    renderQueryTransformSettings();
     if (!silent) {
       setUnlockStatus(error.message, "error");
       statusEl.className = "status error";
@@ -2006,6 +2011,7 @@ function logoutAdminAccess() {
   refreshModelOptions(appSettings);
   renderPromptPresets();
   renderPlaceholderControls();
+  renderQueryTransformSettings();
   updatePromptShareNote();
   setUnlockStatus("Admin přístup byl odhlášen.", "success");
   statusEl.className = "status";
@@ -2900,16 +2906,23 @@ function renderQueryTransformSettings() {
     return;
   }
   const preset = getPromptPresetById(activePromptPresetId);
-  const editable = canEditPromptSpecificPlaceholders(activePromptPresetId);
+  const editable = canEditPromptQueryTransform(activePromptPresetId);
   queryTransformEnabledToggle.disabled = !preset || !editable;
   if (queryTransformDisabledNote) {
     queryTransformDisabledNote.hidden = !preset || editable;
-    queryTransformDisabledNote.textContent = editable ? "" : SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE;
+    queryTransformDisabledNote.textContent = editable ? "" : queryTransformEditMessage(activePromptPresetId);
   }
   if (newQueryTransformActionButton) {
     newQueryTransformActionButton.disabled = !editable;
   }
   const qt = activePromptQueryTransform();
+  if (resetBuiltinQueryTransformButton) {
+    resetBuiltinQueryTransformButton.hidden = !(
+      isUnshadowedBuiltInPromptPreset(activePromptPresetId)
+      && llmModelsUnlocked
+      && qt
+    );
+  }
   const enabled = Boolean(qt?.enabled);
   queryTransformEnabledToggle.checked = enabled;
   if (queryTransformAutoApplyToggle) {
@@ -2924,7 +2937,7 @@ function renderQueryTransformSettings() {
   }
   const actions = Array.isArray(qt?.actions) ? qt.actions : [];
   const disabledNote = !editable
-    ? `<p class="field-note unsaved-note">${SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE}</p>`
+    ? `<p class="field-note unsaved-note">${escapeHtml(queryTransformEditMessage(activePromptPresetId))}</p>`
     : "";
   if (!actions.length) {
     queryTransformActionDefsList.innerHTML = `<p class="field-note">Zatím žádné akce úpravy dotazu.</p>${disabledNote}`;
@@ -2968,9 +2981,10 @@ async function updateActiveQueryTransform(mutator) {
   if (!preset) {
     throw new Error("Nejdřív vyber prompt.");
   }
-  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
-    throw new Error(SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE);
+  if (!canEditPromptQueryTransform(activePromptPresetId)) {
+    throw new Error(queryTransformEditMessage(activePromptPresetId));
   }
+  const builtinOverride = isUnshadowedBuiltInPromptPreset(activePromptPresetId);
   const previous = preset.query_transform ? JSON.parse(JSON.stringify(preset.query_transform)) : null;
   if (!preset.query_transform || typeof preset.query_transform !== "object") {
     preset.query_transform = { enabled: false, auto_apply: true, actions: [] };
@@ -2983,7 +2997,25 @@ async function updateActiveQueryTransform(mutator) {
     preset.query_transform.default_action = preset.query_transform.actions[0]?.id || null;
   }
   try {
-    if (isLocalPromptPreset(activePromptPresetId)) {
+    if (builtinOverride) {
+      const response = await fetch(
+        `prompt-presets/builtin-overrides/${encodeURIComponent(activePromptPresetId)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query_transform: preset.query_transform,
+            admin_password: llmUnlockPassword.value.trim() || null,
+          }),
+        },
+      );
+      const data = await safeJson(response);
+      if (!response.ok) {
+        throw new Error(data.detail || "Transformaci vestavěného profilu se nepodařilo uložit.");
+      }
+      setBuiltInPromptQueryTransform(activePromptPresetId, data.query_transform);
+      setPromptPresetStatus("Transformace vestavěného profilu byla uložena na serveru.", "success");
+    } else if (isLocalPromptPreset(activePromptPresetId)) {
       persistLocalPromptPresets();
       setPromptPresetStatus("Transformace dotazu byla uložena lokálně.", "success");
     } else if (isServerPromptPreset(activePromptPresetId)) {
@@ -3048,8 +3080,8 @@ function openQueryTransformActionEditor(actionId) {
 }
 
 newQueryTransformActionButton?.addEventListener("click", () => {
-  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
-    setPromptPresetStatus(SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE, "error");
+  if (!canEditPromptQueryTransform(activePromptPresetId)) {
+    setPromptPresetStatus(queryTransformEditMessage(activePromptPresetId), "error");
     return;
   }
   openQueryTransformActionEditor(null);
@@ -3186,6 +3218,38 @@ queryTransformAutoApplyToggle?.addEventListener("change", async () => {
   } catch (error) {
     setPromptPresetStatus(error.message, "error");
     renderQueryTransformSettings();
+  }
+});
+
+resetBuiltinQueryTransformButton?.addEventListener("click", async () => {
+  if (!isUnshadowedBuiltInPromptPreset(activePromptPresetId) || !llmModelsUnlocked) {
+    return;
+  }
+  if (!window.confirm("Odstranit uloženou transformaci a obnovit výchozí nastavení tohoto profilu?")) {
+    return;
+  }
+  resetBuiltinQueryTransformButton.disabled = true;
+  try {
+    const params = new URLSearchParams({
+      admin_password: llmUnlockPassword.value.trim(),
+    });
+    const response = await fetch(
+      `prompt-presets/builtin-overrides/${encodeURIComponent(activePromptPresetId)}?${params.toString()}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      const data = await safeJson(response);
+      throw new Error(data.detail || "Výchozí nastavení transformace se nepodařilo obnovit.");
+    }
+    deleteBuiltInPromptQueryTransform(activePromptPresetId);
+    setPromptPresetStatus("Výchozí nastavení transformace bylo obnoveno.", "success");
+    clearAppliedQueryTransform({ refreshButton: false });
+    renderQueryTransformSettings();
+    renderQueryTransformSection();
+  } catch (error) {
+    setPromptPresetStatus(error.message, "error");
+  } finally {
+    resetBuiltinQueryTransformButton.disabled = false;
   }
 });
 
@@ -3803,6 +3867,12 @@ function isBuiltInPromptPreset(presetId) {
   return allBuiltInPromptPresets().some((preset) => preset.id === presetId);
 }
 
+function isUnshadowedBuiltInPromptPreset(presetId) {
+  return isBuiltInPromptPreset(presetId)
+    && !isLocalPromptPreset(presetId)
+    && !isServerPromptPreset(presetId);
+}
+
 function isLocalPromptPreset(presetId) {
   return localPromptPresets.some((preset) => preset.id === presetId);
 }
@@ -3862,6 +3932,37 @@ function updatePromptActionButtonStates(presetId) {
 
 function canEditPromptSpecificPlaceholders(presetId) {
   return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
+}
+
+function canEditPromptQueryTransform(presetId) {
+  return canEditPromptSpecificPlaceholders(presetId)
+    || (isUnshadowedBuiltInPromptPreset(presetId) && llmModelsUnlocked);
+}
+
+function queryTransformEditMessage(presetId) {
+  return isUnshadowedBuiltInPromptPreset(presetId)
+    ? UNLOCK_BUILTIN_QUERY_TRANSFORM_MESSAGE
+    : SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE;
+}
+
+function setBuiltInPromptQueryTransform(presetId, queryTransform) {
+  for (const wp of getWpConfigs()) {
+    const preset = (wp.builtin_prompts || []).find((item) => item.id === presetId);
+    if (preset) {
+      preset.query_transform = queryTransform;
+      return;
+    }
+  }
+}
+
+function deleteBuiltInPromptQueryTransform(presetId) {
+  for (const wp of getWpConfigs()) {
+    const preset = (wp.builtin_prompts || []).find((item) => item.id === presetId);
+    if (preset) {
+      delete preset.query_transform;
+      return;
+    }
+  }
 }
 
 // Built-in prompts are shipped per WP by the backend (appSettings.wps). Each may

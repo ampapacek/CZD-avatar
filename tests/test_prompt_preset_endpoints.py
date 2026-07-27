@@ -209,6 +209,105 @@ class PromptPresetEndpointTests(unittest.TestCase):
         self.assertEqual(owner_update.status_code, 200, owner_update.text)
         self.assertEqual(owner_update.json()["system_prompt"], "owner update")
 
+    def test_admin_saves_transformation_only_override_for_builtin_prompt(self) -> None:
+        saved_prompt = self._create("Unrelated", owner_id="owner-a")
+        response = self.client.put(
+            "/prompt-presets/builtin-overrides/wp1-ucitel",
+            json={
+                "admin_password": "s3cret",
+                "query_transform": {
+                    "enabled": True,
+                    "auto_apply": True,
+                    "default_action": "translate",
+                    "actions": [
+                        {
+                            "id": "translate",
+                            "label": "Translate",
+                            "description": "Translate the query.",
+                            "type": "llm",
+                            "prompt_template": "Translate: {question}",
+                        }
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["prompt_id"], "wp1-ucitel")
+        document = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(document["presets"][0]["id"], saved_prompt["id"])
+        override = document["builtin_overrides"]["wp1-ucitel"]
+        self.assertEqual(set(override), {"query_transform"})
+        self.assertNotIn("system_prompt", override)
+
+        with patch.object(
+            main.pipeline.msearch_retriever,
+            "live_collections_by_prefix",
+            return_value={},
+        ):
+            wps = main._wps_payload_with_live_collections()
+        builtin = next(
+            prompt
+            for wp in wps
+            for prompt in wp["builtin_prompts"]
+            if prompt["id"] == "wp1-ucitel"
+        )
+        self.assertTrue(builtin["system_prompt"])
+        self.assertTrue(builtin["query_transform"]["enabled"])
+        self.assertEqual(main._effective_query_transform("wp1-ucitel")["default_action"], "translate")
+
+    def test_builtin_override_requires_admin_password(self) -> None:
+        response = self.client.put(
+            "/prompt-presets/builtin-overrides/wp1-ucitel",
+            json={
+                "query_transform": {
+                    "enabled": False,
+                    "actions": [],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.path.exists())
+
+    def test_builtin_override_rejects_unknown_prompt(self) -> None:
+        response = self.client.put(
+            "/prompt-presets/builtin-overrides/not-a-prompt",
+            json={
+                "admin_password": "s3cret",
+                "query_transform": {
+                    "enabled": False,
+                    "actions": [],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_can_remove_builtin_override_without_removing_presets(self) -> None:
+        saved_prompt = self._create("Unrelated", owner_id="owner-a")
+        created = self.client.put(
+            "/prompt-presets/builtin-overrides/wp1-ucitel",
+            json={
+                "admin_password": "s3cret",
+                "query_transform": {
+                    "enabled": False,
+                    "actions": [],
+                },
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        deleted = self.client.delete(
+            "/prompt-presets/builtin-overrides/wp1-ucitel",
+            params={"admin_password": "s3cret"},
+        )
+
+        self.assertEqual(deleted.status_code, 204)
+        document = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(document["builtin_overrides"], {})
+        self.assertEqual(document["presets"][0]["id"], saved_prompt["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

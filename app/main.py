@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.models import (
+    BuiltinPromptOverride,
+    BuiltinPromptOverrideSaveRequest,
     ChatRequest,
     ChatResponse,
     HealthResponse,
@@ -39,7 +41,14 @@ from app.rag.msearch import clear_collections_cache
 from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
-from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
+from app.rag.prompt_presets import (
+    delete_builtin_prompt_override,
+    delete_prompt_preset,
+    load_builtin_prompt_overrides,
+    load_prompt_presets,
+    save_builtin_prompt_override,
+    save_prompt_preset,
+)
 from app.rag.query_transforms import render_query_transform_prompt, valid_lindat_model
 from app.rag.shared_history import (
     delete_shared_history_item,
@@ -72,6 +81,7 @@ from app.rag.prompts import (
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
 from app.rag.wp_config import (
+    WP_CONFIGS,
     default_wp_id,
     gated_msearch_collection_ids,
     get_wp_config,
@@ -340,7 +350,12 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
 
     grouped = pipeline.msearch_retriever.live_collections_by_prefix()
     payload = wp_public_payload()
+    builtin_overrides = load_builtin_prompt_overrides(settings.prompt_presets_path)
     for wp in payload:
+        for prompt in wp["builtin_prompts"]:
+            override = builtin_overrides.get(prompt["id"])
+            if override is not None:
+                prompt["query_transform"] = override["query_transform"]
         live = grouped.get(wp_collection_prefix(wp["id"])) or []
         if not live:
             continue
@@ -443,14 +458,18 @@ def _secure_eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
-def _find_prompt_preset(preset_id: str) -> dict[str, str] | None:
+def _find_prompt_preset(preset_id: str) -> dict[str, object] | None:
     return next(
         (preset for preset in load_prompt_presets(settings.prompt_presets_path) if preset["id"] == preset_id),
         None,
     )
 
 
-def _can_modify_prompt_preset(preset: dict[str, str], owner_id: str | None, password: str | None) -> bool:
+def _can_modify_prompt_preset(
+    preset: dict[str, object],
+    owner_id: str | None,
+    password: str | None,
+) -> bool:
     owner = (preset.get("owner_id") or "").strip()
     requester = (owner_id or "").strip()
     if owner and requester and _secure_eq(owner, requester):
@@ -460,6 +479,24 @@ def _can_modify_prompt_preset(preset: dict[str, str], owner_id: str | None, pass
     ):
         return True
     return False
+
+
+def _require_admin_password(password: str | None) -> None:
+    if not settings.admin_password or not _secure_eq(
+        (password or "").strip(), settings.admin_password
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Úpravy vestavěných profilů vyžadují admin přístup.",
+        )
+
+
+def _builtin_prompt_exists(prompt_id: str) -> bool:
+    return any(
+        prompt.id == prompt_id
+        for wp in WP_CONFIGS
+        for prompt in wp.builtin_prompts
+    )
 
 
 @app.get("/prompt-presets", response_model=list[PromptPreset])
@@ -511,6 +548,60 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
     return PromptPreset(**preset)
 
 
+@app.put(
+    "/prompt-presets/builtin-overrides/{prompt_id}",
+    response_model=BuiltinPromptOverride,
+)
+def put_builtin_prompt_override(
+    prompt_id: str,
+    request: BuiltinPromptOverrideSaveRequest,
+) -> BuiltinPromptOverride:
+    _require_admin_password(request.admin_password)
+    if not _builtin_prompt_exists(prompt_id):
+        raise HTTPException(status_code=404, detail="Vestavěný prompt nebyl nalezen.")
+    try:
+        override = save_builtin_prompt_override(
+            settings.prompt_presets_path,
+            prompt_id,
+            request.query_transform.model_dump(),
+        )
+    except OSError as exc:
+        logger.exception(
+            "Could not save built-in prompt override to %s",
+            settings.prompt_presets_path,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Transformaci vestavěného promptu se nepodařilo uložit.",
+        ) from exc
+    return BuiltinPromptOverride(prompt_id=prompt_id, **override)
+
+
+@app.delete(
+    "/prompt-presets/builtin-overrides/{prompt_id}",
+    status_code=204,
+)
+def remove_builtin_prompt_override(
+    prompt_id: str,
+    admin_password: str | None = None,
+) -> Response:
+    _require_admin_password(admin_password)
+    if not _builtin_prompt_exists(prompt_id):
+        raise HTTPException(status_code=404, detail="Vestavěný prompt nebyl nalezen.")
+    try:
+        delete_builtin_prompt_override(settings.prompt_presets_path, prompt_id)
+    except OSError as exc:
+        logger.exception(
+            "Could not delete built-in prompt override from %s",
+            settings.prompt_presets_path,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Výchozí nastavení transformace se nepodařilo obnovit.",
+        ) from exc
+    return Response(status_code=204)
+
+
 @app.delete("/prompt-presets/{preset_id}", status_code=204)
 def remove_prompt_preset(
     preset_id: str,
@@ -534,6 +625,9 @@ def _effective_query_transform(
         saved = _find_prompt_preset(prompt_id)
         if saved is not None and saved.get("query_transform") is not None:
             return saved["query_transform"]
+        builtin = load_builtin_prompt_overrides(settings.prompt_presets_path).get(prompt_id)
+        if builtin is not None:
+            return builtin["query_transform"]
     return None
 
 

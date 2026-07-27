@@ -10,17 +10,27 @@ from app.rag.query_transforms import normalize_query_transform
 from app.rag.wp_config import resolve_wp_id
 
 
-def load_prompt_presets(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+def load_prompt_presets(path: Path) -> list[dict[str, Any]]:
+    data = _load_document(path)
     presets = data.get("presets") if isinstance(data, dict) else data
     if not isinstance(presets, list):
         return []
     return [_normalize_preset(item) for item in presets if isinstance(item, dict)]
+
+
+def load_builtin_prompt_overrides(path: Path) -> dict[str, dict[str, Any]]:
+    data = _load_document(path)
+    raw_overrides = data.get("builtin_overrides") if isinstance(data, dict) else None
+    if not isinstance(raw_overrides, dict):
+        return {}
+    overrides: dict[str, dict[str, Any]] = {}
+    for prompt_id, value in raw_overrides.items():
+        if not isinstance(value, dict):
+            continue
+        query_transform = normalize_query_transform(value.get("query_transform"))
+        if query_transform is not None:
+            overrides[str(prompt_id)] = {"query_transform": query_transform}
+    return overrides
 
 
 def save_prompt_preset(
@@ -76,9 +86,59 @@ def delete_prompt_preset(path: Path, preset_id: str) -> bool:
     return True
 
 
-def _write_presets(path: Path, presets: list[dict[str, str]]) -> None:
+def save_builtin_prompt_override(
+    path: Path,
+    prompt_id: str,
+    query_transform: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = normalize_query_transform(query_transform)
+    if normalized is None:
+        raise ValueError("A query transformation is required.")
+    overrides = load_builtin_prompt_overrides(path)
+    record = {"query_transform": normalized}
+    overrides[prompt_id] = record
+    _write_document(path, load_prompt_presets(path), overrides)
+    return record
+
+
+def delete_builtin_prompt_override(path: Path, prompt_id: str) -> bool:
+    overrides = load_builtin_prompt_overrides(path)
+    if prompt_id not in overrides:
+        return False
+    del overrides[prompt_id]
+    _write_document(path, load_prompt_presets(path), overrides)
+    return True
+
+
+def _write_presets(path: Path, presets: list[dict[str, Any]]) -> None:
+    _write_document(path, presets, load_builtin_prompt_overrides(path))
+
+
+def _write_document(
+    path: Path,
+    presets: list[dict[str, Any]],
+    builtin_overrides: dict[str, dict[str, Any]],
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"presets": presets}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {"presets": presets, "builtin_overrides": builtin_overrides},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_document(path: Path) -> dict[str, Any] | list[Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, (dict, list)) else {}
 
 
 def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:

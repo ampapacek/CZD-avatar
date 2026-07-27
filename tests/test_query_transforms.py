@@ -241,8 +241,11 @@ class QueryTransformEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("není pro tento profil povolena", response.json()["detail"])
 
-    def test_wp_configuration_does_not_expose_query_transforms(self) -> None:
-        with patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}):
+    def test_wp_configuration_without_override_does_not_expose_query_transforms(self) -> None:
+        with (
+            patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}),
+            patch("app.main.load_builtin_prompt_overrides", return_value={}),
+        ):
             wps = main._wps_payload_with_live_collections()
 
         self.assertTrue(wps)

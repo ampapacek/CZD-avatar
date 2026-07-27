@@ -3,8 +3,11 @@ import unittest
 from pathlib import Path
 
 from app.rag.prompt_presets import (
+    delete_builtin_prompt_override,
     delete_prompt_preset,
+    load_builtin_prompt_overrides,
     load_prompt_presets,
+    save_builtin_prompt_override,
     save_prompt_preset,
 )
 
@@ -86,6 +89,55 @@ class PromptPresetStorageTests(unittest.TestCase):
         created = self._save("Experiment", owner_id="owner-a")
         self.assertTrue(delete_prompt_preset(self.path, created["id"]))
         self.assertEqual(load_prompt_presets(self.path), [])
+
+    def test_builtin_override_round_trips_without_copying_prompt(self) -> None:
+        override = save_builtin_prompt_override(
+            self.path,
+            "wp1-ucitel",
+            {
+                "enabled": True,
+                "actions": [
+                    {
+                        "id": "translate",
+                        "description": "Translate the query.",
+                        "type": "llm",
+                        "prompt_template": "Translate: {question}",
+                    }
+                ],
+            },
+        )
+
+        self.assertTrue(override["query_transform"]["enabled"])
+        written = load_builtin_prompt_overrides(self.path)["wp1-ucitel"]
+        self.assertEqual(written, override)
+        raw = self.path.read_text(encoding="utf-8")
+        self.assertNotIn('"system_prompt"', raw)
+        self.assertNotIn('"user_prompt_template"', raw)
+
+    def test_preset_writes_preserve_builtin_overrides(self) -> None:
+        save_builtin_prompt_override(
+            self.path,
+            "wp1-ucitel",
+            {"enabled": False, "actions": []},
+        )
+
+        created = self._save("Experiment", owner_id="owner-a")
+        self._save("Experiment v2", preset_id=created["id"], owner_id="owner-a")
+        delete_prompt_preset(self.path, created["id"])
+
+        self.assertIn("wp1-ucitel", load_builtin_prompt_overrides(self.path))
+
+    def test_deleting_builtin_override_preserves_saved_presets(self) -> None:
+        created = self._save("Experiment", owner_id="owner-a")
+        save_builtin_prompt_override(
+            self.path,
+            "wp1-ucitel",
+            {"enabled": False, "actions": []},
+        )
+
+        self.assertTrue(delete_builtin_prompt_override(self.path, "wp1-ucitel"))
+        self.assertFalse(delete_builtin_prompt_override(self.path, "wp1-ucitel"))
+        self.assertEqual(load_prompt_presets(self.path)[0]["id"], created["id"])
 
     def test_save_records_wp_id(self) -> None:
         record = self._save("Scoped", wp_id="WP2-média")

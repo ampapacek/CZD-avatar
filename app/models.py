@@ -140,6 +140,16 @@ class PromptPresetSaveRequest(BaseModel):
     admin_password: str | None = None
 
 
+class BuiltinPromptOverride(BaseModel):
+    prompt_id: str
+    query_transform: QueryTransformConfig
+
+
+class BuiltinPromptOverrideSaveRequest(BaseModel):
+    query_transform: QueryTransformConfig
+    admin_password: str | None = None
+
+
 class SharedHistoryItem(BaseModel):
     id: str
     owner_id: str = ""
