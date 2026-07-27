@@ -6,7 +6,6 @@ import hmac
 import random
 import time
 import httpx
-from dataclasses import asdict
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -342,8 +341,6 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
     grouped = pipeline.msearch_retriever.live_collections_by_prefix()
     payload = wp_public_payload()
     for wp in payload:
-        if wp["query_transform"] is None:
-            wp["query_transform"] = {"enabled": False, "actions": []}
         live = grouped.get(wp_collection_prefix(wp["id"])) or []
         if not live:
             continue
@@ -530,7 +527,6 @@ def remove_prompt_preset(
 
 
 def _effective_query_transform(
-    wp_id: str | None,
     prompt_preset_id: str | None,
 ) -> dict[str, object] | None:
     prompt_id = (prompt_preset_id or "").strip()
@@ -538,19 +534,18 @@ def _effective_query_transform(
         saved = _find_prompt_preset(prompt_id)
         if saved is not None and saved.get("query_transform") is not None:
             return saved["query_transform"]
-    wp = get_wp_config(resolve_wp_id(wp_id))
-    return asdict(wp.query_transform) if wp and wp.query_transform is not None else None
+    return None
 
 
 def _resolved_query_transform_action(request: QueryTransformRequest) -> dict[str, object]:
     prompt_id = (request.prompt_preset_id or "").strip()
-    # Browser-local/draft personas are not stored on the server, so their
+    # Browser-local/draft prompts are not stored on the server, so their
     # configured action must travel with the request. Server-known and built-in
-    # personas are always resolved from server configuration; do not let a
-    # client-supplied action bypass an explicitly disabled profile.
+    # prompts are always resolved from server configuration; do not let a
+    # client-supplied action bypass an explicitly disabled prompt.
     if request.action is not None and prompt_id.startswith(("local-", "draft-")):
         return request.action.model_dump()
-    transform = _effective_query_transform(request.wp_id, request.prompt_preset_id)
+    transform = _effective_query_transform(request.prompt_preset_id)
     if not transform or not transform.get("enabled"):
         raise HTTPException(status_code=400, detail="Úprava dotazu není pro tento profil povolena.")
     actions = transform.get("actions")

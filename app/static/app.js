@@ -299,17 +299,11 @@ function resolveWpId(wpId) {
   return configs[0]?.id || "";
 }
 
-// Query-transform configuration uses tri-state persona inheritance:
-// missing/null inherits the WP default, while an explicit object (including
-// {enabled:false}) replaces it wholesale.
+// Query transforms belong to prompt presets. Built-in WP configuration does
+// not provide a fallback.
 function resolvedQueryTransformConfig() {
   const preset = getPromptPresetById(activePromptPresetId);
-  const hasPresetOverride = preset
-    && Object.prototype.hasOwnProperty.call(preset, "query_transform")
-    && preset.query_transform !== null;
-  const raw = hasPresetOverride
-    ? preset.query_transform
-    : getWpConfig(activeWpId)?.query_transform;
+  const raw = preset?.query_transform;
   if (!raw || typeof raw !== "object" || raw.enabled !== true) {
     return null;
   }

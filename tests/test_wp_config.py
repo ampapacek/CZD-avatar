@@ -71,7 +71,6 @@ class WPConfigTests(unittest.TestCase):
                 "local_retrieval_enabled",
                 "placeholders",
                 "requires_aiufal",
-                "query_transform",
             },
         )
         self.assertEqual(

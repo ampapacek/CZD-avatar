@@ -30,17 +30,37 @@ class RenderQueryTransformPromptTests(unittest.TestCase):
 
 
 class QueryTransformEndpointTests(unittest.TestCase):
-    """These rely on WP4-adiktologie's real, hardcoded query_transform config
-
-    (``app.rag.wp_config.WP_CONFIGS``), which ships the ``charles-cs-en``
-    lindat action and the ``llm-query-transform`` LLM action.
-    """
-
     def setUp(self) -> None:
         self.client = TestClient(main.app, raise_server_exceptions=False)
+        self.transform_preset = {
+            "id": "transform-preset",
+            "query_transform": {
+                "enabled": True,
+                "default_action": "charles-cs-en",
+                "actions": [
+                    {
+                        "id": "charles-cs-en",
+                        "label": "Translate CS to EN",
+                        "description": "Translate with Charles Translator.",
+                        "type": "lindat",
+                        "model": "cs-en",
+                    }
+                ],
+            },
+        }
+        self._find_preset = patch(
+            "app.main._find_prompt_preset",
+            side_effect=lambda preset_id: (
+                self.transform_preset if preset_id == self.transform_preset["id"] else None
+            ),
+        )
+        self._find_preset.start()
+
+    def tearDown(self) -> None:
+        self._find_preset.stop()
 
     @patch("app.main.httpx.post")
-    def test_wp4_lindat_action_sends_multipart_input_text(self, post: Mock) -> None:
+    def test_saved_prompt_lindat_action_sends_multipart_input_text(self, post: Mock) -> None:
         post.return_value = httpx.Response(
             200,
             text="How does alcohol affect sleep?",
@@ -52,6 +72,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
             json={
                 "question": "Jak alkohol ovlivňuje spánek?",
                 "wp_id": "WP4-adiktologie",
+                "prompt_preset_id": "transform-preset",
                 "action_id": "charles-cs-en",
             },
         )
@@ -199,6 +220,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
             json={
                 "question": "Jak alkohol ovlivňuje spánek?",
                 "wp_id": "WP4-adiktologie",
+                "prompt_preset_id": "transform-preset",
                 "action_id": "charles-cs-en",
             },
         )
@@ -219,21 +241,12 @@ class QueryTransformEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("není pro tento profil povolena", response.json()["detail"])
 
-    def test_wp4_configuration_is_exposed_without_hardcoded_endpoint_logic(self) -> None:
+    def test_wp_configuration_does_not_expose_query_transforms(self) -> None:
         with patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}):
             wps = main._wps_payload_with_live_collections()
 
-        wp4 = next(wp for wp in wps if wp["id"] == "WP4-adiktologie")
-        wp1 = next(wp for wp in wps if wp["id"] == "WP1-historie")
-        self.assertTrue(wp4["query_transform"]["enabled"])
-        self.assertEqual(
-            [action["id"] for action in wp4["query_transform"]["actions"]],
-            ["charles-cs-en", "llm-query-transform"],
-        )
-        self.assertTrue(
-            all(action["description"] for action in wp4["query_transform"]["actions"])
-        )
-        self.assertFalse(wp1["query_transform"]["enabled"])
+        self.assertTrue(wps)
+        self.assertTrue(all("query_transform" not in wp for wp in wps))
 
 
 class RetrievalQueryEndpointTests(unittest.TestCase):

@@ -58,36 +58,6 @@ class BuiltInPrompt:
 
 
 @dataclass(frozen=True)
-class QueryTransformAction:
-    """One query-transform action offered on the main page for a WP.
-
-    ``lindat`` actions call the Charles Translator API directly. ``llm`` actions
-    render ``prompt_template`` (plain ``str.replace``, not ``.format``, since the
-    template is free-form prose that may contain stray braces) with the literal
-    tokens ``{question}`` (required) and ``{instruction}`` (optional) and send
-    the result as a single user-role message; the admin is responsible for
-    including their own "return only the result" guardrail in the template.
-    """
-
-    id: str
-    label: str
-    description: str
-    type: str
-    use_transformed_for_answer: bool = False
-    model: str | None = None
-    source_language: str | None = None
-    target_language: str | None = None
-    prompt_template: str | None = None
-
-
-@dataclass(frozen=True)
-class QueryTransformConfig:
-    enabled: bool
-    default_action: str
-    actions: list[QueryTransformAction]
-
-
-@dataclass(frozen=True)
 class WPCollection:
     """A document collection a WP may search, mapped to an mSearch collection.
 
@@ -118,7 +88,6 @@ class WPConfig:
     # flag, so the restriction lives in one place (the WP, not per-collection ids
     # that change as new collection versions are published).
     requires_aiufal: bool = False
-    query_transform: QueryTransformConfig | None = None
 
 
 def _wp1_prompt(persona_key: str) -> str:
@@ -257,43 +226,6 @@ WP_CONFIGS: list[WPConfig] = [
         ],
         default_collection_id="wp4-default",
         questions_path="data/questions/wp4-adiktologie.txt",
-        query_transform=QueryTransformConfig(
-            enabled=True,
-            default_action="charles-cs-en",
-            actions=[
-                QueryTransformAction(
-                    id="charles-cs-en",
-                    label="Přeložit CS → EN",
-                    description=(
-                        "Přeloží původní dotaz z češtiny do angličtiny pomocí strojového "
-                        "překladače, bez použití LLM."
-                    ),
-                    type="lindat",
-                    model="cs-en",
-                    source_language="cs",
-                    target_language="en",
-                ),
-                QueryTransformAction(
-                    id="llm-query-transform",
-                    label="Upravit pomocí LLM",
-                    description=(
-                        "Do pole Instrukce napište, co má LLM udělat s původním dotazem, "
-                        "například „Přelož dotaz do angličtiny“ nebo „Přeformuluj dotaz pro "
-                        "odborné vyhledávání“."
-                    ),
-                    type="llm",
-                    prompt_template=(
-                        "Uprav následující vyhledávací dotaz podle instrukce uživatele, aby se podle "
-                        "něj v databázi našly co nejrelevantnější podklady. Pokud je instrukce "
-                        "uživatele prázdná, dotaz jen přelož do angličtiny beze změny významu.\n\n"
-                        "Vrať pouze výsledný dotaz jako čistý text, bez uvozovek, vysvětlení nebo "
-                        "jakéhokoli dalšího textu.\n\n"
-                        "Instrukce uživatele (může být prázdná): {instruction}\n\n"
-                        "Dotaz: {question}"
-                    ),
-                ),
-            ],
-        ),
     ),
 ]
 
