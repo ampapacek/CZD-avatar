@@ -45,6 +45,7 @@ class PromptPresetStorageTests(unittest.TestCase):
         updated = self._save("Experiment renamed", preset_id=created["id"], owner_id="owner-b")
         self.assertEqual(updated["owner_id"], "owner-a")
         self.assertEqual(updated["name"], "Experiment renamed")
+        self.assertEqual(updated["id"], created["id"])
 
     def test_authorized_edit_claims_ownerless_preset(self) -> None:
         created = self._save("Legacy", owner_id="")

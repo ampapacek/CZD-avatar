@@ -51,6 +51,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
         )
         self.assertEqual(update.status_code, 200, update.text)
         self.assertEqual(update.json()["name"], "Mine v2")
+        self.assertEqual(update.json()["id"], created["id"])
 
         deleted = self.client.delete(f"/prompt-presets/{created['id']}", params={"owner_id": "owner-a"})
         self.assertEqual(deleted.status_code, 204)

@@ -53,6 +53,7 @@ const promptPresetStatus = document.querySelector("#promptPresetStatus");
 const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
+const promptName = document.querySelector("#promptName");
 const systemPrompt = document.querySelector("#systemPrompt");
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
@@ -1382,12 +1383,13 @@ savePromptAsButton.addEventListener("click", async () => {
   }
 });
 updatePromptButton.addEventListener("click", async () => {
-  if (!getPromptPresetById(promptPreset.value)) {
+  if (!canUpdatePromptPreset(promptPreset.value)) {
     return;
   }
   updatePromptButton.disabled = true;
   try {
-    if (sharePromptOnServer.checked) {
+    if (isServerPromptPreset(promptPreset.value)
+      || (isDraftPromptPreset(promptPreset.value) && sharePromptOnServer.checked)) {
       await saveCurrentPromptPreset({ mode: "update" });
     } else {
       await saveCurrentPromptPresetLocally({ mode: "update" });
@@ -1395,7 +1397,7 @@ updatePromptButton.addEventListener("click", async () => {
   } catch (error) {
     setPromptPresetStatus(error.message, "error");
   } finally {
-    updatePromptButton.disabled = !getPromptPresetById(promptPreset.value);
+    updateUpdatePromptButtonState(promptPreset.value);
   }
 });
 newPromptButton.addEventListener("click", createBlankPromptDraft);
@@ -1483,7 +1485,7 @@ llmUnlockPassword.addEventListener("input", () => {
   setUnlockStatus("");
   persistLlmSettings();
   refreshModelOptions(appSettings);
-  updateDeletePromptButtonState(promptPreset.value);
+  updatePromptActionButtonStates(promptPreset.value);
 });
 customProviderName.addEventListener("input", () => {
   persistLlmSettings();
@@ -1862,7 +1864,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   if (!password) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
-    updateDeletePromptButtonState(promptPreset.value);
+    updatePromptActionButtonStates(promptPreset.value);
     if (!silent) {
       setUnlockStatus("Zadej admin heslo.", "error");
       statusEl.className = "status error";
@@ -1889,7 +1891,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     // localStorage must not turn a valid login into a failure.
     const persisted = persistLlmSettings();
     refreshModelOptions(appSettings);
-    updateDeletePromptButtonState(promptPreset.value);
+    updatePromptActionButtonStates(promptPreset.value);
     if (!silent) {
       if (persisted) {
         setUnlockStatus("Admin přístup je aktivní.", "success");
@@ -1908,7 +1910,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   } catch (error) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
-    updateDeletePromptButtonState(promptPreset.value);
+    updatePromptActionButtonStates(promptPreset.value);
     if (!silent) {
       setUnlockStatus(error.message, "error");
       statusEl.className = "status error";
@@ -3608,9 +3610,7 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId);
   renderPromptPresetSelect(promptPreset, resolvedId, settingsWpScope());
   activePromptPresetId = resolvedId;
-  updateDeletePromptButtonState(resolvedId);
-  updatePromptButton.disabled = !getPromptPresetById(resolvedId);
-  updatePromptButton.title = "";
+  updatePromptActionButtonStates(resolvedId);
   if (newInlinePlaceholderButton) {
     newInlinePlaceholderButton.disabled = !canEditPromptSpecificPlaceholders(resolvedId);
   }
@@ -3705,6 +3705,31 @@ function updateDeletePromptButtonState(presetId) {
     : "";
 }
 
+function canUpdatePromptPreset(presetId) {
+  return isLocalPromptPreset(presetId)
+    || isDraftPromptPreset(presetId)
+    || (isServerPromptPreset(presetId) && (isOwnedServerPromptPreset(presetId) || llmModelsUnlocked));
+}
+
+function updateUpdatePromptButtonState(presetId) {
+  const blockedForeignSharedPrompt = isServerPromptPreset(presetId)
+    && !isOwnedServerPromptPreset(presetId)
+    && !llmModelsUnlocked;
+  updatePromptButton.disabled = !canUpdatePromptPreset(presetId);
+  if (blockedForeignSharedPrompt) {
+    updatePromptButton.title = "Cizí sdílený prompt nelze aktualizovat. Ulož ho jako nový.";
+  } else if (isBuiltInPromptPreset(presetId) && !isLocalPromptPreset(presetId) && !isServerPromptPreset(presetId)) {
+    updatePromptButton.title = "Vestavěný prompt nejprve ulož jako nový.";
+  } else {
+    updatePromptButton.title = "";
+  }
+}
+
+function updatePromptActionButtonStates(presetId) {
+  updateDeletePromptButtonState(presetId);
+  updateUpdatePromptButtonState(presetId);
+}
+
 function canEditPromptSpecificPlaceholders(presetId) {
   return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId);
 }
@@ -3768,6 +3793,7 @@ function applyPromptPresetById(presetId) {
     renderPromptPresets(defaultPromptPresetId());
     return;
   }
+  promptName.value = preset.name || "";
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
   clearAppliedQueryTransform({ refreshButton: false });
@@ -3809,7 +3835,7 @@ function currentPromptDraft({ id = null, name }) {
 
 function selectedPromptNameForSave() {
   const preset = getPromptPresetById(promptPreset.value);
-  return preset?.name || "";
+  return promptName.value.trim() || preset?.name || "";
 }
 
 function promptNameForCreate(promptLabel) {
@@ -3836,9 +3862,9 @@ async function saveCurrentPromptPreset({ mode }) {
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber uložený prompt, který chceš aktualizovat.");
   }
-  // Update keeps the existing name; only "Save as new" asks for one, except a
-  // blank draft already asked for its name when it was created.
-  const name = isUpdate ? currentPreset.name : promptNameForCreate("Název promptu");
+  // Updates take the editable name field; "Save as new" asks for a name, except
+  // for a blank draft that already received its name when it was created.
+  const name = isUpdate ? promptName.value : promptNameForCreate("Název promptu");
   if (!name || !name.trim()) {
     return;
   }
@@ -3871,9 +3897,9 @@ async function saveCurrentPromptPresetLocally({ mode }) {
   if (isUpdate && !currentPreset) {
     throw new Error("Vyber prompt, který chceš aktualizovat.");
   }
-  // Update keeps the existing name; only "Save as new" asks for one, except a
-  // blank draft already asked for its name when it was created.
-  const name = isUpdate ? currentPreset.name : promptNameForCreate("Název lokálního promptu");
+  // Updates take the editable name field; "Save as new" asks for a name, except
+  // for a blank draft that already received its name when it was created.
+  const name = isUpdate ? promptName.value : promptNameForCreate("Název lokálního promptu");
   if (!name || !name.trim()) {
     return;
   }
@@ -4013,6 +4039,7 @@ function createBlankPromptDraft() {
     is_new: true,
   };
   activePromptPresetId = draftId;
+  promptName.value = draftPromptPreset.name;
   systemPrompt.value = draftPromptPreset.system_prompt;
   userPromptTemplate.value = draftPromptPreset.user_prompt_template;
   renderPlaceholderControls();
@@ -4035,10 +4062,13 @@ function resetPromptEditorValues() {
   activePromptPresetId = defaultPromptPresetId(settingsWpScope());
   const defaultPrompt = getPromptPresetById(defaultPromptPresetId(settingsWpScope()));
   if (defaultPrompt) {
+    promptName.value = defaultPrompt.name || "";
     systemPrompt.value = defaultPrompt.system_prompt || "";
     userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
     renderPlaceholderControls();
     updatePromptTemplateWarning();
+  } else {
+    promptName.value = "";
   }
 }
 
