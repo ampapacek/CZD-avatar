@@ -102,14 +102,14 @@ class QueryTransformAction(BaseModel):
     model: str | None = None
     source_language: str | None = None
     target_language: str | None = None
-    prompt: str | None = None
+    prompt_template: str | None = None
+    use_transformed_for_answer: bool = False
 
 
 class QueryTransformConfig(BaseModel):
     enabled: bool = False
     actions: list[QueryTransformAction] = Field(default_factory=list)
     default_action: str | None = None
-    use_transformed_for_answer: bool = False
 
 
 class PromptPreset(BaseModel):

@@ -1,7 +1,4 @@
-import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
@@ -9,116 +6,17 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.rag.llm import LLMGeneration
-from app.rag.query_transforms import load_query_transforms, resolve_query_transform
-
-
-class QueryTransformConfigTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.path = Path(self._tmp.name) / "query_transforms.json"
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def _write(self, payload: dict) -> None:
-        self.path.write_text(json.dumps(payload), encoding="utf-8")
-
-    def test_prompt_override_replaces_wp_actions_without_merging(self) -> None:
-        self._write(
-            {
-                "wp_defaults": {
-                    "WP4-adiktologie": {
-                        "enabled": True,
-                        "actions": [
-                            {"id": "wp-action", "label": "WP", "type": "llm", "prompt": "WP prompt"}
-                        ],
-                    }
-                },
-                "prompt_overrides": {
-                    "special": {
-                        "enabled": True,
-                        "actions": [
-                            {
-                                "id": "persona-action",
-                                "label": "Persona",
-                                "type": "llm",
-                                "prompt": "Persona prompt",
-                            }
-                        ],
-                    }
-                },
-            }
-        )
-
-        config = load_query_transforms(self.path)
-        resolved = resolve_query_transform(config, "WP4-adiktologie", "special")
-
-        self.assertEqual([action["id"] for action in resolved["actions"]], ["persona-action"])
-
-    def test_explicit_disabled_prompt_override_blocks_wp_default(self) -> None:
-        self._write(
-            {
-                "wp_defaults": {
-                    "WP4-adiktologie": {
-                        "enabled": True,
-                        "actions": [{"id": "translate", "label": "T", "type": "llm", "prompt": "P"}],
-                    }
-                },
-                "prompt_overrides": {"disabled-persona": {"enabled": False}},
-            }
-        )
-
-        config = load_query_transforms(self.path)
-
-        self.assertFalse(
-            resolve_query_transform(config, "WP4-adiktologie", "disabled-persona")["enabled"]
-        )
-        self.assertTrue(
-            resolve_query_transform(config, "WP4-adiktologie", "missing-persona")["enabled"]
-        )
 
 
 class QueryTransformEndpointTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self._original_query_transforms_path = main.settings.query_transforms_path
-        main.settings.query_transforms_path = Path(self._tmp.name) / "query_transforms.json"
-        main.settings.query_transforms_path.write_text(
-            json.dumps(
-                {
-                    "wp_defaults": {
-                        "WP4-adiktologie": {
-                            "enabled": True,
-                            "default_action": "charles-cs-en",
-                            "use_transformed_for_answer": False,
-                            "actions": [
-                                {
-                                    "id": "charles-cs-en",
-                                    "label": "Přeložit CS → EN",
-                                    "type": "lindat",
-                                    "source_language": "cs",
-                                    "target_language": "en",
-                                    "model": "cs-en",
-                                },
-                                {
-                                    "id": "llm-translate-en",
-                                    "label": "Upravit pomocí LLM",
-                                    "type": "llm",
-                                    "prompt": "Translate the query into English.",
-                                },
-                            ],
-                        }
-                    },
-                    "prompt_overrides": {},
-                }
-            ),
-            encoding="utf-8",
-        )
-        self.client = TestClient(main.app, raise_server_exceptions=False)
+    """These rely on WP4-adiktologie's real, hardcoded query_transform config
 
-    def tearDown(self) -> None:
-        main.settings.query_transforms_path = self._original_query_transforms_path
-        self._tmp.cleanup()
+    (``app.rag.wp_config.WP_CONFIGS``), which ships the ``charles-cs-en``
+    lindat action and the ``llm-query-transform`` LLM action.
+    """
+
+    def setUp(self) -> None:
+        self.client = TestClient(main.app, raise_server_exceptions=False)
 
     @patch("app.main.httpx.post")
     def test_wp4_lindat_action_sends_multipart_input_text(self, post: Mock) -> None:
@@ -165,7 +63,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                             "id": "local-llm",
                             "label": "Local",
                             "type": "llm",
-                            "prompt": "Profile instruction",
+                            "prompt_template": "Instrukce: {instruction}\nDotaz: {question}\nVrať pouze upravený dotaz.",
                         },
                     },
                 )
@@ -175,9 +73,43 @@ class QueryTransformEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["transformed_query"], "translated query")
         call = fake_llm.generate.call_args
-        self.assertEqual(call.args[0][0]["content"], "Custom instruction")
-        self.assertEqual(call.args[0][1]["content"], "Původní dotaz")
+        self.assertEqual(len(call.args[0]), 1)
+        self.assertEqual(call.args[0][0]["role"], "user")
+        self.assertEqual(
+            call.args[0][0]["content"],
+            "Instrukce: Custom instruction\nDotaz: Původní dotaz\nVrať pouze upravený dotaz.",
+        )
         self.assertEqual(call.kwargs["model"], "selected-model")
+
+    def test_llm_action_without_question_placeholder_is_rejected(self) -> None:
+        fake_llm = Mock()
+        original_llm = main.pipeline._llm
+        main.pipeline._llm = fake_llm
+        try:
+            with patch(
+                "app.main._resolve_llm_request",
+                return_value=("provider", "selected-model", "key", "https://llm.example/v1"),
+            ):
+                response = self.client.post(
+                    "/query-transform",
+                    json={
+                        "question": "Původní dotaz",
+                        "prompt_preset_id": "local-test-persona",
+                        "instruction": "translate to english",
+                        "action": {
+                            "id": "local-llm",
+                            "label": "Local",
+                            "type": "llm",
+                            "prompt_template": "{instruction}",
+                        },
+                    },
+                )
+        finally:
+            main.pipeline._llm = original_llm
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("{question}", response.json()["detail"])
+        fake_llm.generate.assert_not_called()
 
     def test_inline_action_cannot_bypass_disabled_server_profile(self) -> None:
         response = self.client.post(
@@ -190,7 +122,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                     "id": "inline-llm",
                     "label": "Inline",
                     "type": "llm",
-                    "prompt": "Translate",
+                    "prompt_template": "Translate {question}",
                 },
             },
         )
@@ -234,17 +166,9 @@ class QueryTransformEndpointTests(unittest.TestCase):
         self.assertTrue(wp4["query_transform"]["enabled"])
         self.assertEqual(
             [action["id"] for action in wp4["query_transform"]["actions"]],
-            ["charles-cs-en", "llm-translate-en"],
+            ["charles-cs-en", "llm-query-transform"],
         )
         self.assertFalse(wp1["query_transform"]["enabled"])
-
-    def test_missing_local_configuration_disables_wp4_transform(self) -> None:
-        main.settings.query_transforms_path.unlink()
-        with patch.object(main.pipeline.msearch_retriever, "live_collections_by_prefix", return_value={}):
-            wps = main._wps_payload_with_live_collections()
-
-        wp4 = next(wp for wp in wps if wp["id"] == "WP4-adiktologie")
-        self.assertFalse(wp4["query_transform"]["enabled"])
 
 
 class RetrievalQueryEndpointTests(unittest.TestCase):

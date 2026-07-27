@@ -118,7 +118,7 @@ class PromptPresetStorageTests(unittest.TestCase):
                         "id": "translate",
                         "label": "Translate",
                         "type": "llm",
-                        "prompt": "Translate to English.",
+                        "prompt_template": "Translate to English: {question}",
                     }
                 ],
             },
@@ -126,7 +126,9 @@ class PromptPresetStorageTests(unittest.TestCase):
 
         self.assertTrue(record["query_transform"]["enabled"])
         loaded = load_prompt_presets(self.path)[0]
-        self.assertEqual(loaded["query_transform"]["actions"][0]["prompt"], "Translate to English.")
+        self.assertEqual(
+            loaded["query_transform"]["actions"][0]["prompt_template"], "Translate to English: {question}"
+        )
 
     def test_missing_query_transform_inherits_as_null(self) -> None:
         record = self._save("Inherit WP")

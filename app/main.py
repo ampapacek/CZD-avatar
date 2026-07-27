@@ -6,6 +6,7 @@ import hmac
 import random
 import time
 import httpx
+from dataclasses import asdict
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -40,11 +41,7 @@ from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
-from app.rag.query_transforms import (
-    load_query_transforms,
-    resolve_query_transform,
-    valid_lindat_model,
-)
+from app.rag.query_transforms import valid_lindat_model
 from app.rag.shared_history import (
     delete_shared_history_item,
     load_shared_history,
@@ -344,16 +341,9 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
 
     grouped = pipeline.msearch_retriever.live_collections_by_prefix()
     payload = wp_public_payload()
-    query_transforms = load_query_transforms(settings.query_transforms_path)
     for wp in payload:
-        wp["query_transform"] = query_transforms["wp_defaults"].get(
-            wp["id"],
-            {"enabled": False, "actions": [], "use_transformed_for_answer": False},
-        )
-        for prompt in wp["builtin_prompts"]:
-            prompt_override = query_transforms["prompt_overrides"].get(prompt["id"])
-            if prompt_override is not None:
-                prompt["query_transform"] = prompt_override
+        if wp["query_transform"] is None:
+            wp["query_transform"] = {"enabled": False, "actions": []}
         live = grouped.get(wp_collection_prefix(wp["id"])) or []
         if not live:
             continue
@@ -547,8 +537,8 @@ def _effective_query_transform(
         saved = _find_prompt_preset(prompt_id)
         if saved is not None and saved.get("query_transform") is not None:
             return saved["query_transform"]
-    config = load_query_transforms(settings.query_transforms_path)
-    return resolve_query_transform(config, resolve_wp_id(wp_id), prompt_id)
+    wp = get_wp_config(resolve_wp_id(wp_id))
+    return asdict(wp.query_transform) if wp and wp.query_transform is not None else None
 
 
 def _resolved_query_transform_action(request: QueryTransformRequest) -> dict[str, object]:
@@ -607,15 +597,17 @@ def transform_query(request: QueryTransformRequest) -> QueryTransformResponse:
             response.raise_for_status()
             transformed = response.text.strip()
         elif action_type == "llm":
-            instruction = (request.instruction or str(action.get("prompt") or "")).strip()
-            if not instruction:
-                raise HTTPException(status_code=400, detail="Instrukce pro úpravu pomocí LLM nesmí být prázdná.")
+            template = str(action.get("prompt_template") or "")
+            if "{question}" not in template:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Akce úpravy dotazu nemá platnou šablonu promptu (chybí {question}).",
+                )
+            instruction = (request.instruction or "").strip()
+            rendered_prompt = template.replace("{question}", question).replace("{instruction}", instruction)
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
             generation = pipeline.llm.generate(
-                [
-                    {"role": "system", "content": instruction},
-                    {"role": "user", "content": question},
-                ],
+                [{"role": "user", "content": rendered_prompt}],
                 model=resolved_model,
                 api_key=resolved_api_key,
                 base_url=resolved_base_url,

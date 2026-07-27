@@ -72,10 +72,6 @@ class Settings(BaseSettings):
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")
     placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")
-    query_transforms_path: Path = Field(
-        default=Path("data/query_transforms.json"),
-        alias="QUERY_TRANSFORMS_PATH",
-    )
     lindat_translation_base_url: str = Field(
         default="https://lindat.cz/services/translation/api/v2/models",
         alias="LINDAT_TRANSLATION_BASE_URL",
