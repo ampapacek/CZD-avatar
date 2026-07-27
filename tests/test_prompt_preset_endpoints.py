@@ -44,6 +44,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
             json={
                 "id": created["id"],
                 "name": "Mine v2",
+                "note": "Updated usage experience.",
                 "system_prompt": "sys",
                 "user_prompt_template": "{question}",
                 "owner_id": "owner-a",
@@ -51,6 +52,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
         )
         self.assertEqual(update.status_code, 200, update.text)
         self.assertEqual(update.json()["name"], "Mine v2")
+        self.assertEqual(update.json()["note"], "Updated usage experience.")
         self.assertEqual(update.json()["id"], created["id"])
 
         deleted = self.client.delete(f"/prompt-presets/{created['id']}", params={"owner_id": "owner-a"})
@@ -98,6 +100,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
             json={
                 "name": "Scoped",
                 "wp_id": "WP2-média",
+                "note": "Why this variant exists.",
                 "system_prompt": "sys",
                 "user_prompt_template": "{question}",
                 "owner_id": "owner-a",
@@ -115,6 +118,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "id",
                 "name",
                 "wp_id",
+                "note",
                 "system_prompt",
                 "user_prompt_template",
                 "placeholders",
@@ -123,6 +127,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "updated_at",
             },
         )
+        self.assertEqual(response.json()["note"], "Why this variant exists.")
 
     def test_write_failure_returns_structured_json_error(self) -> None:
         with patch.object(

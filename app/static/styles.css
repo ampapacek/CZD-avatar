@@ -1051,6 +1051,14 @@ button:hover {
   font-size: 14px;
 }
 
+.history-prompt-note {
+  grid-column: 1 / -1;
+}
+
+.history-prompt-note strong {
+  white-space: pre-wrap;
+}
+
 .history-sources {
   margin-top: 0;
 }

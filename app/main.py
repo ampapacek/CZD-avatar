@@ -493,6 +493,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
             system_prompt=request.system_prompt,
             user_prompt_template=request.user_prompt_template,
             wp_id=request.wp_id,
+            note=request.note,
             placeholders={
                 name: definition.model_dump() for name, definition in request.placeholders.items()
             },

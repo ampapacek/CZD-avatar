@@ -61,6 +61,27 @@ class PromptPresetStorageTests(unittest.TestCase):
         )
         self.assertEqual(load_prompt_presets(self.path)[0]["owner_id"], "")
 
+    def test_save_round_trips_note(self) -> None:
+        record = save_prompt_preset(
+            self.path,
+            name="With note",
+            note="Works best for short factual questions.",
+            system_prompt="sys",
+            user_prompt_template="{question}",
+        )
+
+        self.assertEqual(record["note"], "Works best for short factual questions.")
+        self.assertEqual(load_prompt_presets(self.path)[0]["note"], record["note"])
+
+    def test_load_normalizes_missing_note(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            '{"presets": [{"id": "p1", "name": "Old", "system_prompt": "", "user_prompt_template": ""}]}',
+            encoding="utf-8",
+        )
+
+        self.assertEqual(load_prompt_presets(self.path)[0]["note"], "")
+
     def test_delete_removes_preset(self) -> None:
         created = self._save("Experiment", owner_id="owner-a")
         self.assertTrue(delete_prompt_preset(self.path, created["id"]))

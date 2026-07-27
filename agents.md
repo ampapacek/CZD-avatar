@@ -59,7 +59,7 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 - AI-Ufal gating is per-WP (`WPConfig.requires_aiufal`, currently WP2). Backend `_enforce_msearch_collection_policy` gates by `wp_id`; frontend disables gated collections unless AI Ufal provider is selected.
 - Random/prepared questions are per-WP plain-text files configured by `WPConfig.questions_path`: `data/questions/wp1-historie.txt`, `wp2-media.txt`, `wp3-pravo.txt`, `wp4-adiktologie.txt`. These are private/gitignored; missing files make `/questions/random` and `/questions` return 404 for that WP only.
 - `/settings` exposes `wps` + `default_wp`; built-in prompts appear even without `data/prompt_presets.json`.
-- Preset JSON shape (shared file + browser `localStorage`): `{id, name, wp_id, system_prompt, user_prompt_template, placeholders, owner_id, updated_at}`. Every preset stores `wp_id`; unknown/missing falls back to default WP. Legacy `style_prompts`/`length_prompts` removed; loader tolerates malformed files.
+- Preset JSON shape (shared file + browser `localStorage`): `{id, name, wp_id, note, system_prompt, user_prompt_template, placeholders, owner_id, updated_at}`. `note` is user-facing metadata and is never sent to the model. Every preset stores `wp_id`; unknown/missing falls back to default WP. Legacy `style_prompts`/`length_prompts` removed; loader tolerates malformed files.
 
 ### Placeholders
 
@@ -78,4 +78,3 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 ## Prompting
 
 - Base prompt helpers live in `app/rag/prompts.py`; WP-specific built-in prompts live in `app/rag/wp_config.py`. WP1 still uses Czech-history personas, while WP2–WP4 use generic domain prompts. Model is asked to: answer in the question's language, separate sourced info from general knowledge, cite only used sources, avoid weak chunks, not force a rigid `Podle nalezených zdrojů...` opener, and not generate its own final source list.
-

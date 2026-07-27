@@ -117,6 +117,7 @@ class PromptPreset(BaseModel):
     id: str
     name: str
     wp_id: str
+    note: str = ""
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
@@ -129,6 +130,7 @@ class PromptPresetSaveRequest(BaseModel):
     id: str | None = None
     name: str
     wp_id: str | None = None
+    note: str = ""
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)

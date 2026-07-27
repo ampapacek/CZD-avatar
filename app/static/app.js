@@ -54,6 +54,7 @@ const updatePromptButton = document.querySelector("#updatePromptButton");
 const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const promptName = document.querySelector("#promptName");
+const promptNote = document.querySelector("#promptNote");
 const systemPrompt = document.querySelector("#systemPrompt");
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
@@ -872,6 +873,7 @@ async function runQuery(retrieveOnlyMode) {
   renderBaselineComparison();
   stopRerankCountdown();
   loadingIndicator.hidden = false;
+  const promptNoteSnapshot = activePromptPresetMetadata().note;
 
   try {
     if (retrieveOnlyMode) {
@@ -912,7 +914,7 @@ async function runQuery(retrieveOnlyMode) {
         mode: "retrieve",
         answer: "Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.",
         sourceCount: currentRetrievedChunks.length,
-        settings: payload,
+        settings: { ...payload, prompt_preset_note: promptNoteSnapshot },
         query_transform_action_id: activeQueryTransformActionId(),
         retrieved_chunks: currentRetrievedChunks,
         sources: currentAnswerSources,
@@ -924,6 +926,7 @@ async function runQuery(retrieveOnlyMode) {
       // show it. The payload sends null when the prompt equals the built-in
       // default (the server fills it in), so read the resolved text directly.
       const promptsUsed = {
+        prompt_preset_note: promptNoteSnapshot,
         system_prompt: systemPrompt.value,
         user_prompt_template: userPromptTemplate.value,
       };
@@ -3629,29 +3632,39 @@ function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
   const builtinOptions = builtInPromptPresets(wpId)
     .map((preset) => {
       const effective = getPromptPresetById(preset.id) || preset;
-      return `<option value="${escapeHtml(preset.id)}">${escapeHtml(effective.name || preset.name)}</option>`;
+      return `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(effective)}>${escapeHtml(effective.name || preset.name)}</option>`;
     })
     .join("");
   const draftOptions = wpDraft.length
     ? `<optgroup label="Rozepsané prompty">${wpDraft
-        .map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`)
+        .map((preset) => `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>${escapeHtml(preset.name)}</option>`)
         .join("")}</optgroup>`
     : "";
   const localOptions = wpLocal.length
     ? `<optgroup label="Lokální prompty">${wpLocal
-        .map((preset) => `<option value="${escapeHtml(preset.id)}">Local - ${escapeHtml(preset.name)}</option>`)
+        .map((preset) => `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>Local - ${escapeHtml(preset.name)}</option>`)
         .join("")}</optgroup>`
     : "";
   const serverOptions = wpServer.length
     ? `<optgroup label="Sdílené prompty">${wpServer
         .map((preset) => {
           const ownedSuffix = isOwnedServerPromptPreset(preset.id) ? " (tvůj)" : "";
-          return `<option value="${escapeHtml(preset.id)}">Shared - ${escapeHtml(preset.name)}${ownedSuffix}</option>`;
+          return `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>Shared - ${escapeHtml(preset.name)}${ownedSuffix}</option>`;
         })
         .join("")}</optgroup>`
     : "";
   selectEl.innerHTML = `<optgroup label="Vestavěné prompty">${builtinOptions}</optgroup>${draftOptions}${localOptions}${serverOptions}`;
   selectEl.value = normalizePromptPresetId(selectedId);
+  selectEl.title = promptPresetNote(getPromptPresetById(selectEl.value));
+}
+
+function promptPresetNote(preset) {
+  return String(preset?.note || "").trim();
+}
+
+function promptNoteTitleAttribute(preset) {
+  const note = promptPresetNote(preset);
+  return note ? ` title="${escapeHtml(note)}"` : "";
 }
 
 function presetWpId(preset) {
@@ -3745,6 +3758,7 @@ function wpBuiltInPromptPresets(wp) {
       id: preset.id,
       name: preset.name,
       wp_id: wp.id,
+      note: String(preset.note || ""),
       system_prompt: preset.system_prompt || "",
       user_prompt_template: preset.user_prompt_template || "",
       placeholders: preset.placeholders && typeof preset.placeholders === "object" ? preset.placeholders : {},
@@ -3794,6 +3808,7 @@ function applyPromptPresetById(presetId) {
     return;
   }
   promptName.value = preset.name || "";
+  promptNote.value = preset.note || "";
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
   clearAppliedQueryTransform({ refreshButton: false });
@@ -3812,6 +3827,7 @@ function activePromptPresetMetadata() {
   return {
     id: preset?.id || activePromptPresetId || defaultPromptPresetId(),
     name: preset?.name || activePromptPresetId || "Výchozí",
+    note: promptPresetNote(preset),
   };
 }
 
@@ -3820,6 +3836,7 @@ function currentPromptDraft({ id = null, name }) {
     id,
     name: name.trim(),
     wp_id: activePromptWpId(),
+    note: promptNote.value,
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
     // Inline placeholder defs come from the live preset object, which the inline
@@ -4001,6 +4018,7 @@ function normalizeLocalPromptPreset(item) {
     id,
     name,
     wp_id: String(item.wp_id || appSettings.default_wp || ""),
+    note: String(item.note || ""),
     system_prompt: String(item.system_prompt || ""),
     user_prompt_template: String(item.user_prompt_template || ""),
     // Inline placeholder defs are passed through as-is; the inline def editor
@@ -4033,6 +4051,7 @@ function createBlankPromptDraft() {
     id: draftId,
     name: name.trim(),
     wp_id: settingsWpScope(),
+    note: "",
     system_prompt: "",
     user_prompt_template: BLANK_USER_PROMPT_TEMPLATE,
     placeholders: {},
@@ -4040,6 +4059,7 @@ function createBlankPromptDraft() {
   };
   activePromptPresetId = draftId;
   promptName.value = draftPromptPreset.name;
+  promptNote.value = draftPromptPreset.note;
   systemPrompt.value = draftPromptPreset.system_prompt;
   userPromptTemplate.value = draftPromptPreset.user_prompt_template;
   renderPlaceholderControls();
@@ -4063,12 +4083,14 @@ function resetPromptEditorValues() {
   const defaultPrompt = getPromptPresetById(defaultPromptPresetId(settingsWpScope()));
   if (defaultPrompt) {
     promptName.value = defaultPrompt.name || "";
+    promptNote.value = defaultPrompt.note || "";
     systemPrompt.value = defaultPrompt.system_prompt || "";
     userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
     renderPlaceholderControls();
     updatePromptTemplateWarning();
   } else {
     promptName.value = "";
+    promptNote.value = "";
   }
 }
 
@@ -4773,10 +4795,12 @@ function renderConversationWorkspace() {
 // Snapshot the current global settings state into a plain settings object that
 // mirrors the chat-request fields a conversation owns.
 function captureSettingsSnapshot() {
+  const activePrompt = activePromptPresetMetadata();
   return {
     wp_id: activeWpId,
     prompt_preset_id: activePromptPresetId,
-    prompt_preset_name: activePromptPresetMetadata().name,
+    prompt_preset_name: activePrompt.name,
+    prompt_preset_note: activePrompt.note,
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
     selections: { ...placeholderSelections },
@@ -5293,7 +5317,10 @@ async function submitConversationTurn() {
     msearch_collection: convSettings.msearch_collection,
     context_window_tokens: convSettings.context_window_tokens,
   });
-  const sanitizedPayload = sanitizeHistorySettings(payload);
+  const sanitizedPayload = {
+    ...sanitizeHistorySettings(payload),
+    prompt_preset_note: promptPresetNoteFromSettings(convSettings),
+  };
 
   try {
     const handleConversationSources = (data) => {
@@ -6059,6 +6086,7 @@ function renderHistorySettingsAndAnswer(entry) {
       <div class="settings-grid">
         ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
+        ${renderPromptNoteSetting(entry.settings)}
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
         ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
@@ -6089,6 +6117,26 @@ function renderHistorySettingsAndAnswer(entry) {
       <div id="historySources" class="sources history-sources"></div>
     </section>
   `;
+}
+
+function renderPromptNoteSetting(settings) {
+  const note = promptPresetNoteFromSettings(settings);
+  if (!note) {
+    return "";
+  }
+  return `
+    <div class="setting-card history-prompt-note">
+      <span>Poznámka k promptu</span>
+      <strong>${escapeHtml(note)}</strong>
+    </div>
+  `;
+}
+
+function promptPresetNoteFromSettings(settings) {
+  if (Object.prototype.hasOwnProperty.call(settings || {}, "prompt_preset_note")) {
+    return String(settings.prompt_preset_note || "").trim();
+  }
+  return promptPresetNote(getPromptPresetById(promptPresetIdFromSettings(settings)));
 }
 
 // Feature 2: collapsed-by-default verbatim system + user prompt. Both come from
