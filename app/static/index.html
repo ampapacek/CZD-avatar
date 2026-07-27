@@ -96,10 +96,17 @@
                 Pouze vyhledat zdroje
               </button>
               <button id="submitButton" class="primary" type="submit">Odpovědět</button>
-              <button id="queryTransformButton" class="secondary" type="button" hidden>Upravit dotaz</button>
               <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
             </div>
           </div>
+          <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
+
+          <details id="queryTransformSection" class="advanced query-transform-inline" hidden>
+            <summary>Upravit dotaz před vyhledáváním</summary>
+            <div class="query-transform-inline-body">
+              <div id="queryTransformRows" class="query-transform-rows"></div>
+            </div>
+          </details>
 
           <div class="controls">
             <label class="field wp-control">
@@ -431,6 +438,24 @@
                 <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat proměnnou promptu</button>
               </div>
             </div>
+            <div class="placeholder-defs-inline">
+              <h4>Transformace dotazu</h4>
+              <p class="field-note">
+                Umožní na hlavní stránce tlačítko „Upravit dotaz“, kterým lze dotaz před vyhledáváním
+                přeložit nebo upravit pomocí LLM. Nastavení patří jen k vybranému promptu/profilu.
+              </p>
+              <label class="field inline-field">
+                <input id="queryTransformEnabledToggle" type="checkbox" />
+                <span>Povolit úpravu dotazu pro tento prompt</span>
+              </label>
+              <p id="queryTransformDisabledNote" class="field-note unsaved-note" hidden></p>
+              <div id="queryTransformSettingsBody" hidden>
+                <div id="queryTransformActionDefsList" class="placeholder-defs-list"></div>
+                <div class="prompt-actions">
+                  <button id="newQueryTransformActionButton" class="secondary" type="button">Přidat akci úpravy</button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -610,51 +635,76 @@
       </form>
     </dialog>
 
-    <dialog id="queryTransformDialog" class="settings-dialog query-transform-dialog">
-      <div class="query-transform-shell">
+    <dialog id="queryTransformActionDialog" class="settings-dialog placeholder-def-dialog">
+      <form id="queryTransformActionForm" method="dialog">
         <div class="history-dialog-header">
           <div>
-            <h2>Upravit vyhledávací dotaz</h2>
-            <p>Vyber způsob úpravy a výsledek před použitím zkontroluj.</p>
+            <h2 id="queryTransformActionTitle">Akce úpravy dotazu</h2>
           </div>
-          <button id="closeQueryTransformButton" class="icon-button help-close" type="button" aria-label="Zavřít" title="Zavřít">
+          <button id="closeQueryTransformActionButton" class="icon-button help-close" type="button" aria-label="Zavřít" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
               <path d="M6 6l12 12"></path>
               <path d="M18 6 6 18"></path>
             </svg>
           </button>
         </div>
-        <div class="query-transform-body">
+        <div class="settings-body">
           <label class="field">
-            <span>Původní dotaz</span>
-            <textarea id="queryTransformOriginal" rows="2" readonly></textarea>
+            <span>Typ akce</span>
+            <select id="queryTransformActionType">
+              <option value="lindat">Strojový překlad (LINDAT)</option>
+              <option value="llm">Úprava pomocí LLM</option>
+            </select>
           </label>
-          <div>
-            <span class="query-transform-section-label">Způsob úpravy</span>
-            <div id="queryTransformActions" class="query-transform-actions"></div>
+          <label class="field">
+            <span>Identifikátor (id)</span>
+            <input id="queryTransformActionId" type="text" autocomplete="off" />
+            <small class="field-note">Jen písmena, číslice a pomlčky.</small>
+          </label>
+          <label class="field">
+            <span>Popisek tlačítka</span>
+            <input id="queryTransformActionLabel" type="text" autocomplete="off" />
+          </label>
+          <div id="queryTransformActionLindatFields" class="settings-grid">
+            <label class="field">
+              <span>Zdrojový jazyk</span>
+              <input id="queryTransformActionSourceLang" type="text" placeholder="cs" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Cílový jazyk</span>
+              <input id="queryTransformActionTargetLang" type="text" placeholder="en" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>LINDAT model</span>
+              <input id="queryTransformActionModel" type="text" placeholder="cs-en" autocomplete="off" />
+            </label>
           </div>
-          <label id="queryTransformPromptField" class="field" hidden>
-            <span>Instrukce pro LLM</span>
-            <textarea id="queryTransformPrompt" rows="4"></textarea>
-            <small class="field-note">Instrukce je předvyplněná z profilu a pro tento dotaz ji můžeš upravit.</small>
+          <label class="field" id="queryTransformActionLlmFields" hidden>
+            <span>Šablona promptu pro LLM</span>
+            <textarea id="queryTransformActionPrompt" rows="6" placeholder="Přelož zadaný dotaz do angličtiny podle instrukce: {instruction}&#10;Dotaz: {question}&#10;Vrať pouze výsledný dotaz, žádný další text."></textarea>
+            <small class="field-note">
+              Šablona nahrazuje celý prompt pro LLM. Musí obsahovat <code>{question}</code>; <code>{instruction}</code> je nepovinný
+              (bez něj hlavní stránka nezobrazí pole pro instrukci uživatele). Nezapomeň do šablony sám napsat, že se má vrátit
+              jen výsledek, bez dalšího textu.
+            </small>
           </label>
-          <p id="queryTransformStatus" class="field-note query-transform-status" role="status" aria-live="polite"></p>
-          <label class="field">
-            <span>Upravený dotaz</span>
-            <textarea id="queryTransformResult" rows="3"></textarea>
+          <label class="field inline-field">
+            <input id="queryTransformActionUseForAnswer" type="checkbox" />
+            <span>Ve výchozím stavu použít upravený dotaz i pro generování odpovědi</span>
           </label>
-          <label class="field inline-field query-transform-answer-toggle" title="Ve výchozím nastavení se upravený dotaz používá pouze k vyhledání podkladů v databázi. Model generující odpověď dostane původní dotaz.">
-            <input id="useTransformedForAnswer" type="checkbox" />
-            <span>Použít upravený dotaz i pro generování odpovědi</span>
-          </label>
-          <p class="field-note">Bez zaškrtnutí se upravený dotaz použije pouze pro vyhledávání v databázi a odpověď se vygeneruje podle původního dotazu.</p>
-          <div class="query-transform-footer">
-            <button id="cancelQueryTransformButton" class="secondary" type="button">Zrušit</button>
-            <button id="applyQueryTransformButton" class="primary" type="button">Použít upravený dotaz</button>
+          <p id="queryTransformActionError" class="prompt-template-warning" hidden></p>
+          <div class="placeholder-def-footer">
+            <div class="placeholder-def-footer-row">
+              <div class="prompt-actions">
+                <button id="deleteQueryTransformActionButton" class="secondary danger-lite" type="button" hidden>Smazat</button>
+                <button id="saveQueryTransformActionButton" class="primary" type="button">Uložit akci</button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </form>
     </dialog>
+
 
     <dialog id="historyDialog" class="history-dialog">
       <div class="history-shell">

@@ -32,18 +32,9 @@ const clearCustomProviderApiKeyButton = document.querySelector("#clearCustomProv
 const customProviderDefaultModel = document.querySelector("#customProviderDefaultModel");
 const customProviderModels = document.querySelector("#customProviderModels");
 const retrieveButton = document.querySelector("#retrieveButton");
-const queryTransformButton = document.querySelector("#queryTransformButton");
-const queryTransformDialog = document.querySelector("#queryTransformDialog");
-const closeQueryTransformButton = document.querySelector("#closeQueryTransformButton");
-const cancelQueryTransformButton = document.querySelector("#cancelQueryTransformButton");
-const applyQueryTransformButton = document.querySelector("#applyQueryTransformButton");
-const queryTransformOriginal = document.querySelector("#queryTransformOriginal");
-const queryTransformActions = document.querySelector("#queryTransformActions");
-const queryTransformPromptField = document.querySelector("#queryTransformPromptField");
-const queryTransformPrompt = document.querySelector("#queryTransformPrompt");
-const queryTransformResult = document.querySelector("#queryTransformResult");
-const queryTransformStatus = document.querySelector("#queryTransformStatus");
-const useTransformedForAnswer = document.querySelector("#useTransformedForAnswer");
+const queryTransformSection = document.querySelector("#queryTransformSection");
+const queryTransformRowsEl = document.querySelector("#queryTransformRows");
+const appliedQueryTransformNote = document.querySelector("#appliedQueryTransformNote");
 const predefinedQuestionWrap = document.querySelector("#predefinedQuestionWrap");
 const predefinedQuestionButton = document.querySelector("#predefinedQuestionButton");
 const predefinedQuestionList = document.querySelector("#predefinedQuestionList");
@@ -93,6 +84,27 @@ const placeholderDefOptionsList = document.querySelector("#placeholderDefOptions
 const addPlaceholderOptionButton = document.querySelector("#addPlaceholderOptionButton");
 const placeholderDefError = document.querySelector("#placeholderDefError");
 const placeholderDefActions = document.querySelector("#placeholderDefActions");
+const queryTransformEnabledToggle = document.querySelector("#queryTransformEnabledToggle");
+const queryTransformDisabledNote = document.querySelector("#queryTransformDisabledNote");
+const queryTransformSettingsBody = document.querySelector("#queryTransformSettingsBody");
+const queryTransformActionDefsList = document.querySelector("#queryTransformActionDefsList");
+const newQueryTransformActionButton = document.querySelector("#newQueryTransformActionButton");
+const queryTransformActionDialog = document.querySelector("#queryTransformActionDialog");
+const queryTransformActionTitle = document.querySelector("#queryTransformActionTitle");
+const closeQueryTransformActionButton = document.querySelector("#closeQueryTransformActionButton");
+const queryTransformActionType = document.querySelector("#queryTransformActionType");
+const queryTransformActionId = document.querySelector("#queryTransformActionId");
+const queryTransformActionLabelInput = document.querySelector("#queryTransformActionLabel");
+const queryTransformActionLindatFields = document.querySelector("#queryTransformActionLindatFields");
+const queryTransformActionSourceLang = document.querySelector("#queryTransformActionSourceLang");
+const queryTransformActionTargetLang = document.querySelector("#queryTransformActionTargetLang");
+const queryTransformActionModel = document.querySelector("#queryTransformActionModel");
+const queryTransformActionLlmFields = document.querySelector("#queryTransformActionLlmFields");
+const queryTransformActionPrompt = document.querySelector("#queryTransformActionPrompt");
+const queryTransformActionUseForAnswer = document.querySelector("#queryTransformActionUseForAnswer");
+const queryTransformActionError = document.querySelector("#queryTransformActionError");
+const deleteQueryTransformActionButton = document.querySelector("#deleteQueryTransformActionButton");
+const saveQueryTransformActionButton = document.querySelector("#saveQueryTransformActionButton");
 const topK = document.querySelector("#topK");
 const topKValue = document.querySelector("#topKValue");
 const denseWeight = document.querySelector("#denseWeight");
@@ -210,6 +222,7 @@ const KNOWN_PROMPT_VARIABLES = new Set([
 ]);
 const CODE_FLOOR_PLACEHOLDERS = new Set(["length", "custom_instructions"]);
 const SAVE_PROMPT_BEFORE_VARIABLES_MESSAGE = "Nejdřív ulož prompt jako nový. Abys mohl přidat nové proměnné.";
+const SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE = "Nejdřív ulož prompt jako nový (lokálně nebo sdíleně). Pak půjde zapnout úprava dotazu.";
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 let selectedHistoryId = null;
@@ -234,6 +247,11 @@ let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
 let appliedQueryTransform = null;
+// Per-action UI state for the inline "Upravit dotaz" rows, keyed by action id.
+// Rebuilt whenever the question text or the resolved set of actions changes.
+let queryTransformRowState = {};
+let queryTransformRowsQuestion = null;
+let queryTransformSelectedActionId = null;
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
@@ -319,26 +337,368 @@ function resolvedQueryTransformConfig() {
 
 function clearAppliedQueryTransform({ refreshButton = true } = {}) {
   appliedQueryTransform = null;
+  queryTransformSelectedActionId = null;
+  // Forces renderQueryTransformSection() to rebuild the rows from scratch.
+  queryTransformRowsQuestion = null;
   if (refreshButton) {
-    refreshQueryTransformButton();
+    renderQueryTransformSection();
   }
 }
 
-function refreshQueryTransformButton() {
-  if (!queryTransformButton) {
+function queryTransformRunLabel(action) {
+  return String(action.type).toLowerCase() === "lindat" ? "Přeložit" : "Upravit pomocí LLM";
+}
+
+function buildQueryTransformRowsDom(config) {
+  if (!queryTransformRowsEl) {
+    return;
+  }
+  queryTransformRowsEl.innerHTML = config.actions
+    .map((action) => {
+      const actionId = String(action.id);
+      const state = queryTransformRowState[actionId] || {};
+      const isLlm = String(action.type).toLowerCase() === "llm";
+      const hasInstructionField = isLlm && String(action.prompt_template || "").includes("{instruction}");
+      const collapsed = Boolean(state.collapsed);
+      const hasResult = Boolean(String(state.result || "").trim());
+      return `
+        <div class="query-transform-row${collapsed ? " is-collapsed" : ""}" data-action-row="${escapeHtml(actionId)}">
+          <div class="query-transform-row-header">
+            <button
+              class="query-transform-row-select"
+              type="button"
+              data-role="select"
+              ${hasResult ? "" : "disabled"}
+              title="${hasResult ? "Použít tuto úpravu pro vyhledávání" : "Nejdřív dotaz uprav"}"
+              aria-label="Vybrat tuto úpravu"
+            ><span class="query-transform-row-select-dot" aria-hidden="true"></span></button>
+            <button class="query-transform-row-toggle" type="button" data-role="toggle" aria-expanded="${collapsed ? "false" : "true"}" title="Sbalit / rozbalit">
+              <strong>${escapeHtml(queryTransformActionLabel(action))}</strong>
+              <span class="query-transform-row-chevron" aria-hidden="true">▾</span>
+            </button>
+          </div>
+          <div class="query-transform-row-body" data-role="body" ${collapsed ? "hidden" : ""}>
+            ${hasInstructionField ? `
+              <label class="field">
+                <span>Instrukce pro LLM</span>
+                <textarea data-role="instruction" rows="2">${escapeHtml(state.instruction || "")}</textarea>
+              </label>
+            ` : ""}
+            <div class="query-transform-row-controls">
+              <button class="secondary" type="button" data-role="run">${escapeHtml(queryTransformRunLabel(action))}</button>
+              <p class="field-note query-transform-row-status" data-role="status" role="status" aria-live="polite"></p>
+            </div>
+            <label class="field" data-role="result-field" ${hasResult ? "" : "hidden"}>
+              <span>Upravený dotaz</span>
+              <textarea data-role="result" rows="2">${escapeHtml(state.result || "")}</textarea>
+            </label>
+            <label class="field inline-field" title="Ve výchozím nastavení se upravený dotaz používá pouze k vyhledání podkladů v databázi. Model generující odpověď dostane původní dotaz.">
+              <input type="checkbox" data-role="use-for-answer" ${state.useForAnswer ? "checked" : ""} />
+              <span>Použít i pro generování odpovědi (nejen pro vyhledání v databázi)</span>
+            </label>
+          </div>
+        </div>`;
+    })
+    .join("");
+  updateQueryTransformRowSelectionUi();
+}
+
+function updateQueryTransformRowSelectionUi() {
+  queryTransformRowsEl?.querySelectorAll("[data-action-row]").forEach((row) => {
+    const actionId = row.dataset.actionRow;
+    const isSelected = actionId === queryTransformSelectedActionId;
+    row.classList.toggle("is-selected", isSelected);
+    const selectButton = row.querySelector('[data-role="select"]');
+    if (selectButton && !selectButton.disabled) {
+      const title = isSelected ? "Zrušit výběr této úpravy" : "Použít tuto úpravu pro vyhledávání";
+      selectButton.title = title;
+      selectButton.setAttribute("aria-label", title);
+    }
+  });
+}
+
+function findQueryTransformRow(actionId) {
+  return [...(queryTransformRowsEl?.querySelectorAll("[data-action-row]") || [])].find(
+    (row) => row.dataset.actionRow === actionId,
+  ) || null;
+}
+
+function setRowCollapsed(actionId, collapsed) {
+  const state = queryTransformRowState[actionId];
+  if (state) {
+    state.collapsed = collapsed;
+  }
+  const row = findQueryTransformRow(actionId);
+  if (!row) {
+    return;
+  }
+  row.classList.toggle("is-collapsed", collapsed);
+  const body = row.querySelector('[data-role="body"]');
+  if (body) {
+    body.hidden = collapsed;
+  }
+  const toggle = row.querySelector('[data-role="toggle"]');
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+}
+
+// Selecting a transform collapses the others down to just their header, so
+// the user isn't juggling several open result boxes at once; each stays
+// reachable by expanding it again (and re-running it re-selects it).
+function collapseOtherRows(selectedActionId) {
+  Object.keys(queryTransformRowState).forEach((id) => {
+    setRowCollapsed(id, id !== selectedActionId);
+  });
+}
+
+function syncAppliedQueryTransformFromRow(actionId) {
+  const state = queryTransformRowState[actionId];
+  if (!state) {
+    return;
+  }
+  const retrievalQuery = String(state.result || "").trim();
+  if (!retrievalQuery) {
+    if (queryTransformSelectedActionId === actionId) {
+      queryTransformSelectedActionId = null;
+      appliedQueryTransform = null;
+      updateQueryTransformRowSelectionUi();
+      renderQueryTransformSection();
+    }
+    return;
+  }
+  appliedQueryTransform = {
+    originalQuestion: question.value,
+    retrievalQuery,
+    useForAnswer: Boolean(state.useForAnswer),
+    actionId,
+  };
+  renderQueryTransformSection();
+}
+
+// Shared by a live run (executeQueryTransformRow) and restoring a history entry
+// (applyHistoryEntryToForm): pushes a resolved result into both the row's state
+// and its DOM so the two paths render identically.
+function applyQueryTransformRowResult(actionId, resultText, useForAnswer) {
+  const state = queryTransformRowState[actionId];
+  if (!state) {
+    return;
+  }
+  state.result = resultText;
+  if (useForAnswer !== undefined) {
+    state.useForAnswer = Boolean(useForAnswer);
+  }
+  const row = findQueryTransformRow(actionId);
+  const resultField = row?.querySelector('[data-role="result"]');
+  const resultFieldWrap = row?.querySelector('[data-role="result-field"]');
+  const selectButton = row?.querySelector('[data-role="select"]');
+  const useForAnswerCheckbox = row?.querySelector('[data-role="use-for-answer"]');
+  if (resultField) {
+    resultField.value = resultText;
+  }
+  if (resultFieldWrap) {
+    resultFieldWrap.hidden = false;
+  }
+  if (selectButton) {
+    selectButton.disabled = false;
+  }
+  if (useForAnswer !== undefined && useForAnswerCheckbox) {
+    useForAnswerCheckbox.checked = state.useForAnswer;
+  }
+}
+
+function setQueryTransformSectionBusy(busy) {
+  queryTransformRowsEl?.querySelectorAll('[data-role="run"]').forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+async function executeQueryTransformRow(action) {
+  const actionId = String(action.id);
+  const state = queryTransformRowState[actionId];
+  if (!state) {
+    return;
+  }
+  const row = findQueryTransformRow(actionId);
+  const statusEl = row?.querySelector('[data-role="status"]');
+  const actionType = String(action.type || "").toLowerCase();
+  const instruction = actionType === "llm" ? String(state.instruction || "").trim() : null;
+  setQueryTransformSectionBusy(true);
+  if (statusEl) {
+    statusEl.textContent = actionType === "lindat" ? "Překládám dotaz..." : "Upravuji dotaz pomocí LLM...";
+    statusEl.classList.remove("error");
+  }
+  try {
+    const activePrompt = activePromptPresetMetadata();
+    const response = await fetch("query-transform", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: question.value,
+        wp_id: activeWpId,
+        prompt_preset_id: activePrompt.id,
+        action_id: action.id,
+        // Local browser personas do not exist on the server, so include their
+        // resolved action definition as well as its stable id.
+        action,
+        instruction,
+        model: selectedModelValue(),
+        llm_provider: llmProvider.value,
+        llm_base_url: nullableString(selectedProviderBaseUrl()),
+        llm_api_key: nullableString(selectedProviderApiKey()),
+        admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
+      }),
+    });
+    const data = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(data.detail || `Dotaz se nepodařilo upravit (HTTP ${response.status}).`);
+    }
+    applyQueryTransformRowResult(actionId, String(data.transformed_query || ""));
+    queryTransformSelectedActionId = actionId;
+    syncAppliedQueryTransformFromRow(actionId);
+    updateQueryTransformRowSelectionUi();
+    collapseOtherRows(actionId);
+    if (statusEl) {
+      statusEl.textContent = "Upravený dotaz je připravený. Můžeš ho ještě ručně změnit.";
+    }
+  } catch (error) {
+    if (statusEl) {
+      statusEl.textContent = error.message || "Dotaz se nepodařilo upravit.";
+      statusEl.classList.add("error");
+    }
+  } finally {
+    setQueryTransformSectionBusy(false);
+  }
+}
+
+function renderQueryTransformSection() {
+  if (!queryTransformSection) {
     return;
   }
   const config = resolvedQueryTransformConfig();
-  queryTransformButton.hidden = !config;
+  queryTransformSection.hidden = !config;
+  if (!config) {
+    refreshAppliedQueryTransformNote(false);
+    return;
+  }
+  const questionChanged = queryTransformRowsQuestion !== question.value;
+  const actionIds = config.actions.map((action) => String(action.id));
+  const idsChanged = actionIds.length !== Object.keys(queryTransformRowState).length
+    || actionIds.some((id) => !queryTransformRowState[id]);
+  if (questionChanged || idsChanged) {
+    queryTransformRowState = {};
+    config.actions.forEach((action) => {
+      queryTransformRowState[action.id] = {
+        result: "",
+        useForAnswer: Boolean(action.use_transformed_for_answer),
+        instruction: "",
+        collapsed: false,
+      };
+    });
+    queryTransformRowsQuestion = question.value;
+    queryTransformSelectedActionId = null;
+    buildQueryTransformRowsDom(config);
+  }
   const hasAppliedQuery = Boolean(
     appliedQueryTransform
     && appliedQueryTransform.originalQuestion === question.value
     && appliedQueryTransform.retrievalQuery,
   );
-  queryTransformButton.classList.toggle("is-applied", hasAppliedQuery);
-  queryTransformButton.title = hasAppliedQuery
-    ? "Upravený dotaz je připravený. Kliknutím ho můžeš zkontrolovat nebo změnit."
-    : "Přeloží nebo jinak upraví dotaz používaný pro vyhledávání.";
+  queryTransformSection.classList.toggle("is-applied", hasAppliedQuery);
+  refreshAppliedQueryTransformNote(hasAppliedQuery);
+}
+
+queryTransformRowsEl?.addEventListener("click", (event) => {
+  const selectButton = event.target.closest('[data-role="select"]');
+  if (selectButton) {
+    const row = selectButton.closest("[data-action-row]");
+    const actionId = row?.dataset.actionRow;
+    if (actionId && queryTransformSelectedActionId === actionId) {
+      queryTransformSelectedActionId = null;
+      appliedQueryTransform = null;
+      updateQueryTransformRowSelectionUi();
+      renderQueryTransformSection();
+      return;
+    }
+    const state = actionId ? queryTransformRowState[actionId] : null;
+    if (state && String(state.result || "").trim()) {
+      queryTransformSelectedActionId = actionId;
+      syncAppliedQueryTransformFromRow(actionId);
+      updateQueryTransformRowSelectionUi();
+      collapseOtherRows(actionId);
+    }
+    return;
+  }
+  const toggleButton = event.target.closest('[data-role="toggle"]');
+  if (toggleButton) {
+    const row = toggleButton.closest("[data-action-row]");
+    const actionId = row?.dataset.actionRow;
+    const state = actionId ? queryTransformRowState[actionId] : null;
+    if (state) {
+      setRowCollapsed(actionId, !state.collapsed);
+    }
+    return;
+  }
+  const runButton = event.target.closest('[data-role="run"]');
+  if (!runButton) {
+    return;
+  }
+  const row = runButton.closest("[data-action-row]");
+  const actionId = row?.dataset.actionRow;
+  const config = resolvedQueryTransformConfig();
+  const action = config?.actions.find((item) => String(item.id) === actionId);
+  if (action) {
+    executeQueryTransformRow(action);
+  }
+});
+
+queryTransformRowsEl?.addEventListener("input", (event) => {
+  const row = event.target.closest("[data-action-row]");
+  const actionId = row?.dataset.actionRow;
+  const state = actionId ? queryTransformRowState[actionId] : null;
+  if (!state) {
+    return;
+  }
+  if (event.target.dataset.role === "result") {
+    state.result = event.target.value;
+    if (queryTransformSelectedActionId === actionId) {
+      syncAppliedQueryTransformFromRow(actionId);
+    }
+  } else if (event.target.dataset.role === "instruction") {
+    state.instruction = event.target.value;
+  }
+});
+
+queryTransformRowsEl?.addEventListener("change", (event) => {
+  if (event.target.dataset.role !== "use-for-answer") {
+    return;
+  }
+  const row = event.target.closest("[data-action-row]");
+  const actionId = row?.dataset.actionRow;
+  const state = actionId ? queryTransformRowState[actionId] : null;
+  if (!state) {
+    return;
+  }
+  state.useForAnswer = event.target.checked;
+  if (queryTransformSelectedActionId === actionId) {
+    syncAppliedQueryTransformFromRow(actionId);
+  }
+});
+
+function refreshAppliedQueryTransformNote(hasAppliedQuery) {
+  if (!appliedQueryTransformNote) {
+    return;
+  }
+  if (!hasAppliedQuery) {
+    appliedQueryTransformNote.hidden = true;
+    appliedQueryTransformNote.textContent = "";
+    return;
+  }
+  const usage = appliedQueryTransform.useForAnswer
+    ? "použije se i pro generování odpovědi"
+    : "použije se jen pro vyhledávání zdrojů";
+  appliedQueryTransformNote.textContent = `Upravený dotaz: „${appliedQueryTransform.retrievalQuery}“ — ${usage}.`;
+  appliedQueryTransformNote.hidden = false;
 }
 
 function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
@@ -356,6 +716,19 @@ function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
     payload.use_retrieval_query_for_answer = Boolean(appliedQueryTransform.useForAnswer);
   }
   return payload;
+}
+
+// Not sent to the server (it has no use for it) — only recorded in history so
+// that reloading the entry can re-select the exact row that produced it.
+function activeQueryTransformActionId() {
+  if (
+    !appliedQueryTransform
+    || appliedQueryTransform.originalQuestion !== question.value
+    || !String(appliedQueryTransform.retrievalQuery || "").trim()
+  ) {
+    return null;
+  }
+  return appliedQueryTransform.actionId || null;
 }
 
 function wpDefaultCollectionMsearchId(wp) {
@@ -503,7 +876,7 @@ async function runQuery(retrieveOnlyMode) {
   activeQueryController = controller;
   submitButton.disabled = true;
   retrieveButton.disabled = true;
-  queryTransformButton.disabled = true;
+  setQueryTransformSectionBusy(true);
   cancelButton.hidden = false;
   cancelButton.disabled = false;
   statusEl.className = "status";
@@ -568,6 +941,7 @@ async function runQuery(retrieveOnlyMode) {
         answer: "Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.",
         sourceCount: currentRetrievedChunks.length,
         settings: payload,
+        query_transform_action_id: activeQueryTransformActionId(),
         retrieved_chunks: currentRetrievedChunks,
         sources: currentAnswerSources,
       });
@@ -644,6 +1018,7 @@ async function runQuery(retrieveOnlyMode) {
         answer: data.answer || streamedAnswerText,
         sourceCount: data.retrieved_chunks?.length || 0,
         settings: { ...payload, ...promptsUsed },
+        query_transform_action_id: activeQueryTransformActionId(),
         retrieved_chunks: data.retrieved_chunks || [],
         omitted_chunks: data.omitted_chunks || [],
         token_budget: data.token_budget || null,
@@ -674,7 +1049,7 @@ async function runQuery(retrieveOnlyMode) {
     cancelButton.hidden = true;
     submitButton.disabled = false;
     retrieveButton.disabled = false;
-    queryTransformButton.disabled = false;
+    setQueryTransformSectionBusy(false);
   }
 }
 
@@ -684,22 +1059,6 @@ form.addEventListener("submit", (event) => {
 });
 
 retrieveButton.addEventListener("click", () => runQuery(true));
-
-function closeQueryTransformDialog() {
-  queryTransformDialog?.close();
-}
-
-function setQueryTransformBusy(busy) {
-  queryTransformActions?.querySelectorAll("button").forEach((button) => {
-    button.disabled = busy;
-  });
-  applyQueryTransformButton.disabled = busy;
-}
-
-function setQueryTransformStatus(message, variant = "") {
-  queryTransformStatus.textContent = message || "";
-  queryTransformStatus.classList.toggle("error", variant === "error");
-}
 
 function queryTransformActionLabel(action) {
   if (action.label) {
@@ -712,126 +1071,6 @@ function queryTransformActionLabel(action) {
   }
   return "Upravit pomocí LLM";
 }
-
-function renderQueryTransformDialog(config) {
-  const previous = appliedQueryTransform?.originalQuestion === question.value
-    ? appliedQueryTransform
-    : null;
-  queryTransformOriginal.value = question.value;
-  queryTransformResult.value = previous?.retrievalQuery || question.value;
-  useTransformedForAnswer.checked = previous
-    ? Boolean(previous.useForAnswer)
-    : Boolean(config.use_transformed_for_answer);
-  setQueryTransformStatus("");
-
-  const llmActions = config.actions.filter((action) => String(action.type).toLowerCase() === "llm");
-  const firstLlmAction = llmActions[0] || null;
-  queryTransformPromptField.hidden = !firstLlmAction;
-  queryTransformPrompt.value = String(firstLlmAction?.prompt || firstLlmAction?.instruction || "");
-  queryTransformPrompt.dataset.actionId = String(firstLlmAction?.id || "");
-
-  queryTransformActions.innerHTML = config.actions
-    .map((action) => `
-      <button
-        class="secondary"
-        type="button"
-        data-transform-action-id="${escapeHtml(String(action.id))}"
-      >${escapeHtml(queryTransformActionLabel(action))}</button>
-    `)
-    .join("");
-}
-
-async function executeQueryTransform(action) {
-  const actionType = String(action.type || "").toLowerCase();
-  if (actionType === "llm" && queryTransformPrompt.dataset.actionId !== String(action.id)) {
-    queryTransformPrompt.value = String(action.prompt || action.instruction || "");
-    queryTransformPrompt.dataset.actionId = String(action.id);
-  }
-  const instruction = actionType === "llm" ? queryTransformPrompt.value.trim() : null;
-  setQueryTransformBusy(true);
-  setQueryTransformStatus(actionType === "lindat" ? "Překládám dotaz..." : "Upravuji dotaz pomocí LLM...");
-  try {
-    const activePrompt = activePromptPresetMetadata();
-    const response = await fetch("query-transform", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: question.value,
-        wp_id: activeWpId,
-        prompt_preset_id: activePrompt.id,
-        action_id: action.id,
-        // Local browser personas do not exist on the server, so include their
-        // resolved action definition as well as its stable id.
-        action,
-        instruction,
-        model: selectedModelValue(),
-        llm_provider: llmProvider.value,
-        llm_base_url: nullableString(selectedProviderBaseUrl()),
-        llm_api_key: nullableString(selectedProviderApiKey()),
-        admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
-      }),
-    });
-    const data = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(data.detail || `Dotaz se nepodařilo upravit (HTTP ${response.status}).`);
-    }
-    queryTransformResult.value = String(data.transformed_query || "");
-    setQueryTransformStatus("Upravený dotaz je připravený. Můžeš ho ještě ručně změnit.");
-  } catch (error) {
-    setQueryTransformStatus(error.message || "Dotaz se nepodařilo upravit.", "error");
-  } finally {
-    setQueryTransformBusy(false);
-  }
-}
-
-queryTransformButton?.addEventListener("click", () => {
-  const config = resolvedQueryTransformConfig();
-  if (!config) {
-    return;
-  }
-  if (!question.value.trim()) {
-    question.focus();
-    return;
-  }
-  renderQueryTransformDialog(config);
-  queryTransformDialog.showModal();
-});
-
-queryTransformActions?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-transform-action-id]");
-  const config = resolvedQueryTransformConfig();
-  if (!button || !config) {
-    return;
-  }
-  const action = config.actions.find((item) => String(item.id) === button.dataset.transformActionId);
-  if (action) {
-    executeQueryTransform(action);
-  }
-});
-
-applyQueryTransformButton?.addEventListener("click", () => {
-  const retrievalQuery = queryTransformResult.value.trim();
-  if (!retrievalQuery) {
-    setQueryTransformStatus("Upravený dotaz nesmí být prázdný.", "error");
-    queryTransformResult.focus();
-    return;
-  }
-  appliedQueryTransform = {
-    originalQuestion: question.value,
-    retrievalQuery,
-    useForAnswer: useTransformedForAnswer.checked,
-  };
-  refreshQueryTransformButton();
-  closeQueryTransformDialog();
-});
-
-closeQueryTransformButton?.addEventListener("click", closeQueryTransformDialog);
-cancelQueryTransformButton?.addEventListener("click", closeQueryTransformDialog);
-queryTransformDialog?.addEventListener("click", (event) => {
-  if (event.target === queryTransformDialog) {
-    closeQueryTransformDialog();
-  }
-});
 
 question.addEventListener("input", () => clearAppliedQueryTransform());
 
@@ -955,6 +1194,7 @@ settingsButton.addEventListener("click", () => {
   syncSettingsWp(activeWpId);
   renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
+  renderQueryTransformSettings();
   settingsDialog.showModal();
 });
 closeSettingsButton.addEventListener("click", () => {
@@ -2439,6 +2679,7 @@ async function refreshAfterPlaceholderDefChange() {
   renderPlaceholderControls();
   renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
+  renderQueryTransformSettings();
 }
 
 // Describe where an effective global def currently comes from, for the list.
@@ -2595,6 +2836,266 @@ function renderInlinePlaceholderDefs() {
         </div>`;
     })
     .join("")}${disabledNote}`;
+}
+
+// --- query-transform settings (per prompt preset) --------------------------
+// The config lives on preset.query_transform itself (same shape the backend
+// resolves via resolvedQueryTransformConfig()); editing it mutates the preset
+// object in place and persists it the same way inline placeholder defs do:
+// immediately, via a local save or a shared "update selected" round-trip.
+
+function activePromptQueryTransform() {
+  const preset = getPromptPresetById(activePromptPresetId);
+  const qt = preset && preset.query_transform;
+  return qt && typeof qt === "object" ? qt : null;
+}
+
+function renderQueryTransformSettings() {
+  if (!queryTransformEnabledToggle) {
+    return;
+  }
+  const preset = getPromptPresetById(activePromptPresetId);
+  const editable = canEditPromptSpecificPlaceholders(activePromptPresetId);
+  queryTransformEnabledToggle.disabled = !preset || !editable;
+  if (queryTransformDisabledNote) {
+    queryTransformDisabledNote.hidden = !preset || editable;
+    queryTransformDisabledNote.textContent = editable ? "" : SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE;
+  }
+  if (newQueryTransformActionButton) {
+    newQueryTransformActionButton.disabled = !editable;
+  }
+  const qt = activePromptQueryTransform();
+  const enabled = Boolean(qt?.enabled);
+  queryTransformEnabledToggle.checked = enabled;
+  if (queryTransformSettingsBody) {
+    queryTransformSettingsBody.hidden = !enabled;
+  }
+  if (!queryTransformActionDefsList) {
+    return;
+  }
+  const actions = Array.isArray(qt?.actions) ? qt.actions : [];
+  const disabledNote = !editable
+    ? `<p class="field-note unsaved-note">${SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE}</p>`
+    : "";
+  if (!actions.length) {
+    queryTransformActionDefsList.innerHTML = `<p class="field-note">Zatím žádné akce úpravy dotazu.</p>${disabledNote}`;
+    return;
+  }
+  const defaultActionId = qt?.default_action;
+  queryTransformActionDefsList.innerHTML = `${actions
+    .map((action) => {
+      const isDefault = action.id === defaultActionId;
+      const typeLabel = action.type === "llm" ? "LLM" : "překlad";
+      const answerBadge = action.use_transformed_for_answer ? " · i pro odpověď" : "";
+      return `
+        <div class="placeholder-def-row" data-query-transform-action="${escapeHtml(action.id)}">
+          <div class="placeholder-def-meta">
+            <strong>${escapeHtml(action.label || action.id)}</strong>
+            <span class="field-note">${escapeHtml(typeLabel)}${isDefault ? " · výchozí" : ""}${answerBadge}</span>
+          </div>
+          <div class="inline-actions">
+            ${editable
+              ? `<button class="secondary" type="button" data-edit-query-transform-action="${escapeHtml(action.id)}">Upravit</button>`
+              : ""}
+          </div>
+        </div>`;
+    })
+    .join("")}${disabledNote}`;
+}
+
+async function updateActiveQueryTransform(mutator) {
+  const preset = getPromptPresetById(activePromptPresetId);
+  if (!preset) {
+    throw new Error("Nejdřív vyber prompt.");
+  }
+  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
+    throw new Error(SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE);
+  }
+  const previous = preset.query_transform ? JSON.parse(JSON.stringify(preset.query_transform)) : null;
+  if (!preset.query_transform || typeof preset.query_transform !== "object") {
+    preset.query_transform = { enabled: false, actions: [] };
+  }
+  mutator(preset.query_transform);
+  if (!Array.isArray(preset.query_transform.actions)) {
+    preset.query_transform.actions = [];
+  }
+  if (!preset.query_transform.actions.some((action) => action.id === preset.query_transform.default_action)) {
+    preset.query_transform.default_action = preset.query_transform.actions[0]?.id || null;
+  }
+  try {
+    if (isLocalPromptPreset(activePromptPresetId)) {
+      persistLocalPromptPresets();
+      setPromptPresetStatus("Transformace dotazu byla uložena lokálně.", "success");
+    } else if (isServerPromptPreset(activePromptPresetId)) {
+      await saveCurrentPromptPreset({ mode: "update" });
+      setPromptPresetStatus("Transformace dotazu byla uložena do sdíleného promptu.", "success");
+    }
+  } catch (error) {
+    preset.query_transform = previous;
+    throw error;
+  } finally {
+    renderQueryTransformSettings();
+    // The edited config may have changed action ids/defaults, so force the
+    // inline rows to rebuild instead of keeping stale per-action state.
+    clearAppliedQueryTransform({ refreshButton: false });
+    renderQueryTransformSection();
+  }
+}
+
+let queryTransformActionEditorId = null;
+
+function updateQueryTransformActionTypeVisibility() {
+  const isLlm = queryTransformActionType.value === "llm";
+  queryTransformActionLindatFields.hidden = isLlm;
+  queryTransformActionLlmFields.hidden = !isLlm;
+}
+
+function setQueryTransformActionError(message) {
+  if (!queryTransformActionError) {
+    return;
+  }
+  queryTransformActionError.hidden = !message;
+  queryTransformActionError.textContent = message || "";
+}
+
+function slugifyQueryTransformActionId(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function openQueryTransformActionEditor(actionId) {
+  const qt = activePromptQueryTransform();
+  const action = actionId ? (qt?.actions || []).find((item) => item.id === actionId) : null;
+  queryTransformActionEditorId = actionId || null;
+  queryTransformActionType.value = action?.type === "llm" ? "llm" : "lindat";
+  queryTransformActionId.value = action?.id || "";
+  queryTransformActionLabelInput.value = action?.label || "";
+  queryTransformActionSourceLang.value = action?.source_language || "";
+  queryTransformActionTargetLang.value = action?.target_language || "";
+  queryTransformActionModel.value = action?.model || "";
+  queryTransformActionPrompt.value = action?.prompt_template || "";
+  queryTransformActionUseForAnswer.checked = Boolean(action?.use_transformed_for_answer);
+  updateQueryTransformActionTypeVisibility();
+  setQueryTransformActionError("");
+  deleteQueryTransformActionButton.hidden = !actionId;
+  queryTransformActionTitle.textContent = actionId ? "Upravit akci úpravy dotazu" : "Nová akce úpravy dotazu";
+  queryTransformActionDialog.showModal();
+  queryTransformActionId.focus();
+}
+
+newQueryTransformActionButton?.addEventListener("click", () => {
+  if (!canEditPromptSpecificPlaceholders(activePromptPresetId)) {
+    setPromptPresetStatus(SAVE_PROMPT_BEFORE_QUERY_TRANSFORM_MESSAGE, "error");
+    return;
+  }
+  openQueryTransformActionEditor(null);
+});
+
+queryTransformActionDefsList?.addEventListener("click", (event) => {
+  const editId = event.target?.dataset?.editQueryTransformAction;
+  if (editId) {
+    openQueryTransformActionEditor(editId);
+  }
+});
+
+queryTransformActionType?.addEventListener("change", updateQueryTransformActionTypeVisibility);
+
+closeQueryTransformActionButton?.addEventListener("click", () => queryTransformActionDialog.close());
+queryTransformActionDialog?.addEventListener("click", (event) => {
+  if (event.target === queryTransformActionDialog) {
+    queryTransformActionDialog.close();
+  }
+});
+
+saveQueryTransformActionButton?.addEventListener("click", async () => {
+  const type = queryTransformActionType.value === "llm" ? "llm" : "lindat";
+  const id = slugifyQueryTransformActionId(queryTransformActionId.value);
+  if (!id) {
+    setQueryTransformActionError("Zadej platné id (písmena, číslice, pomlčky).");
+    return;
+  }
+  const qtForDuplicateCheck = activePromptQueryTransform();
+  const duplicatesOtherAction = (qtForDuplicateCheck?.actions || []).some(
+    (item) => item.id === id && item.id !== queryTransformActionEditorId,
+  );
+  if (duplicatesOtherAction) {
+    setQueryTransformActionError("Toto id už jiná akce používá. Zvol jiné.");
+    return;
+  }
+  const action = {
+    id,
+    label: queryTransformActionLabelInput.value.trim() || id,
+    type,
+    use_transformed_for_answer: queryTransformActionUseForAnswer.checked,
+  };
+  if (type === "lindat") {
+    const lindatModel = queryTransformActionModel.value.trim();
+    if (!isValidLindatModel(lindatModel)) {
+      setQueryTransformActionError("Zadej platný LINDAT model, např. cs-en.");
+      return;
+    }
+    action.model = lindatModel;
+    action.source_language = queryTransformActionSourceLang.value.trim();
+    action.target_language = queryTransformActionTargetLang.value.trim();
+  } else {
+    const promptTemplate = queryTransformActionPrompt.value.trim();
+    if (!promptTemplate.includes("{question}")) {
+      setQueryTransformActionError("Šablona promptu musí obsahovat {question}.");
+      return;
+    }
+    action.prompt_template = promptTemplate;
+  }
+  try {
+    await updateActiveQueryTransform((qt) => {
+      const actions = Array.isArray(qt.actions) ? [...qt.actions] : [];
+      const previousId = queryTransformActionEditorId;
+      const existingIndex = actions.findIndex((item) => item.id === (previousId || id));
+      if (existingIndex >= 0) {
+        actions[existingIndex] = action;
+      } else {
+        actions.push(action);
+      }
+      qt.actions = actions;
+      qt.enabled = true;
+    });
+    queryTransformActionDialog.close();
+  } catch (error) {
+    setQueryTransformActionError(error.message);
+  }
+});
+
+deleteQueryTransformActionButton?.addEventListener("click", async () => {
+  if (!queryTransformActionEditorId) {
+    queryTransformActionDialog.close();
+    return;
+  }
+  try {
+    await updateActiveQueryTransform((qt) => {
+      qt.actions = (qt.actions || []).filter((item) => item.id !== queryTransformActionEditorId);
+    });
+    queryTransformActionDialog.close();
+  } catch (error) {
+    setQueryTransformActionError(error.message);
+  }
+});
+
+queryTransformEnabledToggle?.addEventListener("change", async () => {
+  const enabled = queryTransformEnabledToggle.checked;
+  try {
+    await updateActiveQueryTransform((qt) => {
+      qt.enabled = enabled;
+    });
+  } catch (error) {
+    setPromptPresetStatus(error.message, "error");
+    renderQueryTransformSettings();
+  }
+});
+
+function isValidLindatModel(modelValue) {
+  return /^[a-z]{2,3}-[a-z]{2,3}$/i.test(modelValue || "");
 }
 
 // --- shared dialog editor ---------------------------------------------------
@@ -3290,8 +3791,9 @@ function applyPromptPresetById(presetId) {
   renderPlaceholderControls();
   updatePromptTemplateWarning();
   renderInlinePlaceholderDefs();
+  renderQueryTransformSettings();
   renderPromptPresets(resolvedId);
-  refreshQueryTransformButton();
+  renderQueryTransformSection();
 }
 
 function activePromptPresetMetadata() {
@@ -3531,6 +4033,9 @@ function createBlankPromptDraft() {
   renderPlaceholderControls();
   updatePromptTemplateWarning();
   renderInlinePlaceholderDefs();
+  renderQueryTransformSettings();
+  clearAppliedQueryTransform({ refreshButton: false });
+  renderQueryTransformSection();
   renderPromptPresets(draftId);
   setPromptPresetStatus("Nový prompt je připravený. Uloží se až po kliknutí na uložení.", "success");
   systemPrompt.focus();
@@ -5020,6 +5525,7 @@ function saveHistoryEntry(entry) {
     use_retrieval_query_for_answer: Boolean(
       entry.use_retrieval_query_for_answer ?? entry.settings?.use_retrieval_query_for_answer,
     ),
+    query_transform_action_id: entry.query_transform_action_id || null,
     mode: entry.mode,
     answer: entry.answer,
     sourceCount: entry.sourceCount,
@@ -5792,6 +6298,14 @@ function applyHistoryEntryToForm(entry) {
   const restoredRetrievalQuery = String(
     entry.retrieval_query || entry.settings?.retrieval_query || "",
   ).trim();
+  const restoredActionId = String(
+    entry.query_transform_action_id || entry.settings?.query_transform_action_id || "",
+  ).trim();
+  // Force the inline rows to rebuild fresh for the restored question; the row
+  // matching restoredActionId (if the action still exists) is re-populated
+  // below, once renderQueryTransformSection() has rebuilt fresh row state.
+  queryTransformSelectedActionId = null;
+  queryTransformRowsQuestion = null;
   if (restoredRetrievalQuery && restoredRetrievalQuery !== question.value.trim()) {
     appliedQueryTransform = {
       originalQuestion: question.value,
@@ -5799,11 +6313,26 @@ function applyHistoryEntryToForm(entry) {
       useForAnswer: Boolean(
         entry.use_retrieval_query_for_answer ?? entry.settings?.use_retrieval_query_for_answer,
       ),
+      actionId: restoredActionId || null,
     };
   } else {
     appliedQueryTransform = null;
   }
-  refreshQueryTransformButton();
+  renderQueryTransformSection();
+  // Older entries have no recorded action id, and a preset may have since
+  // dropped/renamed the action that produced this result — in both cases
+  // queryTransformRowState won't have a matching row, and we fall back to
+  // just showing the applied-transform note above the (unselected) rows.
+  if (appliedQueryTransform?.actionId && queryTransformRowState[appliedQueryTransform.actionId]) {
+    applyQueryTransformRowResult(
+      appliedQueryTransform.actionId,
+      appliedQueryTransform.retrievalQuery,
+      appliedQueryTransform.useForAnswer,
+    );
+    queryTransformSelectedActionId = appliedQueryTransform.actionId;
+    updateQueryTransformRowSelectionUi();
+    collapseOtherRows(appliedQueryTransform.actionId);
+  }
   restoreAnswerFromHistoryEntry(entry);
   question.focus();
 }
