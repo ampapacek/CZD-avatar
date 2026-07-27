@@ -77,9 +77,24 @@
         </header>
 
         <form id="chatForm" class="composer">
+          <div class="controls">
+            <label class="field wp-control">
+              <span>WP</span>
+              <select id="wpSelect"></select>
+            </label>
+            <label class="field prompt-control">
+              <span>Prompt</span>
+              <select id="activePromptPreset"></select>
+            </label>
+            <label class="field msearch-control collection-control">
+              <span>Kolekce</span>
+              <select id="msearchCollection"></select>
+            </label>
+          </div>
+
           <label class="field question-field">
             <span>Otázka</span>
-            <textarea id="question" rows="4" required>Jaký byl význam husitských válek?</textarea>
+            <textarea id="question" rows="3" required>Jaký byl význam husitských válek?</textarea>
           </label>
           <div class="question-actions">
             <button id="randomQuestionButton" class="secondary" type="button" title="Vybere náhodnou otázku pro aktuální WP a vloží ji do pole.">
@@ -99,6 +114,7 @@
               <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
             </div>
           </div>
+          <div id="placeholderControls" class="placeholder-controls"></div>
           <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
 
           <details id="queryTransformSection" class="advanced query-transform-inline" hidden>
@@ -107,22 +123,6 @@
               <div id="queryTransformRows" class="query-transform-rows"></div>
             </div>
           </details>
-
-          <div class="controls">
-            <label class="field wp-control">
-              <span>WP</span>
-              <select id="wpSelect"></select>
-            </label>
-            <label class="field msearch-control collection-control">
-              <span>Kolekce</span>
-              <select id="msearchCollection"></select>
-            </label>
-            <label class="field prompt-control">
-              <span>Prompt</span>
-              <select id="activePromptPreset"></select>
-            </label>
-            <div id="placeholderControls" class="placeholder-controls"></div>
-          </div>
 
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
