@@ -145,20 +145,6 @@
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
             <div class="advanced-grid">
-              <section id="queryTransformSection" class="query-transform-inline" hidden>
-                <h3>Transformace dotazu</h3>
-                <label class="field inline-field query-transform-apply-toggle">
-                  <input id="queryTransformApplyToggle" type="checkbox" />
-                  <span>Použít transformaci před vyhledáváním</span>
-                </label>
-                <p class="field-note">
-                  Pokud transformaci nespustíš ručně, provede se automaticky po odeslání dotazu.
-                </p>
-                <div class="query-transform-inline-body">
-                  <div id="queryTransformRows" class="query-transform-rows"></div>
-                </div>
-                <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
-              </section>
               <div class="retrieval-sliders">
                 <label class="field">
                   <span>Dokumentů: <output id="topKValue">10</output></span>
@@ -183,6 +169,20 @@
                 <input id="msearchRescore" type="checkbox" />
                 <span>Re-ranking – zpřesní pořadí dokumentů (cross-encoder).</span>
               </label>
+              <section id="queryTransformSection" class="query-transform-inline" hidden>
+                <h3>Transformace dotazu</h3>
+                <label class="field inline-field query-transform-apply-toggle">
+                  <input id="queryTransformApplyToggle" type="checkbox" />
+                  <span>Použít transformaci před vyhledáváním</span>
+                </label>
+                <p class="field-note">
+                  Pokud transformaci nespustíš ručně, provede se automaticky po odeslání dotazu.
+                </p>
+                <div class="query-transform-inline-body">
+                  <div id="queryTransformRows" class="query-transform-rows"></div>
+                </div>
+                <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
+              </section>
             </div>
           </details>
 
