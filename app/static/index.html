@@ -6,7 +6,7 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=conv-settings-1" />
+    <link rel="stylesheet" href="static/styles.css?v=query-transform-auto-1" />
   </head>
   <body>
     <main class="shell">
@@ -115,14 +115,6 @@
             </div>
           </div>
           <div id="placeholderControls" class="placeholder-controls"></div>
-          <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
-
-          <details id="queryTransformSection" class="advanced query-transform-inline" hidden>
-            <summary>Upravit dotaz před vyhledáváním</summary>
-            <div class="query-transform-inline-body">
-              <div id="queryTransformRows" class="query-transform-rows"></div>
-            </div>
-          </details>
 
           <details class="advanced model-settings">
             <summary>Model</summary>
@@ -153,6 +145,20 @@
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
             <div class="advanced-grid">
+              <section id="queryTransformSection" class="query-transform-inline" hidden>
+                <h3>Transformace dotazu</h3>
+                <label class="field inline-field query-transform-apply-toggle">
+                  <input id="queryTransformApplyToggle" type="checkbox" />
+                  <span>Použít transformaci před vyhledáváním</span>
+                </label>
+                <p class="field-note">
+                  Pokud transformaci nespustíš ručně, provede se automaticky po odeslání dotazu.
+                </p>
+                <div class="query-transform-inline-body">
+                  <div id="queryTransformRows" class="query-transform-rows"></div>
+                </div>
+                <p id="appliedQueryTransformNote" class="field-note query-transform-applied-note" hidden></p>
+              </section>
               <div class="retrieval-sliders">
                 <label class="field">
                   <span>Dokumentů: <output id="topKValue">10</output></span>
@@ -246,7 +252,7 @@
           </div>
           <div class="help-card">
             <h3>Úprava dotazu</h3>
-            <p>Pokud ji vybraný WP nebo prompt nabízí, sekce <code>Upravit dotaz před vyhledáváním</code> umožní dotaz přeložit nebo jinak upravit. Každá transformace obsahuje vlastní popis a výsledný dotaz lze před použitím ručně změnit. Uživatel také zvolí, zda se má upravený dotaz použít jen pro vyhledání zdrojů, nebo i pro vygenerování odpovědi.</p>
+            <p>Pokud ji vybraný prompt nabízí, transformace se před vyhledáváním provede automaticky. V <code>Pokročilém nastavení</code> ji lze pro aktuální dotaz vypnout, vybrat jinou transformaci nebo ji spustit předem a výsledný dotaz ručně upravit. Profil také určuje, zda se má upravený dotaz použít jen pro vyhledání zdrojů, nebo i pro vygenerování odpovědi.</p>
           </div>
           <div class="help-card">
             <h3>Zdroje a kolekce</h3>
@@ -283,7 +289,7 @@
           </div>
           <div class="help-card">
             <h3>Pokročilé nastavení</h3>
-            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje vyhledávání zdrojů pro aktuální dotaz. Nastavuje počet dokumentů, minimální confidence, relativní skóre vůči nejlepšímu výsledku a re-ranking. Přísnější filtry mohou vrátit méně dokumentů, než určuje zvolený počet.</p>
+            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje transformaci a vyhledávání zdrojů pro aktuální dotaz. Nastavuje použitou transformaci, počet dokumentů, minimální confidence, relativní skóre vůči nejlepšímu výsledku a re-ranking. Přísnější filtry mohou vrátit méně dokumentů, než určuje zvolený počet.</p>
           </div>
           <div class="help-card">
             <h3>Re-ranking</h3>
@@ -413,12 +419,17 @@
             <div class="placeholder-defs-inline">
               <h4>Transformace dotazu</h4>
               <p class="field-note">
-                Umožní na hlavní stránce tlačítko „Upravit dotaz“, kterým lze dotaz před vyhledáváním
-                přeložit nebo upravit pomocí LLM. Nastavení patří jen k vybranému promptu/profilu.
+                Umožní dotaz před vyhledáváním automaticky přeložit nebo upravit pomocí LLM.
+                Více transformací může být dostupných ručně, ale právě jedna je výchozí.
+                Nastavení patří jen k vybranému promptu/profilu.
               </p>
               <label class="field inline-field">
                 <input id="queryTransformEnabledToggle" type="checkbox" />
                 <span>Povolit úpravu dotazu pro tento prompt</span>
+              </label>
+              <label class="field inline-field">
+                <input id="queryTransformAutoApplyToggle" type="checkbox" />
+                <span>Použít výchozí transformaci automaticky</span>
               </label>
               <p id="queryTransformDisabledNote" class="field-note unsaved-note" hidden></p>
               <div id="queryTransformSettingsBody" hidden>
@@ -809,6 +820,6 @@
       </div>
     </dialog>
 
-  <script src="static/app.js?v=shared-history-2"></script>
+  <script src="static/app.js?v=query-transform-auto-1"></script>
 </body>
 </html>

@@ -33,6 +33,7 @@ const customProviderDefaultModel = document.querySelector("#customProviderDefaul
 const customProviderModels = document.querySelector("#customProviderModels");
 const retrieveButton = document.querySelector("#retrieveButton");
 const queryTransformSection = document.querySelector("#queryTransformSection");
+const queryTransformApplyToggle = document.querySelector("#queryTransformApplyToggle");
 const queryTransformRowsEl = document.querySelector("#queryTransformRows");
 const appliedQueryTransformNote = document.querySelector("#appliedQueryTransformNote");
 const predefinedQuestionWrap = document.querySelector("#predefinedQuestionWrap");
@@ -85,6 +86,7 @@ const addPlaceholderOptionButton = document.querySelector("#addPlaceholderOption
 const placeholderDefError = document.querySelector("#placeholderDefError");
 const placeholderDefActions = document.querySelector("#placeholderDefActions");
 const queryTransformEnabledToggle = document.querySelector("#queryTransformEnabledToggle");
+const queryTransformAutoApplyToggle = document.querySelector("#queryTransformAutoApplyToggle");
 const queryTransformDisabledNote = document.querySelector("#queryTransformDisabledNote");
 const queryTransformSettingsBody = document.querySelector("#queryTransformSettingsBody");
 const queryTransformActionDefsList = document.querySelector("#queryTransformActionDefsList");
@@ -241,6 +243,7 @@ let appliedQueryTransform = null;
 let queryTransformRowState = {};
 let queryTransformRowsQuestion = null;
 let queryTransformSelectedActionId = null;
+let queryTransformApplyEnabled = null;
 let appSettings = {};
 let promptPresets = [];
 let localPromptPresets = [];
@@ -316,12 +319,17 @@ function resolvedQueryTransformConfig() {
       && ["lindat", "llm"].includes(String(action.type || "").toLowerCase())
     ))
     : [];
-  return actions.length ? { ...raw, actions } : null;
+  return actions.length ? {
+    ...raw,
+    auto_apply: raw.auto_apply !== false,
+    actions,
+  } : null;
 }
 
 function clearAppliedQueryTransform({ refreshButton = true } = {}) {
   appliedQueryTransform = null;
   queryTransformSelectedActionId = null;
+  queryTransformApplyEnabled = null;
   // Forces renderQueryTransformSection() to rebuild the rows from scratch.
   queryTransformRowsQuestion = null;
   if (refreshButton) {
@@ -352,8 +360,7 @@ function buildQueryTransformRowsDom(config) {
               class="query-transform-row-select"
               type="button"
               data-role="select"
-              ${hasResult ? "" : "disabled"}
-              title="${hasResult ? "Použít tuto úpravu pro vyhledávání" : "Nejdřív dotaz uprav"}"
+              title="Vybrat tuto transformaci"
               aria-label="Vybrat tuto úpravu"
             ><span class="query-transform-row-select-dot" aria-hidden="true"></span></button>
             <button class="query-transform-row-toggle" type="button" data-role="toggle" aria-expanded="${collapsed ? "false" : "true"}" title="Sbalit / rozbalit">
@@ -394,8 +401,8 @@ function updateQueryTransformRowSelectionUi() {
     const isSelected = actionId === queryTransformSelectedActionId;
     row.classList.toggle("is-selected", isSelected);
     const selectButton = row.querySelector('[data-role="select"]');
-    if (selectButton && !selectButton.disabled) {
-      const title = isSelected ? "Zrušit výběr této úpravy" : "Použít tuto úpravu pro vyhledávání";
+    if (selectButton) {
+      const title = isSelected ? "Vybraná transformace" : "Vybrat tuto transformaci";
       selectButton.title = title;
       selectButton.setAttribute("aria-label", title);
     }
@@ -498,17 +505,22 @@ function setQueryTransformSectionBusy(busy) {
   });
 }
 
-async function executeQueryTransformRow(action) {
+async function executeQueryTransformRow(
+  action,
+  { signal = null, propagateError = false, manageBusy = true } = {},
+) {
   const actionId = String(action.id);
   const state = queryTransformRowState[actionId];
   if (!state) {
-    return;
+    throw new Error("Vybraná transformace není dostupná.");
   }
   const row = findQueryTransformRow(actionId);
   const statusEl = row?.querySelector('[data-role="status"]');
   const actionType = String(action.type || "").toLowerCase();
   const instruction = actionType === "llm" ? String(state.instruction || "").trim() : null;
-  setQueryTransformSectionBusy(true);
+  if (manageBusy) {
+    setQueryTransformSectionBusy(true);
+  }
   if (statusEl) {
     statusEl.textContent = actionType === "lindat" ? "Překládám dotaz..." : "Upravuji dotaz pomocí LLM...";
     statusEl.classList.remove("error");
@@ -518,6 +530,7 @@ async function executeQueryTransformRow(action) {
     const response = await fetch("query-transform", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({
         question: question.value,
         wp_id: activeWpId,
@@ -540,6 +553,10 @@ async function executeQueryTransformRow(action) {
     }
     applyQueryTransformRowResult(actionId, String(data.transformed_query || ""));
     queryTransformSelectedActionId = actionId;
+    queryTransformApplyEnabled = true;
+    if (queryTransformApplyToggle) {
+      queryTransformApplyToggle.checked = true;
+    }
     syncAppliedQueryTransformFromRow(actionId);
     updateQueryTransformRowSelectionUi();
     collapseOtherRows(actionId);
@@ -548,11 +565,18 @@ async function executeQueryTransformRow(action) {
     }
   } catch (error) {
     if (statusEl) {
-      statusEl.textContent = error.message || "Dotaz se nepodařilo upravit.";
-      statusEl.classList.add("error");
+      statusEl.textContent = error.name === "AbortError"
+        ? "Úprava dotazu byla zrušena."
+        : (error.message || "Dotaz se nepodařilo upravit.");
+      statusEl.classList.toggle("error", error.name !== "AbortError");
+    }
+    if (propagateError) {
+      throw error;
     }
   } finally {
-    setQueryTransformSectionBusy(false);
+    if (manageBusy) {
+      setQueryTransformSectionBusy(false);
+    }
   }
 }
 
@@ -571,19 +595,27 @@ function renderQueryTransformSection() {
   const idsChanged = actionIds.length !== Object.keys(queryTransformRowState).length
     || actionIds.some((id) => !queryTransformRowState[id]);
   if (questionChanged || idsChanged) {
+    const initialActionId = actionIds.includes(String(config.default_action || ""))
+      ? String(config.default_action)
+      : actionIds[0];
     queryTransformRowState = {};
     config.actions.forEach((action) => {
       queryTransformRowState[action.id] = {
         result: "",
         useForAnswer: Boolean(action.use_transformed_for_answer),
         instruction: "",
-        collapsed: false,
+        collapsed: String(action.id) !== initialActionId,
       };
     });
     queryTransformRowsQuestion = question.value;
-    queryTransformSelectedActionId = null;
+    queryTransformSelectedActionId = initialActionId;
+    queryTransformApplyEnabled = config.auto_apply;
     buildQueryTransformRowsDom(config);
   }
+  if (queryTransformApplyToggle) {
+    queryTransformApplyToggle.checked = queryTransformApplyEnabled !== false;
+  }
+  queryTransformSection.classList.toggle("is-disabled", queryTransformApplyEnabled === false);
   const hasAppliedQuery = Boolean(
     appliedQueryTransform
     && appliedQueryTransform.originalQuestion === question.value
@@ -598,17 +630,13 @@ queryTransformRowsEl?.addEventListener("click", (event) => {
   if (selectButton) {
     const row = selectButton.closest("[data-action-row]");
     const actionId = row?.dataset.actionRow;
-    if (actionId && queryTransformSelectedActionId === actionId) {
-      queryTransformSelectedActionId = null;
-      appliedQueryTransform = null;
-      updateQueryTransformRowSelectionUi();
-      renderQueryTransformSection();
-      return;
-    }
     const state = actionId ? queryTransformRowState[actionId] : null;
-    if (state && String(state.result || "").trim()) {
+    if (state) {
       queryTransformSelectedActionId = actionId;
-      syncAppliedQueryTransformFromRow(actionId);
+      appliedQueryTransform = null;
+      if (String(state.result || "").trim()) {
+        syncAppliedQueryTransformFromRow(actionId);
+      }
       updateQueryTransformRowSelectionUi();
       collapseOtherRows(actionId);
     }
@@ -635,6 +663,16 @@ queryTransformRowsEl?.addEventListener("click", (event) => {
   if (action) {
     executeQueryTransformRow(action);
   }
+});
+
+queryTransformApplyToggle?.addEventListener("change", () => {
+  queryTransformApplyEnabled = queryTransformApplyToggle.checked;
+  if (!queryTransformApplyEnabled) {
+    appliedQueryTransform = null;
+  } else if (queryTransformSelectedActionId) {
+    syncAppliedQueryTransformFromRow(queryTransformSelectedActionId);
+  }
+  renderQueryTransformSection();
 });
 
 queryTransformRowsEl?.addEventListener("input", (event) => {
@@ -688,7 +726,8 @@ function refreshAppliedQueryTransformNote(hasAppliedQuery) {
 
 function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
   if (
-    !appliedQueryTransform
+    queryTransformApplyEnabled === false
+    || !appliedQueryTransform
     || appliedQueryTransform.originalQuestion !== question.value
     || !String(appliedQueryTransform.retrievalQuery || "").trim()
   ) {
@@ -707,13 +746,50 @@ function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
 // that reloading the entry can re-select the exact row that produced it.
 function activeQueryTransformActionId() {
   if (
-    !appliedQueryTransform
+    queryTransformApplyEnabled === false
+    || !appliedQueryTransform
     || appliedQueryTransform.originalQuestion !== question.value
     || !String(appliedQueryTransform.retrievalQuery || "").trim()
   ) {
     return null;
   }
   return appliedQueryTransform.actionId || null;
+}
+
+function pendingAutomaticQueryTransform() {
+  const config = resolvedQueryTransformConfig();
+  if (!config || queryTransformApplyEnabled === false) {
+    return null;
+  }
+  const action = config.actions.find(
+    (item) => String(item.id) === queryTransformSelectedActionId,
+  );
+  if (!action) {
+    return null;
+  }
+  const state = queryTransformRowState[String(action.id)];
+  const hasCurrentResult = Boolean(
+    state
+    && String(state.result || "").trim()
+    && appliedQueryTransform
+    && appliedQueryTransform.originalQuestion === question.value
+    && appliedQueryTransform.actionId === String(action.id),
+  );
+  return hasCurrentResult ? null : action;
+}
+
+async function prepareAutomaticQueryTransform(signal) {
+  const action = pendingAutomaticQueryTransform();
+  if (!action) {
+    return;
+  }
+  statusEl.className = "status";
+  statusEl.textContent = "Upravuji dotaz před vyhledáváním...";
+  await executeQueryTransformRow(action, {
+    signal,
+    propagateError: true,
+    manageBusy: false,
+  });
 }
 
 function wpDefaultCollectionMsearchId(wp) {
@@ -870,6 +946,10 @@ async function runQuery(retrieveOnlyMode) {
   const promptNoteSnapshot = activePromptPresetMetadata().note;
 
   try {
+    await prepareAutomaticQueryTransform(controller.signal);
+    statusEl.textContent = retrieveOnlyMode
+      ? "Vyhledávám zdroje..."
+      : "Vyhledávám zdroje a generuji odpověď...";
     if (retrieveOnlyMode) {
       const payload = buildRetrievePayload();
       currentRetrievalQuery = payload.retrieval_query || payload.question;
@@ -2832,6 +2912,10 @@ function renderQueryTransformSettings() {
   const qt = activePromptQueryTransform();
   const enabled = Boolean(qt?.enabled);
   queryTransformEnabledToggle.checked = enabled;
+  if (queryTransformAutoApplyToggle) {
+    queryTransformAutoApplyToggle.checked = qt?.auto_apply !== false;
+    queryTransformAutoApplyToggle.disabled = !preset || !editable || !enabled;
+  }
   if (queryTransformSettingsBody) {
     queryTransformSettingsBody.hidden = !enabled;
   }
@@ -2857,6 +2941,17 @@ function renderQueryTransformSettings() {
           <div class="placeholder-def-meta">
             <strong>${escapeHtml(action.label || action.id)}</strong>
             <span class="field-note">${escapeHtml(typeLabel)}${isDefault ? " · výchozí" : ""}${answerBadge}</span>
+            <label class="field inline-field query-transform-default-action">
+              <input
+                type="radio"
+                name="queryTransformDefaultAction"
+                value="${escapeHtml(action.id)}"
+                data-default-query-transform-action
+                ${isDefault ? "checked" : ""}
+                ${editable ? "" : "disabled"}
+              />
+              <span>Výchozí automatická transformace</span>
+            </label>
           </div>
           <div class="inline-actions">
             ${editable
@@ -2878,7 +2973,7 @@ async function updateActiveQueryTransform(mutator) {
   }
   const previous = preset.query_transform ? JSON.parse(JSON.stringify(preset.query_transform)) : null;
   if (!preset.query_transform || typeof preset.query_transform !== "object") {
-    preset.query_transform = { enabled: false, actions: [] };
+    preset.query_transform = { enabled: false, auto_apply: true, actions: [] };
   }
   mutator(preset.query_transform);
   if (!Array.isArray(preset.query_transform.actions)) {
@@ -2967,6 +3062,19 @@ queryTransformActionDefsList?.addEventListener("click", (event) => {
   }
 });
 
+queryTransformActionDefsList?.addEventListener("change", async (event) => {
+  if (!event.target.matches("[data-default-query-transform-action]")) {
+    return;
+  }
+  try {
+    await updateActiveQueryTransform((qt) => {
+      qt.default_action = event.target.value;
+    });
+  } catch (error) {
+    setPromptPresetStatus(error.message, "error");
+  }
+});
+
 queryTransformActionType?.addEventListener("change", updateQueryTransformActionTypeVisibility);
 
 closeQueryTransformActionButton?.addEventListener("click", () => queryTransformActionDialog.close());
@@ -3032,6 +3140,9 @@ saveQueryTransformActionButton?.addEventListener("click", async () => {
       }
       qt.actions = actions;
       qt.enabled = true;
+      if (previousId && qt.default_action === previousId) {
+        qt.default_action = id;
+      }
     });
     queryTransformActionDialog.close();
   } catch (error) {
@@ -3059,6 +3170,18 @@ queryTransformEnabledToggle?.addEventListener("change", async () => {
   try {
     await updateActiveQueryTransform((qt) => {
       qt.enabled = enabled;
+    });
+  } catch (error) {
+    setPromptPresetStatus(error.message, "error");
+    renderQueryTransformSettings();
+  }
+});
+
+queryTransformAutoApplyToggle?.addEventListener("change", async () => {
+  const autoApply = queryTransformAutoApplyToggle.checked;
+  try {
+    await updateActiveQueryTransform((qt) => {
+      qt.auto_apply = autoApply;
     });
   } catch (error) {
     setPromptPresetStatus(error.message, "error");
@@ -6306,6 +6429,12 @@ function applyHistoryEntryToForm(entry) {
     appliedQueryTransform = null;
   }
   renderQueryTransformSection();
+  if (appliedQueryTransform) {
+    // A history item with an explicit retrieval query should restore that
+    // query even when the profile's current automatic default is disabled.
+    queryTransformApplyEnabled = true;
+    renderQueryTransformSection();
+  }
   // Older entries have no recorded action id, and a preset may have since
   // dropped/renamed the action that produced this result — in both cases
   // queryTransformRowState won't have a matching row, and we fall back to

@@ -779,9 +779,8 @@ button:hover {
   min-width: 0;
 }
 
-#queryTransformSection.is-applied summary {
+#queryTransformSection.is-applied h3 {
   color: var(--accent);
-  font-weight: 800;
 }
 
 .query-transform-applied-note {
@@ -2158,13 +2157,32 @@ body[data-theme="dark"] .source-highlight {
 }
 
 .query-transform-inline {
-  margin-top: -4px;
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.query-transform-inline h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.query-transform-inline > .field-note {
+  margin: 0;
+}
+
+.query-transform-apply-toggle {
+  margin-top: 2px;
 }
 
 .query-transform-inline-body {
   display: grid;
   gap: 14px;
-  margin-top: 14px;
+  margin-top: 6px;
 }
 
 .query-transform-rows {
@@ -2288,6 +2306,13 @@ body[data-theme="dark"] .source-highlight {
 .query-transform-row-status.error {
   color: #b91c1c;
   font-weight: 700;
+}
+
+.query-transform-default-action {
+  flex-basis: 100%;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .settings-section {

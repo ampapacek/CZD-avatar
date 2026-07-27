@@ -109,6 +109,7 @@ class QueryTransformAction(BaseModel):
 
 class QueryTransformConfig(BaseModel):
     enabled: bool = False
+    auto_apply: bool = True
     actions: list[QueryTransformAction] = Field(default_factory=list)
     default_action: str | None = None
 

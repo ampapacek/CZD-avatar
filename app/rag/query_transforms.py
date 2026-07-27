@@ -30,7 +30,10 @@ def normalize_query_transform(value: Any) -> dict[str, Any] | None:
     enabled = bool(value.get("enabled", False))
     result: dict[str, Any] = {
         "enabled": enabled,
-        "actions": _normalize_actions(value.get("actions")) if enabled else [],
+        "auto_apply": bool(value.get("auto_apply", True)),
+        # Disabling the feature should not destroy the profile's configured
+        # actions; the endpoint still enforces ``enabled`` before resolving one.
+        "actions": _normalize_actions(value.get("actions")),
     }
     default_action = str(value.get("default_action") or "").strip()
     action_ids = {action["id"] for action in result["actions"]}

@@ -134,6 +134,7 @@ class PromptPresetStorageTests(unittest.TestCase):
             user_prompt_template="{question}",
             query_transform={
                 "enabled": True,
+                "auto_apply": False,
                 "default_action": "translate",
                 "actions": [
                     {
@@ -148,13 +149,72 @@ class PromptPresetStorageTests(unittest.TestCase):
         )
 
         self.assertTrue(record["query_transform"]["enabled"])
+        self.assertFalse(record["query_transform"]["auto_apply"])
         loaded = load_prompt_presets(self.path)[0]
+        self.assertFalse(loaded["query_transform"]["auto_apply"])
         self.assertEqual(
             loaded["query_transform"]["actions"][0]["prompt_template"], "Translate to English: {question}"
         )
         self.assertEqual(
             loaded["query_transform"]["actions"][0]["description"], "Translate the query to English."
         )
+
+    def test_query_transform_auto_apply_defaults_to_true_and_default_action_is_singular(self) -> None:
+        record = save_prompt_preset(
+            self.path,
+            name="Automatic transform",
+            system_prompt="sys",
+            user_prompt_template="{question}",
+            query_transform={
+                "enabled": True,
+                "default_action": "missing",
+                "actions": [
+                    {
+                        "id": "first",
+                        "label": "First",
+                        "description": "First transformation.",
+                        "type": "llm",
+                        "prompt_template": "Transform: {question}",
+                    },
+                    {
+                        "id": "second",
+                        "label": "Second",
+                        "description": "Second transformation.",
+                        "type": "llm",
+                        "prompt_template": "Rewrite: {question}",
+                    },
+                ],
+            },
+        )
+
+        self.assertTrue(record["query_transform"]["auto_apply"])
+        self.assertEqual(record["query_transform"]["default_action"], "first")
+
+    def test_disabling_query_transform_preserves_configured_actions(self) -> None:
+        record = save_prompt_preset(
+            self.path,
+            name="Temporarily disabled transform",
+            system_prompt="sys",
+            user_prompt_template="{question}",
+            query_transform={
+                "enabled": False,
+                "auto_apply": True,
+                "default_action": "translate",
+                "actions": [
+                    {
+                        "id": "translate",
+                        "label": "Translate",
+                        "description": "Translate the query.",
+                        "type": "llm",
+                        "prompt_template": "Translate: {question}",
+                    }
+                ],
+            },
+        )
+
+        self.assertFalse(record["query_transform"]["enabled"])
+        self.assertEqual(record["query_transform"]["default_action"], "translate")
+        self.assertEqual(len(record["query_transform"]["actions"]), 1)
 
     def test_missing_query_transform_inherits_as_null(self) -> None:
         record = self._save("Inherit WP")
