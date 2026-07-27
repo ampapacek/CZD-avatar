@@ -246,12 +246,15 @@
           </div>
           <div class="help-card">
             <h3>Úprava dotazu</h3>
-            <p>Pokud ji vybraný WP nebo prompt nabízí, tlačítko <code>Upravit dotaz</code> umožní dotaz před vyhledáváním přeložit nebo upravit. Ve výchozím nastavení se upravený dotaz používá pouze k vyhledání podkladů v databázi; model generující odpověď dostane původní dotaz.</p>
+            <p>Pokud ji vybraný WP nebo prompt nabízí, sekce <code>Upravit dotaz před vyhledáváním</code> umožní dotaz přeložit nebo jinak upravit. Každá transformace obsahuje vlastní popis a výsledný dotaz lze před použitím ručně změnit. Uživatel také zvolí, zda se má upravený dotaz použít jen pro vyhledání zdrojů, nebo i pro vygenerování odpovědi.</p>
           </div>
           <div class="help-card">
-            <h3>Zdroje: mSearch / lokální databáze</h3>
-            <p>Výchozí vyhledávání používá mSearch, tedy vyhledávání nad kolekcemi dokumentů v Seafile. mSearch vrací confidence skóre, podle kterého lze výsledky filtrovat, například vyžadovat minimální skóre. Podle tohoto skóre se výsledky také řadí. Lokální vyhledávání je zatím hlavně testovací režim pro WP1; používá lokálně zaindexované dokumenty, dense podobnost a BM25.</p>
-            <p>Nastavení jako počet dokumentů, minimální skóre, relativní skóre nebo reranking ovlivňuje, které úryvky a kolik z nich se pošle modelu.</p>
+            <h3>Zdroje a kolekce</h3>
+            <p>Vybraný pracovní balíček (WP) určuje dostupné kolekce dokumentů. Kolekce vybírá konkrétní sadu podkladů, ve které aplikace hledá relevantní úryvky. Počet dokumentů, minimální confidence, relativní skóre a re-ranking ovlivňují, které úryvky se použijí jako podklad pro odpověď.</p>
+          </div>
+          <div class="help-card">
+            <h3>Model</h3>
+            <p>V sekci <code>Model</code> lze vybrat poskytovatele, jazykový model a context window. Context window ovlivňuje, kolik nalezených zdrojů se připojí do promptu a zda se před odesláním zkrátí. Nejde o skutečný limit vybraného modelu.</p>
           </div>
           <div class="help-card">
             <h3>Prompty a {proměnné}</h3>
@@ -259,7 +262,7 @@
           </div>
           <div class="help-card">
             <h3>Lokální a sdílené úpravy</h3>
-            <p>Prompty a proměnné (placeholdery) se dají uložit jen v tomto prohlížeči nebo sdíleně na serveru. Lokální úpravy jsou vhodné pro experimenty. Sdílené úpravy uvidí i ostatní uživatelé. Úpravy existujících promptů vyžadují admin heslo.</p>
+            <p>Prompty a proměnné se dají uložit jen v tomto prohlížeči nebo sdíleně na serveru. Lokální úpravy jsou vhodné pro experimenty. Sdílené úpravy uvidí i ostatní uživatelé. Vlastník může svůj sdílený obsah upravovat nebo smazat; admin přístup umožňuje spravovat také obsah ostatních.</p>
           </div>
           <div class="help-card">
             <h3>Zamčeno a admin přístup</h3>
@@ -272,29 +275,24 @@
           </div>
           <div class="help-card">
             <h3>Konverzace a historie</h3>
-            <p>Konverzace slouží pro navazující otázky, ale v beta verzi může být méně spolehlivá než samostatný dotaz. Historie ukládá předchozí odpovědi, zdroje a nastavení lokálně v tomto prohlížeči.</p>
+            <p>Konverzace slouží pro navazující otázky, ale v beta verzi může být méně spolehlivá než samostatný dotaz. Osobní historie ukládá předchozí odpovědi, zdroje a nastavení v tomto prohlížeči. Vybrané položky historie lze sdílet na serveru s ostatními uživateli.</p>
           </div>
           <div class="help-card">
             <h3>Nastavení</h3>
-            <p>Tlačítko <code>Nastavení</code> otevírá správu věcí, které se obvykle nemění u každé otázky. Lze tam uložit API klíče pro jednotlivé providery, zadat nebo odhlásit admin přístup, nastavit tokenové limity, přidat vlastního LLM providera a upravovat prompty nebo proměnné. Pokud se něco uloží jen lokálně, platí to pouze pro tento prohlížeč. Pokud se něco uloží sdíleně na serveru, mohou to používat i ostatní uživatelé.</p>
+            <p>Tlačítko <code>Nastavení</code> otevírá správu věcí, které se obvykle nemění u každé otázky. Lze tam uložit API klíče, zadat nebo odhlásit admin přístup, nastavit tokenový rozpočet, přidat vlastního LLM poskytovatele a upravovat prompty, proměnné nebo transformace dotazu. Lze tam také obnovit seznam dostupných modelů a kolekcí. Lokálně uložené změny platí pouze pro tento prohlížeč; sdílené změny mohou používat i ostatní.</p>
           </div>
           <div class="help-card">
             <h3>Pokročilé nastavení</h3>
-            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje aktuální dotaz. Dá se tam vybrat model, zdroj dokumentů, backend vyhledávání, mSearch kolekce, počet vrácených dokumentů, minimální skóre, relativní skóre vůči nejlepšímu výsledku a reranking. Prakticky to znamená: nejdřív nastavíš, odkud a jak se mají najít dokumenty, a potom kolik z nich se má poslat modelu jako kontext pro odpověď.</p>
+            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje vyhledávání zdrojů pro aktuální dotaz. Nastavuje počet dokumentů, minimální confidence, relativní skóre vůči nejlepšímu výsledku a re-ranking. Přísnější filtry mohou vrátit méně dokumentů, než určuje zvolený počet.</p>
           </div>
           <div class="help-card">
             <h3>Re-ranking</h3>
-            <p>Re-ranking je volitelný druhý krok po vyhledávání. Nejdřív se najde širší sada kandidátních úryvků a potom je cross-encoder znovu ohodnotí podle relevance k otázce. Pomáhá to seřadit chunky přesněji, takže se modelu častěji pošlou nejvhodnější zdroje nahoře v pořadí. Nevýhoda je, že re-ranking trvá déle, protože model musí zvlášť přečíst dvojice otázka + úryvek. Tato funkce je zatím v testovací fázi.</p>
-            <p>K dispozici jsou dvě varianty a lze je zapnout i obě najednou:</p>
-            <ul>
-              <li><strong>Re-ranking přes mSearch</strong> probíhá na serveru mSearch. Je obvykle přesnější a mnohem rychlejší (není potřeba lokální model). Vrací rovnou přeřazené pořadí, takže se nezobrazuje porovnání s původním pořadím.</li>
-              <li><strong>Lokální re-ranking</strong> běží přímo v této aplikaci s modelem <code>BAAI/bge-reranker-v2-m3</code>. Je výrazně pomalejší, ale umožní porovnat pořadí před a po re-rankingu a má nastavitelnou váhu míchání skóre.</li>
-            </ul>
-            <p>Pokud jsou zapnuté obě varianty, mSearch nejdřív přeřadí kandidáty na serveru a lokální re-ranking pak pracuje nad tímto pořadím.</p>
+            <p>Re-ranking je volitelný druhý krok po vyhledávání. Nalezené úryvky se znovu ohodnotí podle relevance k otázce, aby se nejvhodnější zdroje dostaly výše. Může zlepšit pořadí výsledků, ale vyhledávání může trvat o něco déle.</p>
+            <p>Při zapnutém re-rankingu mohou být skóre na jiné škále. Pokud se vrací příliš málo zdrojů, zkontroluj zejména nastavení <code>Min. vůči nejlepšímu</code>.</p>
           </div>
           <div class="help-card">
             <h3>Soukromí a kontrola</h3>
-            <p>API klíče, lokální prompty, lokální proměnné, historie a konverzace se ukládají v tomto prohlížeči. Sdílené prompty a proměnné se ukládají na serveru. U důležitých odpovědí vždy otevři zdroje a ověř, jestli citace opravdu podporují tvrzení v textu.</p>
+            <p>API klíče, lokální prompty, lokální proměnné, osobní historie a konverzace se ukládají v tomto prohlížeči. Sdílené prompty, proměnné a položky historie se ukládají na serveru. U důležitých odpovědí vždy otevři zdroje a ověř, jestli citace opravdu podporují tvrzení v textu.</p>
           </div>
           <div class="help-card">
             <h3>Upozornění</h3>
