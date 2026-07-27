@@ -590,6 +590,17 @@ select:focus {
   margin-top: 14px;
 }
 
+.model-context-notes {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.model-context-notes .warning {
+  color: #b91c1c;
+  font-weight: 750;
+}
+
 .retrieval-sliders {
   grid-column: 1 / -1;
   display: grid;

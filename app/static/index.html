@@ -138,13 +138,15 @@
               <label class="field context-window-main-field">
                 <span>Context window</span>
                 <input id="mainContextWindowTokens" type="number" min="1024" step="1" />
-                <span id="modelContextWindowNote" class="field-note">Načítám výchozí hodnotu modelu...</span>
-                <span class="field-note">Ovlivňuje jen sestavení promptu: kolik nalezených zdrojů z databáze se vejde a zda se před odesláním zkrátí. Nemění samotné vyhledávání ani skutečný limit modelu.</span>
               </label>
               <label class="field" id="customModelField" hidden>
                 <span>Jiný model</span>
                 <input id="customModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
               </label>
+            </div>
+            <div class="model-context-notes">
+              <span id="modelContextWindowNote" class="field-note">Načítám výchozí hodnotu modelu...</span>
+              <span class="field-note">Context window ovlivňuje, kolik nalezených zdrojů z databáze se připojí do promptu a zda se před odesláním zkrátí. Nejde o skutečný limit modelu.</span>
             </div>
           </details>
 
@@ -155,6 +157,7 @@
                 <label class="field">
                   <span>Dokumentů: <output id="topKValue">10</output></span>
                   <input id="topK" type="range" min="0" max="50" step="1" value="10" />
+                  <span class="field-note">Kolik nejrelevantnějších dokumentů se má vyhledat jako podklad pro odpověď.</span>
                 </label>
                 <label class="field">
                   <span>Min. vůči nejlepšímu: <output id="minRelativeScoreValue">0.30</output></span>
