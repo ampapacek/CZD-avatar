@@ -238,6 +238,7 @@
             </div>
             <span id="rerankProgressLabel" class="rerank-progress-label"></span>
           </div>
+          <p id="answerQuestionInfo" class="query-used-info" hidden>Odpověď generována na dotaz: <strong id="answerQuestionText"></strong></p>
           <article id="answer" class="answer"></article>
         </section>
       </section>
@@ -245,6 +246,7 @@
       <aside class="sources-panel">
         <div class="sources-header">
           <h2>Zdroje</h2>
+          <p id="retrievalQueryInfo" class="query-used-info" hidden>Zdroje vyhledány pro dotaz: <strong id="retrievalQueryText"></strong></p>
           <p id="msearchRescoreNote" class="msearch-rescore-note" hidden>Pořadí přeřazeno přes mSearch (cross-encoder).</p>
           <button type="button" id="toggleBaseline" class="ghost-button" hidden aria-expanded="false">
             Porovnat s pořadím bez re-rankingu

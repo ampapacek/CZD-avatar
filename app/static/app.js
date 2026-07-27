@@ -138,7 +138,11 @@ const rerankProgressEl = document.querySelector("#rerankProgress");
 const rerankProgressFill = document.querySelector("#rerankProgressFill");
 const rerankProgressLabel = document.querySelector("#rerankProgressLabel");
 const answerEl = document.querySelector("#answer");
+const answerQuestionInfo = document.querySelector("#answerQuestionInfo");
+const answerQuestionText = document.querySelector("#answerQuestionText");
 const sourcesEl = document.querySelector("#sources");
+const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
+const retrievalQueryText = document.querySelector("#retrievalQueryText");
 const baselineSourcesEl = document.querySelector("#baselineSources");
 const baselineColumnEl = document.querySelector("#baselineColumn");
 const rerankedColumnTitleEl = document.querySelector("#rerankedColumnTitle");
@@ -237,6 +241,7 @@ let streamedAnswerText = "";
 let currentAnswerSources = [];
 let currentRetrievedChunks = [];
 let currentRetrievalQuery = "";
+let currentAnswerQuestion = "";
 let currentOmittedChunks = [];
 let currentBaselineChunks = [];
 let baselineVisible = false;
@@ -887,6 +892,7 @@ async function runQuery(retrieveOnlyMode) {
   currentAnswerSources = [];
   currentRetrievedChunks = [];
   currentRetrievalQuery = question.value;
+  currentAnswerQuestion = "";
   currentOmittedChunks = [];
   currentBaselineChunks = [];
   baselineVisible = false;
@@ -958,6 +964,7 @@ async function runQuery(retrieveOnlyMode) {
       const data = await chatRequest(payload, {
         onPreliminarySources(prelimData) {
           currentRetrievalQuery = prelimData.retrieval_query || currentRetrievalQuery;
+          currentAnswerQuestion = prelimData.answer_question || currentAnswerQuestion;
           // First-stage hits shown while the cross-encoder runs; replaced by the
           // reranked order once the "sources" event arrives.
           currentRetrievedChunks = prelimData.retrieved_chunks || [];
@@ -972,6 +979,7 @@ async function runQuery(retrieveOnlyMode) {
         },
         onSources(sourceData) {
           currentRetrievalQuery = sourceData.retrieval_query || currentRetrievalQuery;
+          currentAnswerQuestion = sourceData.answer_question || currentAnswerQuestion;
           stopRerankCountdown();
           currentRetrievedChunks = sourceData.retrieved_chunks || [];
           currentBaselineChunks = sourceData.baseline_chunks || [];
@@ -989,6 +997,7 @@ async function runQuery(retrieveOnlyMode) {
         },
         onDone(doneData) {
           currentRetrievalQuery = doneData.retrieval_query || currentRetrievalQuery;
+          currentAnswerQuestion = doneData.answer_question || currentAnswerQuestion;
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
           statusEl.textContent = formatTimingLabel(doneData, modelLabel);
           currentAnswerSources = doneData.sources || currentAnswerSources;
@@ -1006,6 +1015,7 @@ async function runQuery(retrieveOnlyMode) {
       currentAnswerSources = data.sources || currentAnswerSources;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
       currentRetrievalQuery = data.retrieval_query || currentRetrievalQuery;
+      currentAnswerQuestion = data.answer_question || currentAnswerQuestion;
       currentBaselineChunks = data.baseline_chunks || currentBaselineChunks;
       currentOmittedChunks = data.omitted_chunks || currentOmittedChunks;
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
@@ -4388,7 +4398,24 @@ function chunksToSources(chunks) {
   }));
 }
 
+function renderQueryUsedInfo() {
+  const typedQuestion = question.value.trim();
+  if (retrievalQueryInfo && retrievalQueryText) {
+    const retrievalQuery = currentRetrievalQuery.trim();
+    const changed = retrievalQuery && retrievalQuery !== typedQuestion;
+    retrievalQueryInfo.hidden = !changed;
+    retrievalQueryText.textContent = changed ? retrievalQuery : "";
+  }
+  if (answerQuestionInfo && answerQuestionText) {
+    const answerQuestion = currentAnswerQuestion.trim();
+    const changed = answerQuestion && answerQuestion !== typedQuestion;
+    answerQuestionInfo.hidden = !changed;
+    answerQuestionText.textContent = changed ? answerQuestion : "";
+  }
+}
+
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
+  renderQueryUsedInfo();
   renderSourceCards(
     sourcesEl,
     sources,
@@ -4438,6 +4465,7 @@ toggleBaselineBtn.addEventListener("click", () => {
 });
 
 function renderAnswer(text) {
+  renderQueryUsedInfo();
   answerEl.innerHTML = renderMarkdown(text, currentAnswerSources, "main-source");
   updateUsedSourceHighlights(sourcesEl, extractCitationIds(text));
 }

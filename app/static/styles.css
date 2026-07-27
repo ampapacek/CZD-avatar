@@ -1615,6 +1615,27 @@ button:hover {
   margin-top: 14px;
 }
 
+.query-used-info {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.query-used-info strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.query-used-info[hidden] {
+  display: none;
+}
+
 .status {
   color: var(--muted);
   font-size: 14px;
