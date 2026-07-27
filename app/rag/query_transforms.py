@@ -5,6 +5,21 @@ from typing import Any
 
 
 _LINDAT_MODEL_RE = re.compile(r"^[a-z]{2,3}-[a-z]{2,3}$", re.IGNORECASE)
+_QUERY_TRANSFORM_TOKEN_RE = re.compile(r"\{question\}|\{instruction\}")
+
+
+def render_query_transform_prompt(template: str, question: str, instruction: str) -> str:
+    """Fill the ``{question}``/``{instruction}`` tokens in a single pass.
+
+    Chained ``template.replace("{question}", question).replace("{instruction}",
+    instruction)`` would rescan the already-substituted string for the second
+    token, so a literal ``{instruction}`` inside the user's question gets
+    clobbered by the instruction text. A single regex pass only ever matches
+    tokens that were in the original template.
+    """
+
+    values = {"{question}": question, "{instruction}": instruction}
+    return _QUERY_TRANSFORM_TOKEN_RE.sub(lambda match: values[match.group(0)], template)
 
 
 def normalize_query_transform(value: Any) -> dict[str, Any] | None:

@@ -41,7 +41,7 @@ from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import delete_prompt_preset, load_prompt_presets, save_prompt_preset
-from app.rag.query_transforms import valid_lindat_model
+from app.rag.query_transforms import render_query_transform_prompt, valid_lindat_model
 from app.rag.shared_history import (
     delete_shared_history_item,
     load_shared_history,
@@ -604,7 +604,7 @@ def transform_query(request: QueryTransformRequest) -> QueryTransformResponse:
                     detail="Akce úpravy dotazu nemá platnou šablonu promptu (chybí {question}).",
                 )
             instruction = (request.instruction or "").strip()
-            rendered_prompt = template.replace("{question}", question).replace("{instruction}", instruction)
+            rendered_prompt = render_query_transform_prompt(template, question, instruction)
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
             generation = pipeline.llm.generate(
                 [{"role": "user", "content": rendered_prompt}],

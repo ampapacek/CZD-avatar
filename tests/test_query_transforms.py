@@ -6,6 +6,27 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.rag.llm import LLMGeneration
+from app.rag.query_transforms import render_query_transform_prompt
+
+
+class RenderQueryTransformPromptTests(unittest.TestCase):
+    def test_substitutes_both_tokens(self) -> None:
+        rendered = render_query_transform_prompt(
+            "Instrukce: {instruction}\nDotaz: {question}", "Původní dotaz", "Přelož do angličtiny"
+        )
+        self.assertEqual(rendered, "Instrukce: Přelož do angličtiny\nDotaz: Původní dotaz")
+
+    def test_question_containing_instruction_token_is_left_untouched(self) -> None:
+        rendered = render_query_transform_prompt(
+            "{instruction} :: {question}", "please use {instruction} nicely", "TRANSLATE"
+        )
+        self.assertEqual(rendered, "TRANSLATE :: please use {instruction} nicely")
+
+    def test_instruction_containing_question_token_is_left_untouched(self) -> None:
+        rendered = render_query_transform_prompt(
+            "{instruction} :: {question}", "original", "use {question} verbatim"
+        )
+        self.assertEqual(rendered, "use {question} verbatim :: original")
 
 
 class QueryTransformEndpointTests(unittest.TestCase):
@@ -80,6 +101,43 @@ class QueryTransformEndpointTests(unittest.TestCase):
             "Instrukce: Custom instruction\nDotaz: Původní dotaz\nVrať pouze upravený dotaz.",
         )
         self.assertEqual(call.kwargs["model"], "selected-model")
+
+    def test_question_containing_literal_instruction_token_is_not_corrupted(self) -> None:
+        # Regression test: chained str.replace("{question}", ...).replace("{instruction}", ...)
+        # would rescan the already-substituted question text for a literal
+        # "{instruction}" and clobber it with the instruction value.
+        fake_llm = Mock()
+        fake_llm.generate.return_value = LLMGeneration(answer="translated query", model="selected-model")
+        original_llm = main.pipeline._llm
+        main.pipeline._llm = fake_llm
+        try:
+            with patch(
+                "app.main._resolve_llm_request",
+                return_value=("provider", "selected-model", "key", "https://llm.example/v1"),
+            ):
+                response = self.client.post(
+                    "/query-transform",
+                    json={
+                        "question": "Co mám napsat do pole {instruction} ve formuláři?",
+                        "prompt_preset_id": "local-test-persona",
+                        "instruction": "Custom instruction",
+                        "action": {
+                            "id": "local-llm",
+                            "label": "Local",
+                            "type": "llm",
+                            "prompt_template": "Instrukce: {instruction}\nDotaz: {question}",
+                        },
+                    },
+                )
+        finally:
+            main.pipeline._llm = original_llm
+
+        self.assertEqual(response.status_code, 200, response.text)
+        call = fake_llm.generate.call_args
+        self.assertEqual(
+            call.args[0][0]["content"],
+            "Instrukce: Custom instruction\nDotaz: Co mám napsat do pole {instruction} ve formuláři?",
+        )
 
     def test_llm_action_without_question_placeholder_is_rejected(self) -> None:
         fake_llm = Mock()
