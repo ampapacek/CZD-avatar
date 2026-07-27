@@ -871,6 +871,11 @@ button:hover {
   opacity: 0.7;
 }
 
+#deletePromptButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .danger-lite {
   color: var(--warn);
 }

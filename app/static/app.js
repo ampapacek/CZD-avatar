@@ -1406,7 +1406,7 @@ deletePromptButton.addEventListener("click", async () => {
   } catch (error) {
     setPromptPresetStatus(error.message, "error");
   } finally {
-    deletePromptButton.disabled = !canDeletePromptPreset(promptPreset.value);
+    updateDeletePromptButtonState(promptPreset.value);
   }
 });
 
@@ -1483,6 +1483,7 @@ llmUnlockPassword.addEventListener("input", () => {
   setUnlockStatus("");
   persistLlmSettings();
   refreshModelOptions(appSettings);
+  updateDeletePromptButtonState(promptPreset.value);
 });
 customProviderName.addEventListener("input", () => {
   persistLlmSettings();
@@ -1861,6 +1862,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   if (!password) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
+    updateDeletePromptButtonState(promptPreset.value);
     if (!silent) {
       setUnlockStatus("Zadej admin heslo.", "error");
       statusEl.className = "status error";
@@ -1887,6 +1889,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     // localStorage must not turn a valid login into a failure.
     const persisted = persistLlmSettings();
     refreshModelOptions(appSettings);
+    updateDeletePromptButtonState(promptPreset.value);
     if (!silent) {
       if (persisted) {
         setUnlockStatus("Admin přístup je aktivní.", "success");
@@ -1905,6 +1908,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   } catch (error) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
+    updateDeletePromptButtonState(promptPreset.value);
     if (!silent) {
       setUnlockStatus(error.message, "error");
       statusEl.className = "status error";
@@ -3604,7 +3608,7 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId);
   renderPromptPresetSelect(promptPreset, resolvedId, settingsWpScope());
   activePromptPresetId = resolvedId;
-  deletePromptButton.disabled = !canDeletePromptPreset(resolvedId);
+  updateDeletePromptButtonState(resolvedId);
   updatePromptButton.disabled = !getPromptPresetById(resolvedId);
   updatePromptButton.title = "";
   if (newInlinePlaceholderButton) {
@@ -3686,7 +3690,19 @@ function isDraftPromptPreset(presetId) {
 }
 
 function canDeletePromptPreset(presetId) {
-  return isLocalPromptPreset(presetId) || isServerPromptPreset(presetId) || isDraftPromptPreset(presetId);
+  return isLocalPromptPreset(presetId)
+    || isDraftPromptPreset(presetId)
+    || (isServerPromptPreset(presetId) && (isOwnedServerPromptPreset(presetId) || llmModelsUnlocked));
+}
+
+function updateDeletePromptButtonState(presetId) {
+  const blockedForeignSharedPrompt = isServerPromptPreset(presetId)
+    && !isOwnedServerPromptPreset(presetId)
+    && !llmModelsUnlocked;
+  deletePromptButton.disabled = !canDeletePromptPreset(presetId);
+  deletePromptButton.title = blockedForeignSharedPrompt
+    ? "Cizí sdílený prompt nelze smazat."
+    : "";
 }
 
 function canEditPromptSpecificPlaceholders(presetId) {
