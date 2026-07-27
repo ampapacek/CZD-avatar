@@ -579,18 +579,21 @@ select:focus {
   display: none;
 }
 
-.top-k-control {
-  grid-column: 1 / -1;
-}
-
 .context-window-main-field {
   align-self: start;
 }
 
-.score-thresholds {
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.retrieval-sliders {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
   gap: 14px;
 }
 
@@ -607,13 +610,6 @@ select:focus {
   color: var(--text);
   font-size: 13px;
   line-height: 1.4;
-}
-
-.rerank-options {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
 }
 
 .prompt-section {
@@ -2373,8 +2369,8 @@ body[data-theme="dark"] .source-highlight {
 @media (max-width: 560px) {
   .controls,
   .advanced-grid,
-  .score-thresholds,
-  .rerank-options,
+  .model-grid,
+  .retrieval-sliders,
   .prompt-controls,
   .provider-key-list,
   .settings-grid,

@@ -86,7 +86,7 @@
               <span>Prompt</span>
               <select id="activePromptPreset"></select>
             </label>
-            <label class="field msearch-control collection-control">
+            <label class="field collection-control">
               <span>Kolekce</span>
               <select id="msearchCollection"></select>
             </label>
@@ -124,9 +124,9 @@
             </div>
           </details>
 
-          <details class="advanced">
-            <summary>Pokročilé nastavení</summary>
-            <div class="advanced-grid">
+          <details class="advanced model-settings">
+            <summary>Model</summary>
+            <div class="model-grid">
               <label class="field">
                 <span>Poskytovatel</span>
                 <select id="llmProvider"></select>
@@ -145,75 +145,35 @@
                 <span>Jiný model</span>
                 <input id="customModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
               </label>
-              <label class="field">
-                <span>Embeddingy</span>
-                <input id="embeddingModel" type="text" readonly />
-              </label>
-              <label class="field">
-                <span>Vyhledávání</span>
-                <select id="retrievalBackend">
-                  <option value="msearch">mSearch</option>
-                  <option value="local">Lokální databáze</option>
-                </select>
-              </label>
-              <label class="field msearch-control">
-                <span>Režim mSearch</span>
-                <select id="msearchMode">
-                  <option value="hybrid">hybrid</option>
-                  <option value="semantic">semantic</option>
-                  <option value="keyword">keyword</option>
-                </select>
-              </label>
-              <label class="field top-k-control">
-                <span>Dokumentů: <output id="topKValue">10</output></span>
-                <input id="topK" type="range" min="0" max="50" step="1" value="10" />
-              </label>
-              <label class="field msearch-control">
-                <span>Min. confidence: <output id="msearchMinConfidenceValue">0.00</output></span>
-                <input id="msearchMinConfidence" type="range" min="0" max="1" step="0.05" value="0" />
-                <span class="field-note">Platí jen pro mSearch a filtruje výsledky podle confidence vrácené mSearchem.</span>
-              </label>
-              <label class="field local-control">
-                <span>Váha embeddingů: <output id="denseWeightValue">0.70</output></span>
-                <input id="denseWeight" type="range" min="0" max="1" step="0.05" value="0.70" />
-              </label>
-              <label class="field local-control">
-                <span>Váha BM25: <output id="bm25WeightValue">0.30</output></span>
-                <input id="bm25Weight" type="range" min="0" max="1" step="0.05" value="0.30" />
-              </label>
-              <div class="score-thresholds">
+            </div>
+          </details>
+
+          <details class="advanced">
+            <summary>Pokročilé nastavení</summary>
+            <div class="advanced-grid">
+              <div class="retrieval-sliders">
                 <label class="field">
-                  <span>Min. skóre: <output id="minScoreValue">0.20</output></span>
-                  <input id="minScore" type="range" min="0" max="1" step="0.05" value="0.20" />
-                  <span class="field-note">Odstraní výsledky s nižším skóre (aplikuje CZD-avatar po získání výsledků z mSearch).</span>
+                  <span>Dokumentů: <output id="topKValue">10</output></span>
+                  <input id="topK" type="range" min="0" max="50" step="1" value="10" />
                 </label>
                 <label class="field">
                   <span>Min. vůči nejlepšímu: <output id="minRelativeScoreValue">0.30</output></span>
                   <input id="minRelativeScore" type="range" min="0" max="1" step="0.05" value="0.30" />
                   <span class="field-note">Ponechá jen výsledky dostatečně blízké nejlepšímu nalezenému dokumentu.</span>
                 </label>
-                <p class="field-note rescore-threshold-note" id="rescoreThresholdNote" hidden>
-                  Pozor: při re-rankingu přes mSearch jsou skóre na jiné škále a bývají nižší. Zkontroluj hodnoty Min. skóre a Min. vůči nejlepšímu, ať nevyfiltrují příliš mnoho výsledků.
-                </p>
+                <label class="field">
+                  <span>Min. confidence: <output id="msearchMinConfidenceValue">0.00</output></span>
+                  <input id="msearchMinConfidence" type="range" min="0" max="1" step="0.05" value="0" />
+                  <span class="field-note">Filtruje výsledky podle confidence vrácené mSearchem.</span>
+                </label>
               </div>
-              <label class="field inline-field rerank-toggle msearch-control" id="msearchRescoreField">
+              <p class="field-note rescore-threshold-note" id="rescoreThresholdNote" hidden>
+                Pozor: při re-rankingu přes mSearch jsou skóre na jiné škále a bývají nižší. Zkontroluj hodnotu Min. vůči nejlepšímu, ať nevyfiltruje příliš mnoho výsledků.
+              </p>
+              <label class="field inline-field rerank-toggle" id="msearchRescoreField">
                 <input id="msearchRescore" type="checkbox" />
-                <span>Re-ranking přes mSearch (cross-encoder) zpřesní pořadí dokumentů. Probíhá na serveru — je obvykle přesnější a mnohem rychlejší než lokální re-ranking.</span>
+                <span>Re-ranking – zpřesní pořadí dokumentů (cross-encoder).</span>
               </label>
-              <label class="field inline-field rerank-toggle" id="rerankToggleField">
-                <input id="rerankEnabled" type="checkbox" />
-                <span>Lokální re-ranking (cross-encoder) zpřesní pořadí dokumentů, ale je výrazně pomalejší. Umožní porovnat pořadí před a po re-rankingu.</span>
-              </label>
-              <div class="rerank-options" id="rerankOptions" hidden>
-                <label class="field" id="rerankCandidatesField">
-                  <span>Kandidátů k re-rankingu: <output id="rerankCandidatesValue">40</output></span>
-                  <input id="rerankCandidates" type="range" min="1" max="200" step="1" value="40" />
-                </label>
-                <label class="field" id="rerankField">
-                  <span>Váha re-rankingu: <output id="rerankWeightValue">0.0</output></span>
-                  <input id="rerankWeight" type="range" min="0" max="1" step="0.1" value="0" />
-                </label>
-              </div>
             </div>
           </details>
 
