@@ -2256,6 +2256,10 @@ body[data-theme="dark"] .source-highlight {
   height: 3.4em;
 }
 
+.query-transform-row-description {
+  margin: 0;
+}
+
 .query-transform-row-controls {
   display: flex;
   align-items: center;

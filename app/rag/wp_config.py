@@ -71,6 +71,7 @@ class QueryTransformAction:
 
     id: str
     label: str
+    description: str
     type: str
     use_transformed_for_answer: bool = False
     model: str | None = None
@@ -263,6 +264,10 @@ WP_CONFIGS: list[WPConfig] = [
                 QueryTransformAction(
                     id="charles-cs-en",
                     label="Přeložit CS → EN",
+                    description=(
+                        "Přeloží původní dotaz z češtiny do angličtiny pomocí strojového "
+                        "překladače, bez použití LLM."
+                    ),
                     type="lindat",
                     model="cs-en",
                     source_language="cs",
@@ -271,6 +276,11 @@ WP_CONFIGS: list[WPConfig] = [
                 QueryTransformAction(
                     id="llm-query-transform",
                     label="Upravit pomocí LLM",
+                    description=(
+                        "Do pole Instrukce napište, co má LLM udělat s původním dotazem, "
+                        "například „Přelož dotaz do angličtiny“ nebo „Přeformuluj dotaz pro "
+                        "odborné vyhledávání“."
+                    ),
                     type="llm",
                     prompt_template=(
                         "Uprav následující vyhledávací dotaz podle instrukce uživatele, aby se podle "

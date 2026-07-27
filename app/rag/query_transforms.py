@@ -57,11 +57,13 @@ def _normalize_actions(value: Any) -> list[dict[str, Any]]:
             continue
         action_id = str(item.get("id") or "").strip()
         action_type = str(item.get("type") or "").strip().lower()
-        if not action_id or action_id in seen or action_type not in {"lindat", "llm"}:
+        description = str(item.get("description") or "").strip()
+        if not action_id or not description or action_id in seen or action_type not in {"lindat", "llm"}:
             continue
         action: dict[str, Any] = {
             "id": action_id,
             "label": str(item.get("label") or action_id).strip(),
+            "description": description,
             "type": action_type,
             "use_transformed_for_answer": bool(item.get("use_transformed_for_answer", False)),
         }

@@ -98,6 +98,7 @@ class InlinePlaceholderDef(BaseModel):
 class QueryTransformAction(BaseModel):
     id: str
     label: str = ""
+    description: str
     type: Literal["lindat", "llm"]
     model: str | None = None
     source_language: str | None = None

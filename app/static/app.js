@@ -93,6 +93,7 @@ const closeQueryTransformActionButton = document.querySelector("#closeQueryTrans
 const queryTransformActionType = document.querySelector("#queryTransformActionType");
 const queryTransformActionId = document.querySelector("#queryTransformActionId");
 const queryTransformActionLabelInput = document.querySelector("#queryTransformActionLabel");
+const queryTransformActionDescription = document.querySelector("#queryTransformActionDescription");
 const queryTransformActionLindatFields = document.querySelector("#queryTransformActionLindatFields");
 const queryTransformActionSourceLang = document.querySelector("#queryTransformActionSourceLang");
 const queryTransformActionTargetLang = document.querySelector("#queryTransformActionTargetLang");
@@ -315,6 +316,7 @@ function resolvedQueryTransformConfig() {
       action
       && typeof action === "object"
       && String(action.id || "").trim()
+      && String(action.description || "").trim()
       && ["lindat", "llm"].includes(String(action.type || "").toLowerCase())
     ))
     : [];
@@ -364,10 +366,11 @@ function buildQueryTransformRowsDom(config) {
             </button>
           </div>
           <div class="query-transform-row-body" data-role="body" ${collapsed ? "hidden" : ""}>
+            <p class="field-note query-transform-row-description">${escapeHtml(action.description)}</p>
             ${hasInstructionField ? `
               <label class="field">
                 <span>Instrukce pro LLM</span>
-                <textarea data-role="instruction" rows="2">${escapeHtml(state.instruction || "")}</textarea>
+                <textarea data-role="instruction" rows="2" placeholder="Např. Přelož dotaz do angličtiny.">${escapeHtml(state.instruction || "")}</textarea>
               </label>
             ` : ""}
             <div class="query-transform-row-controls">
@@ -2932,6 +2935,7 @@ function openQueryTransformActionEditor(actionId) {
   queryTransformActionType.value = action?.type === "llm" ? "llm" : "lindat";
   queryTransformActionId.value = action?.id || "";
   queryTransformActionLabelInput.value = action?.label || "";
+  queryTransformActionDescription.value = action?.description || "";
   queryTransformActionSourceLang.value = action?.source_language || "";
   queryTransformActionTargetLang.value = action?.target_language || "";
   queryTransformActionModel.value = action?.model || "";
@@ -2984,9 +2988,15 @@ saveQueryTransformActionButton?.addEventListener("click", async () => {
     setQueryTransformActionError("Toto id už jiná akce používá. Zvol jiné.");
     return;
   }
+  const description = queryTransformActionDescription.value.trim();
+  if (!description) {
+    setQueryTransformActionError("Napiš popis transformace pro uživatele.");
+    return;
+  }
   const action = {
     id,
     label: queryTransformActionLabelInput.value.trim() || id,
+    description,
     type,
     use_transformed_for_answer: queryTransformActionUseForAnswer.checked,
   };

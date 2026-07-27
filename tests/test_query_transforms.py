@@ -83,6 +83,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                         "action": {
                             "id": "local-llm",
                             "label": "Local",
+                            "description": "Transform the query using the supplied instruction.",
                             "type": "llm",
                             "prompt_template": "Instrukce: {instruction}\nDotaz: {question}\nVrať pouze upravený dotaz.",
                         },
@@ -124,6 +125,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                         "action": {
                             "id": "local-llm",
                             "label": "Local",
+                            "description": "Transform the query using the supplied instruction.",
                             "type": "llm",
                             "prompt_template": "Instrukce: {instruction}\nDotaz: {question}",
                         },
@@ -157,6 +159,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                         "action": {
                             "id": "local-llm",
                             "label": "Local",
+                            "description": "Transform the query using the supplied instruction.",
                             "type": "llm",
                             "prompt_template": "{instruction}",
                         },
@@ -179,6 +182,7 @@ class QueryTransformEndpointTests(unittest.TestCase):
                 "action": {
                     "id": "inline-llm",
                     "label": "Inline",
+                    "description": "Transform the query with an LLM.",
                     "type": "llm",
                     "prompt_template": "Translate {question}",
                 },
@@ -225,6 +229,9 @@ class QueryTransformEndpointTests(unittest.TestCase):
         self.assertEqual(
             [action["id"] for action in wp4["query_transform"]["actions"]],
             ["charles-cs-en", "llm-query-transform"],
+        )
+        self.assertTrue(
+            all(action["description"] for action in wp4["query_transform"]["actions"])
         )
         self.assertFalse(wp1["query_transform"]["enabled"])
 
