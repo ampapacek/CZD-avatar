@@ -239,6 +239,11 @@ let currentMsearchRescoreUsed = false;
 let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
+// Source card the user clicked to light up its citation markers in the answer,
+// as { scope, citationId }. Kept outside the DOM because both the answer and the
+// source cards are re-rendered from scratch (on every streamed token, even), so
+// the highlight has to be reapplied after each render rather than live in it.
+let activeCitation = null;
 let appliedQueryTransform = null;
 // Per-action UI state for the inline "Upravit dotaz" rows, keyed by action id.
 // Rebuilt whenever the question text or the resolved set of actions changes.
@@ -939,6 +944,7 @@ async function runQuery(retrieveOnlyMode) {
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
+  activeCitation = null;
   renderAnswer("");
   sourcesEl.innerHTML = "";
   baselineSourcesEl.innerHTML = "";
@@ -1227,6 +1233,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closePredefinedQuestions();
+    setActiveCitation(null);
   }
 });
 
@@ -1391,6 +1398,7 @@ conversationRewriteQuery?.addEventListener("change", () => {
   renderConversationWorkspace();
 });
 document.addEventListener("click", pulseSourceCardFromCitation);
+document.addEventListener("click", toggleCitationHighlightFromSource);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
 conversationQuestion.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, conversationForm));
 
@@ -4638,9 +4646,12 @@ function renderAnswer(text) {
   updateUsedSourceHighlights(sourcesEl, extractCitationIds(text));
 }
 
+const CITE_TOGGLE_TITLE = "Zvýraznit místa v odpovědi, kde je zdroj citován";
+
 function renderSourceCards(container, sources, chunks, highlightQuery, usedCitationIds = new Set(), idPrefix = "source") {
   if (!sources.length) {
     container.textContent = "Žádné zdroje nebyly vráceny.";
+    applyCitationHighlights();
     return;
   }
   const highlightTerms = extractHighlightTerms(highlightQuery);
@@ -4664,13 +4675,14 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       const dense = typeof chunk?.dense_score === "number" ? ` · emb ${chunk.dense_score.toFixed(2)}` : "";
       const bm25 = typeof chunk?.bm25_score === "number" ? ` · BM25 ${chunk.bm25_score.toFixed(2)}` : "";
       const citationId = source.citation_id || "";
-      const usedClass = usedCitationIds.has(citationId) ? " used-source" : "";
+      const isUsed = usedCitationIds.has(citationId);
+      const usedClass = isUsed ? " used-source" : "";
       const budgetStatus = chunk?.metadata?.budget_status || "";
       const trimmedBadge = budgetStatus === "trimmed" ? `<span class="source-badge">zkráceno pro prompt</span>` : "";
       const originalText = chunk?.metadata?.original_text || "";
       return `
         <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
-          <strong>[${escapeHtml(citationId)}] ${title} ${trimmedBadge}</strong>
+          <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>[${escapeHtml(citationId)}]</button> ${title} ${trimmedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
           <p class="score">score ${score}${dense}${bm25}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
@@ -4694,6 +4706,7 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       `;
     })
     .join("");
+  applyCitationHighlights();
 }
 
 function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBudget = null, conversationSummary = "") {
@@ -4742,8 +4755,16 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
 function updateUsedSourceHighlights(container, usedCitationIds) {
   for (const card of container.querySelectorAll(".source")) {
     const citationId = card.dataset.citationId || "";
-    card.classList.toggle("used-source", usedCitationIds.has(citationId));
+    const isUsed = usedCitationIds.has(citationId);
+    card.classList.toggle("used-source", isUsed);
+    // A card can become cited mid-stream, so its toggle is enabled here rather
+    // than only at render time.
+    const toggle = card.querySelector(".source-cite-btn");
+    if (toggle) {
+      toggle.disabled = !isUsed;
+    }
   }
+  applyCitationHighlights();
 }
 
 function escapeHtml(value) {
@@ -4886,8 +4907,7 @@ function pulseSourceCardFromCitation(event) {
     trigger.closest(".history-detail") ||
     trigger.closest(".answer-panel")?.closest(".workspace") ||
     document;
-  const escapedCitationId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(citationId) : citationId;
-  const sourceSelector = `.source[data-citation-id="${escapedCitationId}"]`;
+  const sourceSelector = sourceCardSelector(citationId);
   const sourceCard =
     (scopeRoot.classList?.contains("workspace")
       ? document.querySelector(`.sources-panel ${sourceSelector}`)
@@ -4903,6 +4923,127 @@ function pulseSourceCardFromCitation(event) {
   window.setTimeout(() => {
     sourceCard.classList.remove("source-pulse");
   }, 1400);
+}
+
+// The reverse of pulseSourceCardFromCitation: clicking a source card lights up
+// every superscript in the answer that cites it. Each scope pairs a panel of
+// source cards with the answer those cards belong to; the conversation and
+// history entries come first because their panels sit inside their own dialogs.
+const CITATION_SCOPES = [
+  {
+    name: "conversation",
+    sourcesSelector: ".conversation-sources-panel",
+    answerSelector: "#conversationMessages",
+  },
+  { name: "history", sourcesSelector: "#historySources", answerSelector: ".history-answer" },
+  { name: "main", sourcesSelector: ".sources-panel", answerSelector: "#answer" },
+];
+
+function escapeSelectorValue(value) {
+  return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value;
+}
+
+function sourceCardSelector(citationId) {
+  return `.source[data-citation-id="${escapeSelectorValue(citationId)}"]`;
+}
+
+function citationScopeForCard(card) {
+  return CITATION_SCOPES.find((scope) => card.closest(scope.sourcesSelector)) || null;
+}
+
+function citationMarkers(scope, citationId) {
+  const answerRoot = document.querySelector(scope.answerSelector);
+  if (!answerRoot) {
+    return [];
+  }
+  return Array.from(
+    answerRoot.querySelectorAll(`.footnote-ref a[data-citation-id="${escapeSelectorValue(citationId)}"]`),
+  );
+}
+
+// Repaints the sticky highlight from activeCitation. Safe to call after any
+// render — it clears first, and drops the selection if the card it pointed at is
+// gone (new answer, closed dialog, source no longer cited).
+function applyCitationHighlights() {
+  for (const marker of document.querySelectorAll(".footnote-ref a.citation-active")) {
+    marker.classList.remove("citation-active");
+  }
+  for (const card of document.querySelectorAll(".source.active-source")) {
+    card.classList.remove("active-source");
+    card.querySelector(".source-cite-btn")?.setAttribute("aria-pressed", "false");
+  }
+  if (!activeCitation) {
+    return;
+  }
+  const scope = CITATION_SCOPES.find((entry) => entry.name === activeCitation.scope);
+  const card = scope
+    ? document.querySelector(`${scope.sourcesSelector} ${sourceCardSelector(activeCitation.citationId)}`)
+    : null;
+  if (!card || !card.classList.contains("used-source")) {
+    activeCitation = null;
+    return;
+  }
+  card.classList.add("active-source");
+  card.querySelector(".source-cite-btn")?.setAttribute("aria-pressed", "true");
+  for (const marker of citationMarkers(scope, activeCitation.citationId)) {
+    marker.classList.add("citation-active");
+  }
+}
+
+function setActiveCitation(next) {
+  activeCitation = next;
+  applyCitationHighlights();
+}
+
+function isCitationMarkerVisible(marker, answerRoot) {
+  const rect = marker.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  if (rect.bottom <= 0 || rect.top >= viewportHeight) {
+    return false;
+  }
+  // The conversation transcript and history detail scroll inside their own box,
+  // so a marker can sit in the viewport yet be clipped out of its container.
+  const bounds = answerRoot.getBoundingClientRect();
+  return rect.bottom > bounds.top && rect.top < bounds.bottom;
+}
+
+function scrollToFirstCitationMarker(scope, citationId) {
+  const answerRoot = document.querySelector(scope.answerSelector);
+  const markers = citationMarkers(scope, citationId);
+  if (!answerRoot || !markers.length) {
+    return;
+  }
+  if (markers.some((marker) => isCitationMarkerVisible(marker, answerRoot))) {
+    return;
+  }
+  markers[0].scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function toggleCitationHighlightFromSource(event) {
+  const card = event.target.closest(".source");
+  if (!card) {
+    // Empty space inside a sources panel clears the highlight. Clicks elsewhere
+    // leave it alone, so it survives scrolling and selecting text in the answer.
+    if (activeCitation && CITATION_SCOPES.some((scope) => event.target.closest(scope.sourcesSelector))) {
+      setActiveCitation(null);
+    }
+    return;
+  }
+  // Let the card's own controls work, and ignore the click that ends a text
+  // selection in the excerpt.
+  if (event.target.closest("a, summary") || window.getSelection()?.isCollapsed === false) {
+    return;
+  }
+  const citationId = card.dataset.citationId || "";
+  const scope = citationScopeForCard(card);
+  if (!citationId || !scope || !card.classList.contains("used-source")) {
+    return;
+  }
+  const isActive = activeCitation?.scope === scope.name && activeCitation.citationId === citationId;
+  setActiveCitation(isActive ? null : { scope: scope.name, citationId });
+  if (!isActive) {
+    scrollToFirstCitationMarker(scope, citationId);
+  }
 }
 
 function maybeSubmitOnCommandEnter(event, targetForm) {

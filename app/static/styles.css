@@ -1832,6 +1832,20 @@ button:hover {
   vertical-align: super;
   text-decoration: none;
   font-weight: 700;
+  border-radius: 4px;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+/* Set while its source card is selected. A superscript digit is too small to
+   find by color alone, so the marker takes on area as a filled chip. */
+.footnote-ref a.citation-active {
+  padding: 0 4px;
+  background: var(--accent);
+  color: var(--surface-3);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .footnote-sep {
@@ -1958,14 +1972,57 @@ button:hover {
   background: color-mix(in srgb, var(--surface-3) 72%, var(--accent) 28%);
   box-shadow: 0 10px 24px rgba(15, 104, 95, 0.12);
   transform: translateY(-1px);
+  cursor: pointer;
 }
 
 .source.used-source strong {
   color: var(--accent-dark);
 }
 
+.source.active-source {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent),
+    0 12px 26px rgba(15, 104, 95, 0.16);
+}
+
 .source.source-pulse {
   animation: source-pulse 1.2s ease;
+}
+
+/* The [A2] label doubles as the keyboard-reachable toggle for the whole card.
+   Disabled on sources the answer never cites — there is nothing to point at. */
+.source-cite-btn {
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.source-cite-btn:hover:not(:disabled),
+.source-cite-btn:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.source-cite-btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface-3);
+}
+
+.source-cite-btn:disabled {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: default;
 }
 
 .source strong {
