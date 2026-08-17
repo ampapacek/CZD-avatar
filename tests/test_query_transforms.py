@@ -194,21 +194,22 @@ class QueryTransformEndpointTests(unittest.TestCase):
         fake_llm.generate.assert_not_called()
 
     def test_inline_action_cannot_bypass_disabled_server_profile(self) -> None:
-        response = self.client.post(
-            "/query-transform",
-            json={
-                "question": "Kdo byl Jan Hus?",
-                "wp_id": "WP1-historie",
-                "prompt_preset_id": "wp1-ucitel",
-                "action": {
-                    "id": "inline-llm",
-                    "label": "Inline",
-                    "description": "Transform the query with an LLM.",
-                    "type": "llm",
-                    "prompt_template": "Translate {question}",
+        with patch("app.main._effective_query_transform", return_value=None):
+            response = self.client.post(
+                "/query-transform",
+                json={
+                    "question": "Kdo byl Jan Hus?",
+                    "wp_id": "WP1-historie",
+                    "prompt_preset_id": "wp1-ucitel",
+                    "action": {
+                        "id": "inline-llm",
+                        "label": "Inline",
+                        "description": "Transform the query with an LLM.",
+                        "type": "llm",
+                        "prompt_template": "Translate {question}",
+                    },
                 },
-            },
-        )
+            )
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("není pro tento profil povolena", response.json()["detail"])
