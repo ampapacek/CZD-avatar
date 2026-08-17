@@ -4597,7 +4597,7 @@ function renderSources(sources, chunks, answerText = streamedAnswerText) {
     sources,
     chunks,
     currentRetrievalQuery || question.value,
-    extractCitationIds(answerText),
+    AvatarMarkdown.extractCitationIds(answerText),
     "main-source",
   );
   renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
@@ -4642,8 +4642,8 @@ toggleBaselineBtn.addEventListener("click", () => {
 
 function renderAnswer(text) {
   renderQueryUsedInfo();
-  answerEl.innerHTML = renderMarkdown(text, currentAnswerSources, "main-source");
-  updateUsedSourceHighlights(sourcesEl, extractCitationIds(text));
+  answerEl.innerHTML = AvatarMarkdown.renderMarkdown(text, currentAnswerSources, "main-source");
+  updateUsedSourceHighlights(sourcesEl, AvatarMarkdown.extractCitationIds(text));
 }
 
 const CITE_TOGGLE_TITLE = "Zvýraznit místa v odpovědi, kde je zdroj citován";
@@ -5430,7 +5430,7 @@ function renderConversationDetail(conversation) {
     latestSources,
     latestChunks,
     conversationRetrievalQuery(latestAssistant, conversationQuestion.value),
-    extractCitationIds(latestAssistant?.content || ""),
+    AvatarMarkdown.extractCitationIds(latestAssistant?.content || ""),
     "conversation-source",
   );
   renderConversationRetrievalInfo(latestAssistant);
@@ -5496,7 +5496,7 @@ function renderConversationMessage(message) {
   const messageClass = message.role === "assistant" ? "assistant" : "user";
   const body =
     message.role === "assistant"
-      ? renderMarkdown(message.content || "", message.sources || [], "conversation-source")
+      ? AvatarMarkdown.renderMarkdown(message.content || "", message.sources || [], "conversation-source")
       : `<p>${escapeHtml(message.content || "")}</p>`;
   const metaParts = [];
   if (message.role === "assistant" && message.model_used) {
@@ -6467,7 +6467,7 @@ function renderHistorySettingsAndAnswer(entry) {
       entry.answer
         ? `<section class="history-block">
             <h4>Odpověď</h4>
-            <div class="history-answer">${renderMarkdown(entry.answer, sources, "history-source")}</div>
+            <div class="history-answer">${AvatarMarkdown.renderMarkdown(entry.answer, sources, "history-source")}</div>
           </section>`
         : ""
     }
@@ -6528,7 +6528,7 @@ function mountHistoryDetailSources(entry) {
   const chunks = entry.retrieved_chunks || [];
   const omittedChunks = entry.omitted_chunks || [];
   const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
-  const usedCitationIds = extractCitationIds(entry.answer || "");
+  const usedCitationIds = AvatarMarkdown.extractCitationIds(entry.answer || "");
   const historySources = historyDetail.querySelector("#historySources");
   if (!historySources) {
     return;
@@ -6731,231 +6731,6 @@ function formatHistoryTime(timestamp) {
   } catch {
     return "";
   }
-}
-
-function renderMarkdown(markdown, sources = [], sourceLinkPrefix = "source") {
-  const citationMap = buildCitationMap(sources);
-  const prepared = normalizeCitationMarkdown(markdown, citationMap);
-  const citationOrderMap = buildCitationOrderMap(prepared.orderedCitationIds);
-  const lines = prepared.markdown.split("\n");
-  const html = [];
-  const paragraph = [];
-  const codeLines = [];
-  let listType = null;
-  let inCodeBlock = false;
-
-  const flushParagraph = () => {
-    if (!paragraph.length) {
-      return;
-    }
-    html.push(
-      `<p>${renderInlineMarkdown(paragraph.join("\n"), citationMap, prepared.usedCitationIds, citationOrderMap).replace(/\n/g, "<br>")}</p>`,
-    );
-    paragraph.length = 0;
-  };
-
-  const closeList = () => {
-    if (!listType) {
-      return;
-    }
-    html.push(listType === "ol" ? "</ol>" : "</ul>");
-    listType = null;
-  };
-
-  for (const line of lines) {
-    const fenceMatch = line.match(/^```([\w-]+)?\s*$/);
-    if (fenceMatch) {
-      flushParagraph();
-      closeList();
-      if (inCodeBlock) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-        codeLines.length = 0;
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeLines.push(line);
-      continue;
-    }
-
-    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
-    if (headingMatch) {
-      flushParagraph();
-      closeList();
-      const level = headingMatch[1].length;
-      html.push(
-        `<h${level}>${renderInlineMarkdown(headingMatch[2], citationMap, prepared.usedCitationIds, citationOrderMap)}</h${level}>`,
-      );
-      continue;
-    }
-
-    const blockquoteMatch = line.match(/^>\s?(.*)$/);
-    if (blockquoteMatch) {
-      flushParagraph();
-      closeList();
-      html.push(
-        `<blockquote><p>${renderInlineMarkdown(blockquoteMatch[1], citationMap, prepared.usedCitationIds, citationOrderMap)}</p></blockquote>`,
-      );
-      continue;
-    }
-
-    const unorderedMatch = line.match(/^[-*+]\s+(.*)$/);
-    if (unorderedMatch) {
-      flushParagraph();
-      if (listType !== "ul") {
-        closeList();
-        html.push("<ul>");
-        listType = "ul";
-      }
-      html.push(`<li>${renderInlineMarkdown(unorderedMatch[1], citationMap, prepared.usedCitationIds, citationOrderMap)}</li>`);
-      continue;
-    }
-
-    const orderedMatch = line.match(/^\d+\.\s+(.*)$/);
-    if (orderedMatch) {
-      flushParagraph();
-      if (listType !== "ol") {
-        closeList();
-        html.push("<ol>");
-        listType = "ol";
-      }
-      html.push(`<li>${renderInlineMarkdown(orderedMatch[1], citationMap, prepared.usedCitationIds, citationOrderMap)}</li>`);
-      continue;
-    }
-
-    if (!line.trim()) {
-      flushParagraph();
-      closeList();
-      continue;
-    }
-
-    closeList();
-    paragraph.push(line);
-  }
-
-  if (inCodeBlock) {
-    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-  } else {
-    flushParagraph();
-  }
-  closeList();
-  return `<div class="markdown-content">${html.join("")}${renderFootnotes(prepared.orderedCitationIds, citationMap, sourceLinkPrefix)}</div>`;
-}
-
-function renderInlineMarkdown(text, citationMap = new Map(), usedCitationIds = new Set(), citationOrderMap = new Map()) {
-  const placeholders = [];
-  const placeholderToken = (index) => `@@CODEXPH${index}@@`;
-  let escaped = escapeHtml(text);
-  escaped = escaped.replace(/\[\^([A-Z]{1,3}\d+)\]|\[([A-Z]{1,3}\d+)\]/g, (_, footnoteId, legacyId) => {
-    const citationId = footnoteId || legacyId;
-    if (!citationMap.has(citationId)) {
-      return footnoteId ? `[^${citationId}]` : `[${citationId}]`;
-    }
-    usedCitationIds.add(citationId);
-    const token = placeholderToken(placeholders.length);
-    placeholders.push(
-      `<sup class="footnote-ref"><a href="#fn-${citationId}" id="fnref-${citationId}" data-citation-id="${citationId}">${escapeHtml(String(citationOrderMap.get(citationId) || "?"))}</a></sup>`,
-    );
-    return token;
-  });
-  escaped = escaped.replace(/`([^`]+)`/g, (_, code) => {
-    const token = placeholderToken(placeholders.length);
-    placeholders.push(`<code>${code}</code>`);
-    return token;
-  });
-  escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, href) => {
-    const token = placeholderToken(placeholders.length);
-    placeholders.push(`<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${label}</a>`);
-    return token;
-  });
-  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  escaped = escaped.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  escaped = escaped.replace(/_([^_]+)_/g, "<em>$1</em>");
-  const rendered = escaped.replace(/@@CODEXPH(\d+)@@/g, (_, index) => placeholders[Number(index)] || "");
-  // Separate adjacent citation markers (e.g. [^A2][^A3]) so they read as "2,3"
-  // instead of a glued-together "23". The comma is itself superscript so it
-  // aligns with the markers rather than dropping to the baseline.
-  return rendered.replace(
-    /<\/sup>(<sup class="footnote-ref">)/g,
-    '</sup><sup class="footnote-ref"><span class="footnote-sep">,</span></sup>$1',
-  );
-}
-
-function normalizeCitationMarkdown(markdown, citationMap) {
-  const usedCitationIds = new Set();
-  const normalized = String(markdown || "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/^\[\^([A-Z]{1,3}\d+)\]:[^\n]*(?:\n(?!\[\^[A-Z]{1,3}\d+\]:).*)*/gm, "")
-    .replace(/\n{2,}(?:#+\s*)?Použité zdroje:?\s*\n(?:[^\n]*\n?)*/i, "")
-    .trim();
-  const orderedCitationIds = Array.from(new Set(extractCitationIds(normalized))).filter((citationId) =>
-    citationMap.has(citationId),
-  );
-  for (const citationId of orderedCitationIds) {
-    usedCitationIds.add(citationId);
-  }
-  return { markdown: normalized, usedCitationIds, orderedCitationIds };
-}
-
-function buildCitationMap(sources) {
-  return new Map((sources || []).filter((source) => source?.citation_id).map((source) => [source.citation_id, source]));
-}
-
-function buildCitationOrderMap(orderedCitationIds) {
-  return new Map((orderedCitationIds || []).map((citationId, index) => [citationId, index + 1]));
-}
-
-function extractCitationIds(text) {
-  const matches = String(text || "").match(/\[\^([A-Z]{1,3}\d+)\]|\[([A-Z]{1,3}\d+)\]/g) || [];
-  const citationIds = new Set();
-  for (const match of matches) {
-    const citationId = match.replace(/[\[\]^]/g, "");
-    if (citationId) {
-      citationIds.add(citationId);
-    }
-  }
-  return citationIds;
-}
-
-function renderFootnotes(orderedCitationIds, citationMap, sourceLinkPrefix = "source") {
-  if (!orderedCitationIds.length) {
-    return "";
-  }
-  const items = orderedCitationIds
-    .map((citationId) => {
-      const source = citationMap.get(citationId);
-      if (!source) {
-        return "";
-      }
-      const title = escapeHtml(source.title || citationId);
-      const page = source.page_number ? `, str. ${escapeHtml(source.page_number)}` : "";
-      const targetUrl = source.document_url || source.source_url || source.url;
-      const titleHtml = targetUrl
-        ? `<a href="${escapeHtml(targetUrl)}" target="_blank" rel="noreferrer">${title}</a>`
-        : title;
-      return `
-        <li id="fn-${escapeHtml(citationId)}">
-          <span class="footnote-label">[${escapeHtml(citationId)}]</span>
-          ${titleHtml}${page}
-        </li>
-      `;
-    })
-    .filter(Boolean)
-    .join("");
-  if (!items) {
-    return "";
-  }
-  return `
-    <section class="footnotes">
-      <h4>Poznámky a zdroje</h4>
-      <ol>${items}</ol>
-    </section>
-  `;
 }
 
 loadSettings().catch((error) => {

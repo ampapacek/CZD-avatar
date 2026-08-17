@@ -458,6 +458,18 @@ Collection-specific app assets currently live under `data/collections/czech_hist
 
 Random-question seed files have moved to the private, per-WP files under `data/questions/` (see [Random Questions](#random-questions)).
 
+## Frontend Development
+
+The deployed app serves committed static JavaScript and does not need Node.js. When changing the Markdown renderer, install its development dependencies and rebuild the browser bundle locally:
+
+```bash
+npm install
+npm test
+npm run build
+```
+
+Renderer source and focused tests live under `frontend/`; the generated bundle is `app/static/markdown-renderer.bundle.js`.
+
 The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
 
 ## Notes For Future Extensions

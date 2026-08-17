@@ -1823,6 +1823,38 @@ button:hover {
   color: var(--muted);
 }
 
+.markdown-table-wrap {
+  max-width: 100%;
+  margin: 0 0 0.9rem;
+  overflow-x: auto;
+}
+
+.markdown-content table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  background: var(--surface-3);
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content th {
+  background: color-mix(in srgb, var(--surface-2) 76%, var(--accent) 24%);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.markdown-content tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
 .footnote-ref {
   margin-left: 0;
 }
