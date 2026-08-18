@@ -257,6 +257,14 @@ let localPromptPresets = [];
 let draftPromptPreset = null;
 let activePromptPresetId = "";
 let activeWpId = "";
+// Prepared questions are static for a page load. Cache successful loads so a WP
+// switch can identify whether the current text is managed without another
+// request. These revisions guard asynchronous loads against stale UI updates.
+const predefinedQuestionsByWp = new Map();
+const predefinedQuestionLoadsByWp = new Map();
+let predefinedQuestionsRenderRevision = 0;
+let questionEditRevision = 0;
+let managedQuestion = null;
 // WP whose prompts/inline-defs the Settings dialog edits. Initialized to
 // activeWpId when the dialog opens; the user can switch it inside Settings
 // without touching the main page (which keeps using activeWpId).
@@ -837,6 +845,18 @@ function syncSettingsWp(wpId) {
 // in turn loads the WP's length definitions and re-renders the WP-filtered
 // prompt options. Pass explicit ids when restoring a saved conversation.
 function selectWp(wpId, { promptId, collectionId } = {}) {
+  const previousWpId = activeWpId;
+  const questionSnapshot = question.value;
+  const questionRevisionSnapshot = questionEditRevision;
+  const matchesCachedPreparedQuestion = questionMatchesPreparedList(
+    questionSnapshot,
+    predefinedQuestionsByWp.get(previousWpId) || [],
+  );
+  const managedQuestionSnapshot = managedQuestion?.value === questionSnapshot
+    || matchesCachedPreparedQuestion;
+  if (matchesCachedPreparedQuestion && managedQuestion?.value !== questionSnapshot) {
+    managedQuestion = { wpId: previousWpId, value: questionSnapshot };
+  }
   activeWpId = resolveWpId(wpId);
   wpSelect.value = activeWpId;
   const wp = getWpConfig(activeWpId);
@@ -846,7 +866,12 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
     ? promptId
     : defaultPromptPresetId(activeWpId);
   applyPromptPresetById(targetPrompt);
-  loadPredefinedQuestions(activeWpId);
+  loadPredefinedQuestions(activeWpId, {
+    previousWpId,
+    questionSnapshot,
+    questionRevisionSnapshot,
+    managedQuestionSnapshot,
+  });
 }
 
 const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
@@ -910,7 +935,11 @@ async function loadSettings() {
   renderConversationWorkspace();
   await loadPromptPresets();
   renderGlobalPlaceholderDefs();
-  loadPredefinedQuestions(activeWpId);
+  loadPredefinedQuestions(activeWpId, {
+    initializeQuestion: true,
+    questionSnapshot: question.value,
+    questionRevisionSnapshot: questionEditRevision,
+  });
 }
 
 // Shared by the "Odpovědět" form submit (full answer) and the "Pouze vyhledat
@@ -1133,7 +1162,11 @@ function queryTransformActionLabel(action) {
   return "Upravit pomocí LLM";
 }
 
-question.addEventListener("input", () => clearAppliedQueryTransform());
+question.addEventListener("input", () => {
+  questionEditRevision += 1;
+  managedQuestion = null;
+  clearAppliedQueryTransform();
+});
 
 cancelButton.addEventListener("click", () => {
   cancelButton.disabled = true;
@@ -1146,14 +1179,23 @@ randomQuestionButton.addEventListener("click", async () => {
   randomQuestionButton.disabled = true;
   statusEl.className = "status";
   statusEl.textContent = "Vybírám náhodnou otázku...";
+  const requestedWpId = activeWpId;
+  const questionRevisionSnapshot = questionEditRevision;
   try {
-    const params = new URLSearchParams({ wp_id: wpSelect.value || "" });
+    const params = new URLSearchParams({ wp_id: requestedWpId });
     const response = await fetch(`questions/random?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");
     }
+    if (activeWpId !== requestedWpId || questionEditRevision !== questionRevisionSnapshot) {
+      statusEl.className = "status";
+      statusEl.textContent = "";
+      return;
+    }
     question.value = data.question || "";
+    questionEditRevision += 1;
+    managedQuestion = { wpId: requestedWpId, value: question.value };
     clearAppliedQueryTransform();
     question.focus();
     statusEl.textContent = "Náhodná otázka je vložená. Spusť odpověď tlačítkem Odpovědět.";
@@ -1181,27 +1223,96 @@ function openPredefinedQuestions() {
   predefinedQuestionButton?.setAttribute("aria-expanded", "true");
 }
 
+async function questionsForWp(wpId) {
+  if (predefinedQuestionsByWp.has(wpId)) {
+    return { questions: predefinedQuestionsByWp.get(wpId), error: false };
+  }
+  if (predefinedQuestionLoadsByWp.has(wpId)) {
+    return predefinedQuestionLoadsByWp.get(wpId);
+  }
+
+  const load = (async () => {
+    try {
+      const params = new URLSearchParams({ wp_id: wpId || "" });
+      const response = await fetch(`questions?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Nepodařilo se načíst otázky.");
+      }
+      const questions = (data.questions || [])
+        .map((item) => String(item).trim())
+        .filter(Boolean);
+      predefinedQuestionsByWp.set(wpId, questions);
+      return { questions, error: false };
+    } catch {
+      return { questions: [], error: true };
+    } finally {
+      predefinedQuestionLoadsByWp.delete(wpId);
+    }
+  })();
+  predefinedQuestionLoadsByWp.set(wpId, load);
+  return load;
+}
+
+function questionMatchesPreparedList(value, questions) {
+  const normalized = String(value || "").trim();
+  return Boolean(normalized) && questions.some((item) => item === normalized);
+}
+
 // Fills the "Připravené otázky" dropdown with the same question list used for
-// random questions, scoped to the given WP. The list is a fixed-height,
-// scrollable popover so a long question set stays compact.
-async function loadPredefinedQuestions(wpId = wpSelect.value || "") {
+// random questions. It also inserts the first question initially and replaces
+// a previous WP's prepared question on WP changes, while preserving custom text.
+async function loadPredefinedQuestions(
+  wpId = wpSelect.value || "",
+  {
+    previousWpId = "",
+    initializeQuestion = false,
+    questionSnapshot = question.value,
+    questionRevisionSnapshot = questionEditRevision,
+    managedQuestionSnapshot = managedQuestion?.value === question.value,
+  } = {},
+) {
   if (!predefinedQuestionList) {
     return;
   }
+  const renderRevision = ++predefinedQuestionsRenderRevision;
   closePredefinedQuestions();
-  try {
-    const params = new URLSearchParams({ wp_id: wpId || "" });
-    const response = await fetch(`questions?${params.toString()}`);
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || "Nepodařilo se načíst otázky.");
-    }
-    predefinedQuestionList.innerHTML = (data.questions || [])
-      .map((q) => `<li role="option" title="${escapeHtml(q)}">${escapeHtml(q)}</li>`)
-      .join("");
-  } catch {
+  const destinationPromise = questionsForWp(wpId);
+  const previousPromise = previousWpId && previousWpId !== wpId
+    ? questionsForWp(previousWpId)
+    : Promise.resolve({ questions: [], error: false });
+  const [destination, previous] = await Promise.all([destinationPromise, previousPromise]);
+
+  if (renderRevision !== predefinedQuestionsRenderRevision || activeWpId !== wpId) {
+    return;
+  }
+
+  if (destination.error || !destination.questions.length) {
     predefinedQuestionList.innerHTML =
       `<li class="predefined-question-empty">Žádné připravené otázky.</li>`;
+  } else {
+    predefinedQuestionList.innerHTML = destination.questions
+      .map((q) => `<li role="option" title="${escapeHtml(q)}">${escapeHtml(q)}</li>`)
+      .join("");
+  }
+
+  const questionUnchanged = questionEditRevision === questionRevisionSnapshot
+    && question.value === questionSnapshot;
+  const initialEmptyQuestion = initializeQuestion && !String(questionSnapshot).trim();
+  const initialQuestionStillPending = previousWpId
+    && previousWpId !== wpId
+    && questionRevisionSnapshot === 0
+    && !String(questionSnapshot).trim();
+  const previousPreparedQuestion = previousWpId
+    && previousWpId !== wpId
+    && questionMatchesPreparedList(questionSnapshot, previous.questions);
+  if (
+    questionUnchanged
+    && (managedQuestionSnapshot || initialEmptyQuestion || initialQuestionStillPending || previousPreparedQuestion)
+  ) {
+    question.value = destination.questions[0] || "";
+    managedQuestion = { wpId, value: question.value };
+    clearAppliedQueryTransform();
   }
 }
 
@@ -1219,6 +1330,8 @@ predefinedQuestionList?.addEventListener("click", (event) => {
     return;
   }
   question.value = item.textContent;
+  questionEditRevision += 1;
+  managedQuestion = { wpId: activeWpId, value: question.value };
   clearAppliedQueryTransform();
   closePredefinedQuestions();
   question.focus();
@@ -6604,6 +6717,11 @@ function promptPresetIdFromSettings(settings) {
 
 function applyHistoryEntryToForm(entry) {
   question.value = entry.question || "";
+  // A history restore is another deliberate user choice; pending prepared-
+  // question loads must not replace it even if the text happens to match an
+  // earlier request snapshot.
+  questionEditRevision += 1;
+  managedQuestion = null;
   const providerValue = normalizeProviderId(entry.settings?.llm_provider || llmProvider.value || "");
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
