@@ -194,6 +194,40 @@ const LOCAL_PROMPT_PRESETS_STORAGE_KEY = "czdemos4ai-local-prompt-presets";
 // the shared server overlay: inline -> browser-local -> shared overlay -> code floor.
 const LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY = "czdemos4ai-local-placeholder-defs";
 const BROWSER_OWNER_ID_STORAGE_KEY = "czdemos4ai-browser-owner-id";
+const ANALYTICS_SESSION_ID_STORAGE_KEY = "czdemos4ai-analytics-session-id";
+const nativeFetch = window.fetch.bind(window);
+
+function newAnalyticsId() {
+  return globalThis.crypto?.randomUUID?.()
+    || `fallback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function analyticsSessionId() {
+  let value = sessionStorage.getItem(ANALYTICS_SESSION_ID_STORAGE_KEY);
+  if (!value) {
+    value = newAnalyticsId();
+    sessionStorage.setItem(ANALYTICS_SESSION_ID_STORAGE_KEY, value);
+  }
+  return value;
+}
+
+window.fetch = function analyticsFetch(input, init = {}) {
+  const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
+  if (url.origin !== window.location.origin) {
+    return nativeFetch(input, init);
+  }
+  const { analyticsTurnId = null, analyticsAppOpen = false, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers || (input instanceof Request ? input.headers : undefined));
+  headers.set("X-Client-Id", getBrowserOwnerId());
+  headers.set("X-Session-Id", analyticsSessionId());
+  if (analyticsTurnId) {
+    headers.set("X-Turn-Id", analyticsTurnId);
+  }
+  if (analyticsAppOpen) {
+    headers.set("X-App-Open", "1");
+  }
+  return nativeFetch(input, { ...fetchInit, headers });
+};
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
@@ -522,7 +556,7 @@ function setQueryTransformSectionBusy(busy) {
 
 async function executeQueryTransformRow(
   action,
-  { signal = null, propagateError = false, manageBusy = true } = {},
+  { signal = null, propagateError = false, manageBusy = true, turnId = null } = {},
 ) {
   const actionId = String(action.id);
   const state = queryTransformRowState[actionId];
@@ -540,12 +574,15 @@ async function executeQueryTransformRow(
     statusEl.textContent = actionType === "lindat" ? "Překládám dotaz..." : "Upravuji dotaz pomocí LLM...";
     statusEl.classList.remove("error");
   }
+  const effectiveTurnId = turnId || newAnalyticsId();
   try {
+    const transformStarted = performance.now();
     const activePrompt = activePromptPresetMetadata();
     const response = await fetch("query-transform", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
+      analyticsTurnId: effectiveTurnId,
       body: JSON.stringify({
         question: question.value,
         wp_id: activeWpId,
@@ -567,6 +604,8 @@ async function executeQueryTransformRow(
       throw new Error(data.detail || `Dotaz se nepodařilo upravit (HTTP ${response.status}).`);
     }
     applyQueryTransformRowResult(actionId, String(data.transformed_query || ""));
+    state.durationMs = Math.max(0, Math.round(performance.now() - transformStarted));
+    state.turnId = effectiveTurnId;
     queryTransformSelectedActionId = actionId;
     queryTransformApplyEnabled = true;
     if (queryTransformApplyToggle) {
@@ -750,6 +789,11 @@ function activeQueryTransformPayload({ includeAnswerFlag = true } = {}) {
   }
   const payload = {
     retrieval_query: appliedQueryTransform.retrievalQuery.trim(),
+    query_transform_ms: queryTransformRowState[appliedQueryTransform.actionId]?.durationMs ?? null,
+    query_transform_kind: resolvedQueryTransformConfig()?.actions
+      ?.find((action) => String(action.id) === String(appliedQueryTransform.actionId))?.type === "llm"
+      ? "llm"
+      : "other",
   };
   if (includeAnswerFlag) {
     payload.use_retrieval_query_for_answer = Boolean(appliedQueryTransform.useForAnswer);
@@ -769,6 +813,11 @@ function activeQueryTransformActionId() {
     return null;
   }
   return appliedQueryTransform.actionId || null;
+}
+
+function activeQueryTransformTurnId() {
+  const actionId = activeQueryTransformActionId();
+  return actionId ? queryTransformRowState[actionId]?.turnId || null : null;
 }
 
 function pendingAutomaticQueryTransform() {
@@ -793,7 +842,7 @@ function pendingAutomaticQueryTransform() {
   return hasCurrentResult ? null : action;
 }
 
-async function prepareAutomaticQueryTransform(signal) {
+async function prepareAutomaticQueryTransform(signal, turnId) {
   const action = pendingAutomaticQueryTransform();
   if (!action) {
     return;
@@ -804,6 +853,7 @@ async function prepareAutomaticQueryTransform(signal) {
     signal,
     propagateError: true,
     manageBusy: false,
+    turnId,
   });
 }
 
@@ -897,7 +947,7 @@ function currentProviderBaseUrl() {
 }
 
 async function loadSettings() {
-  const response = await fetch("settings");
+  const response = await fetch("settings", { analyticsAppOpen: true });
   const settings = await response.json();
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
@@ -951,6 +1001,7 @@ let activeQueryController = null;
 
 async function runQuery(retrieveOnlyMode) {
   const controller = new AbortController();
+  const turnId = activeQueryTransformTurnId() || newAnalyticsId();
   activeQueryController = controller;
   submitButton.disabled = true;
   retrieveButton.disabled = true;
@@ -983,7 +1034,7 @@ async function runQuery(retrieveOnlyMode) {
   const promptNoteSnapshot = activePromptPresetMetadata().note;
 
   try {
-    await prepareAutomaticQueryTransform(controller.signal);
+    await prepareAutomaticQueryTransform(controller.signal, turnId);
     statusEl.textContent = retrieveOnlyMode
       ? "Vyhledávám zdroje..."
       : "Vyhledávám zdroje a generuji odpověď...";
@@ -1012,7 +1063,7 @@ async function runQuery(retrieveOnlyMode) {
           renderSources(currentAnswerSources, currentRetrievedChunks, "");
           statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků.`;
         },
-      }, { signal: controller.signal });
+      }, { signal: controller.signal, turnId });
       renderAnswer("Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.");
       statusEl.textContent = `Nalezeno ${data.retrieved_chunks.length} chunků.`;
       currentRetrievedChunks = data.retrieved_chunks || currentRetrievedChunks;
@@ -1089,7 +1140,7 @@ async function runQuery(retrieveOnlyMode) {
           currentConversationSummary = doneData.conversation_summary || currentConversationSummary;
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
         },
-      }, { signal: controller.signal });
+      }, { signal: controller.signal, turnId });
       streamedAnswerText = data.answer || streamedAnswerText;
       renderAnswer(streamedAnswerText);
       currentAnswerSources = data.sources || currentAnswerSources;
@@ -2402,11 +2453,11 @@ function updateModelContextWindowNote() {
     `Pro tento model nemáme uložené maximum. Výchozí hodnota aplikace: ${formatTokenCount(defaultContextWindowTokens())} tokenů.`;
 }
 
-async function chatRequest(payload, handlers = {}, { signal } = {}) {
+async function chatRequest(payload, handlers = {}, { signal, turnId = null } = {}) {
   if (providerSupportsStreaming(payload.llm_provider)) {
-    return streamChatWithHandlers(payload, handlers, { signal });
+    return streamChatWithHandlers(payload, handlers, { signal, turnId });
   }
-  const data = await fetchChat(payload, { signal });
+  const data = await fetchChat(payload, { signal, turnId });
   handlers.onSources?.(data);
   if (data.answer) {
     handlers.onToken?.(data.answer, data);
@@ -2415,12 +2466,13 @@ async function chatRequest(payload, handlers = {}, { signal } = {}) {
   return data;
 }
 
-async function fetchChat(payload, { signal } = {}) {
+async function fetchChat(payload, { signal, turnId = null } = {}) {
   const response = await fetch("chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal,
+    analyticsTurnId: turnId,
   });
   const data = await safeJson(response);
   if (!response.ok) {
@@ -2429,12 +2481,13 @@ async function fetchChat(payload, { signal } = {}) {
   return data;
 }
 
-async function streamRetrieveWithHandlers(payload, handlers = {}, { signal } = {}) {
+async function streamRetrieveWithHandlers(payload, handlers = {}, { signal, turnId = null } = {}) {
   const response = await fetch("retrieve/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal,
+    analyticsTurnId: turnId,
   });
   if (!response.ok) {
     const data = await safeJson(response);
@@ -2491,12 +2544,13 @@ function providerSupportsStreaming(providerId = null) {
   return provider?.supports_streaming !== false;
 }
 
-async function streamChatWithHandlers(payload, handlers = {}, { signal } = {}) {
+async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId = null } = {}) {
   const response = await fetch("chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal,
+    analyticsTurnId: turnId,
   });
   if (!response.ok) {
     const data = await safeJson(response);
@@ -5736,6 +5790,7 @@ async function submitConversationTurn() {
     return;
   }
   const controller = new AbortController();
+  const turnId = newAnalyticsId();
   activeConversationController = controller;
   conversationSubmitButton.disabled = true;
   if (conversationCancelButton) {
@@ -5916,7 +5971,7 @@ async function submitConversationTurn() {
         });
         renderConversationWorkspace();
       },
-    }, { signal: controller.signal });
+    }, { signal: controller.signal, turnId });
   } catch (error) {
     if (error.name === "AbortError") {
       return;

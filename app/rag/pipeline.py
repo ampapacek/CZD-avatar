@@ -3,11 +3,13 @@ from __future__ import annotations
 import copy
 import logging
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.config import Settings
+from app.analytics import bind_context, current_context
 from app.models import ChatResponse, RetrievedChunk, Source
 from app.rag.catalog import save_chunk_catalog
 from app.rag.chunking import chunk_documents
@@ -164,6 +166,7 @@ class RAGPipeline:
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
+        timings: dict[str, float | None] | None = None,
     ) -> list[dict[str, Any]]:
         chunks, _ = self.retrieve_with_baseline(
             question,
@@ -181,6 +184,7 @@ class RAGPipeline:
             rerank_enabled=rerank_enabled,
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,
+            timings=timings,
         )
         return chunks
 
@@ -201,6 +205,7 @@ class RAGPipeline:
         rerank_enabled: bool | None = None,
         rerank_weight: float | None = None,
         rerank_candidates: int | None = None,
+        timings: dict[str, float | None] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Retrieve chunks and, when reranking is active, the pre-rerank ordering.
 
@@ -211,6 +216,7 @@ class RAGPipeline:
         cross-encoder-reordered by mSearch, so the baseline reflects that order and
         the local rerank only shows what it adds on top.
         """
+        retrieval_started = time.perf_counter()
         candidates = self.retrieve_candidates(
             question,
             top_k,
@@ -228,7 +234,12 @@ class RAGPipeline:
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,
         )
+        retrieval_seconds = time.perf_counter() - retrieval_started
+        rerank_started = time.perf_counter()
         reranked = self.apply_rerank(question, candidates)
+        rerank_seconds = time.perf_counter() - rerank_started if candidates.rerank_active else None
+        if timings is not None:
+            timings.update(retrieval_seconds=retrieval_seconds, rerank_seconds=rerank_seconds)
         return reranked, candidates.baseline
 
     def retrieve_candidates(
@@ -505,6 +516,7 @@ class RAGPipeline:
             if not retrieval_query:
                 raise ValueError("Retrieval query must not be empty.")
         answer_question = retrieval_query if use_retrieval_query_for_answer else question
+        retrieval_timings: dict[str, float | None] = {}
         retrieved, baseline_retrieved = self.retrieve_with_baseline(
             retrieval_query,
             top_k,
@@ -521,7 +533,11 @@ class RAGPipeline:
             rerank_enabled=rerank_enabled,
             rerank_weight=rerank_weight,
             rerank_candidates=rerank_candidates,
+            timings=retrieval_timings,
         )
+        retrieval_seconds = retrieval_timings.get("retrieval_seconds") or 0.0
+        rerank_seconds = retrieval_timings.get("rerank_seconds")
+        prompt_prepare_started = time.perf_counter()
         budget = prepare_prompt_budget(
             question=answer_question,
             retrieved_chunks=retrieved,
@@ -537,6 +553,8 @@ class RAGPipeline:
         if summary_warning:
             budget.warnings.append(summary_warning)
         budget.conversation_summary_used = bool(effective_summary)
+        prompt_prepare_seconds = time.perf_counter() - prompt_prepare_started
+        generation_started = time.perf_counter()
         generation = self.llm.generate(
             budget.messages,
             model=resolved_model,
@@ -544,6 +562,7 @@ class RAGPipeline:
             base_url=llm_base_url,
         )
         answer = generation.answer
+        generation_seconds = time.perf_counter() - generation_started
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
@@ -573,6 +592,10 @@ class RAGPipeline:
             model=resolved_model,
             upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),
+            retrieval_time_seconds=round(retrieval_seconds, 3),
+            prompt_prepare_time_seconds=round(prompt_prepare_seconds, 3),
+            rerank_time_seconds=round(rerank_seconds, 3) if rerank_seconds is not None else None,
+            generation_time_seconds=round(generation_seconds, 3),
         )
 
     def build_chat_prompt(
@@ -668,7 +691,10 @@ class RAGPipeline:
             },
         ]
         try:
-            generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
+            context = current_context()
+            manager = bind_context(context, purpose="query_rewrite") if context else nullcontext()
+            with manager:
+                generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
         except Exception as exc:
             logger.warning("Retrieval query rewrite failed for question=%r: %s", clean_question, exc)
             return clean_question
@@ -741,7 +767,10 @@ class RAGPipeline:
                 "content": "\n\n".join(turns),
             },
         ]
-        generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
+        context = current_context()
+        manager = bind_context(context, purpose="conversation_summary") if context else nullcontext()
+        with manager:
+            generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
         return generation.answer.strip()
 
 

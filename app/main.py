@@ -10,11 +10,23 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
+from app.analytics import (
+    AnalyticsWriter,
+    bind_context,
+    configure as configure_analytics,
+    endpoint_host,
+    error_code as analytics_error_code,
+    estimated_tokens,
+    ms,
+    question_metadata,
+    request_context,
+    text_lengths,
+)
 from app.logging_config import configure_logging
 from app.models import (
     BuiltinPromptOverride,
@@ -107,6 +119,11 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 settings = get_settings()
+analytics = AnalyticsWriter(
+    False,
+    settings.analytics_dir,
+    settings.analytics_instance_id,
+)
 model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
 provider_presets = available_llm_providers(
     model_context_windows=model_context_windows,
@@ -173,6 +190,12 @@ pipeline = RAGPipeline(settings)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global analytics
+    analytics = configure_analytics(
+        settings.analytics_enabled,
+        settings.analytics_dir,
+        settings.analytics_instance_id,
+    )
     yield
     logger.info("Shutting down API")
     pipeline.close()
@@ -288,7 +311,14 @@ def health() -> HealthResponse:
 
 
 @app.get("/settings")
-def get_public_settings() -> dict[str, object]:
+def get_public_settings(request: Request) -> dict[str, object]:
+    if request.headers.get("x-app-open") == "1":
+        analytics.event(
+            "app_open",
+            request_context(request, settings.analytics_instance_id),
+            status="ok",
+            duration_ms=None,
+        )
     _refresh_provider_state()
     return {
         "placeholders": effective_global_placeholders(settings.placeholders_path),
@@ -430,6 +460,70 @@ def _load_questions_for_wp(wp_id: str | None) -> tuple[str, list[str]]:
     if not questions:
         raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} does not contain any questions.")
     return resolved_wp_id, questions
+
+
+def _questions_for_analytics(wp_id: str | None) -> list[str]:
+    try:
+        return _load_questions_for_wp(wp_id)[1]
+    except (HTTPException, OSError, UnicodeError):
+        return []
+
+
+def _prompt_kind(prompt_id: str | None) -> str:
+    clean = (prompt_id or "").strip()
+    if any(clean == prompt.id for wp in WP_CONFIGS for prompt in wp.builtin_prompts):
+        return "builtin"
+    if clean.startswith(("local-", "draft-")) or not clean:
+        return "custom"
+    return "shared"
+
+
+def _key_source(request: ChatRequest, resolved_api_key: str | None) -> str:
+    if request.llm_api_key and request.llm_api_key.strip():
+        return "browser"
+    return "server" if resolved_api_key else "none"
+
+
+def _turn_fields(
+    body: ChatRequest | RetrieveRequest,
+    *,
+    operation: str,
+    mode: str,
+    provider: str | None = None,
+    requested_model: str | None = None,
+    base_url: str | None = None,
+    key_source: str = "none",
+) -> dict[str, object]:
+    backend = body.retrieval_backend or settings.retrieval_backend
+    return {
+        **question_metadata(body.question, _questions_for_analytics(body.wp_id)),
+        "wp_id": resolve_wp_id(body.wp_id),
+        "operation": operation,
+        "mode": mode,
+        "provider": provider,
+        "requested_model": requested_model,
+        "upstream_model": None,
+        "endpoint_host": endpoint_host(base_url),
+        "key_source": key_source,
+        "prompt_kind": _prompt_kind(body.prompt_preset_id),
+        "prompt_id": body.prompt_preset_id,
+        "retrieval_backend": backend,
+        "msearch_collection": body.msearch_collection if backend == "msearch" else None,
+        "msearch_mode": body.msearch_mode if backend == "msearch" else None,
+        "msearch_rescore": body.msearch_rescore if backend == "msearch" else None,
+        "msearch_min_confidence": body.msearch_min_confidence if backend == "msearch" else None,
+        "top_k": body.top_k,
+        "dense_weight": body.dense_weight,
+        "bm25_weight": body.bm25_weight,
+        "min_score": body.min_score,
+        "min_relative_score": body.min_relative_score,
+        "rerank_enabled": body.rerank_enabled,
+        "rerank_weight": body.rerank_weight,
+        "rerank_candidates": body.rerank_candidates,
+        "query_transform_ms": body.query_transform_ms,
+        "query_transform_kind": body.query_transform_kind,
+        "retrieval_query_was_rewritten": None,
+    }
 
 
 @app.get("/questions/random")
@@ -666,7 +760,8 @@ def _clean_transformed_query(value: str) -> str:
 
 
 @app.post("/query-transform", response_model=QueryTransformResponse)
-def transform_query(request: QueryTransformRequest) -> QueryTransformResponse:
+def transform_query(request: QueryTransformRequest, http_request: Request) -> QueryTransformResponse:
+    context = request_context(http_request, settings.analytics_instance_id)
     question = request.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Dotaz nesmí být prázdný.")
@@ -696,12 +791,18 @@ def transform_query(request: QueryTransformRequest) -> QueryTransformResponse:
             instruction = (request.instruction or "").strip()
             rendered_prompt = render_query_transform_prompt(template, question, instruction)
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
-            generation = pipeline.llm.generate(
-                [{"role": "user", "content": rendered_prompt}],
-                model=resolved_model,
-                api_key=resolved_api_key,
-                base_url=resolved_base_url,
-            )
+            with bind_context(
+                context,
+                provider=resolved_provider,
+                key_source=_key_source(request, resolved_api_key),
+                purpose="query_transform",
+            ):
+                generation = pipeline.llm.generate(
+                    [{"role": "user", "content": rendered_prompt}],
+                    model=resolved_model,
+                    api_key=resolved_api_key,
+                    base_url=resolved_base_url,
+                )
             transformed = _clean_transformed_query(generation.answer)
             logger.info(
                 "Transformed query with provider=%s model=%s action=%s",
@@ -926,7 +1027,10 @@ def ingest(request: IngestRequest) -> IngestResponse:
 
 
 @app.post("/retrieve", response_model=RetrieveResponse)
-def retrieve(request: RetrieveRequest) -> RetrieveResponse:
+def retrieve(request: RetrieveRequest, http_request: Request) -> RetrieveResponse:
+    started = time.perf_counter()
+    context = request_context(http_request, settings.analytics_instance_id)
+    fields = _turn_fields(request, operation="retrieve_only", mode="blocking")
     try:
         # No mSearch provider gate here: retrieve-only returns chunks to the
         # browser and never sends them to an LLM. The gate exists solely to keep
@@ -941,6 +1045,7 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
         )
         if not retrieval_query:
             raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
+        retrieval_timings: dict[str, float | None] = {}
         chunks, baseline_chunks = pipeline.retrieve_with_baseline(
             retrieval_query,
             request.top_k,
@@ -956,12 +1061,18 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
             rerank_enabled=request.rerank_enabled,
             rerank_weight=request.rerank_weight,
             rerank_candidates=request.rerank_candidates,
+            timings=retrieval_timings,
         )
-    except HTTPException:
+        retrieval_ms = ms(retrieval_timings.get("retrieval_seconds") or 0.0)
+        rerank_ms = ms(retrieval_timings["rerank_seconds"]) if retrieval_timings.get("rerank_seconds") is not None else None
+    except HTTPException as exc:
+        analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), http_status=exc.status_code, error_code=analytics_error_code(exc, exc.status_code))
         # Intended 4xx from policy enforcement must keep its status, not become 500.
         raise
     except Exception as exc:
+        analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), http_status=500, error_code="retrieval_error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    analytics.event("turn", context, **fields, status="ok", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, http_status=200, error_code=None)
     return RetrieveResponse(
         question=request.question,
         original_question=request.question,
@@ -972,8 +1083,16 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
 
 
 @app.post("/retrieve/stream")
-def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
+def retrieve_stream(request: RetrieveRequest, http_request: Request) -> StreamingResponse:
+    context = request_context(http_request, settings.analytics_instance_id)
+    fields = _turn_fields(request, operation="retrieve_only", mode="streaming")
+
     def event_stream():
+        started = time.perf_counter()
+        retrieval_ms = None
+        rerank_ms = None
+        preliminary_ms = None
+        final_sources_ms = None
         try:
             # No mSearch provider gate here for the same reason as /retrieve:
             # retrieve-only never sends chunks to an LLM provider.
@@ -985,6 +1104,7 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
             )
             if not retrieval_query:
                 raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
+            retrieval_started = time.perf_counter()
             candidates = pipeline.retrieve_candidates(
                 retrieval_query,
                 request.top_k,
@@ -1001,8 +1121,10 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
                 rerank_weight=request.rerank_weight,
                 rerank_candidates=request.rerank_candidates,
             )
+            retrieval_ms = ms(time.perf_counter() - retrieval_started)
             baseline_payload = [_serialize_retrieved_chunk(chunk) for chunk in candidates.baseline]
             if candidates.rerank_active and candidates.baseline:
+                preliminary_ms = ms(time.perf_counter() - started)
                 yield _sse_event(
                     "preliminary_sources",
                     {
@@ -1030,6 +1152,8 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
                 else:  # "result"
                     retrieved, rerank_seconds = event[1], event[2]
 
+            rerank_ms = ms(rerank_seconds) if candidates.rerank_active else None
+
             payload = {
                 "question": request.question,
                 "original_question": request.question,
@@ -1039,13 +1163,25 @@ def retrieve_stream(request: RetrieveRequest) -> StreamingResponse:
                 "sources": [_serialize_source(chunk) for chunk in retrieved],
                 "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
             }
+            final_sources_ms = ms(time.perf_counter() - started)
             yield _sse_event("sources", payload)
             yield _sse_event("done", payload)
+            analytics.event(
+                "turn", context, **fields, status="ok", duration_ms=ms(time.perf_counter() - started),
+                total_ms=ms(time.perf_counter() - started), retrieval_ms=retrieval_ms, rerank_ms=rerank_ms,
+                time_to_preliminary_sources_ms=preliminary_ms, time_to_final_sources_ms=final_sources_ms,
+                http_status=200, error_code=None,
+            )
         except HTTPException as exc:
             yield _sse_event("error", {"detail": exc.detail})
+            analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, http_status=200, error_code=analytics_error_code(exc, exc.status_code))
+        except GeneratorExit:
+            analytics.event("turn", context, **fields, status="cancelled", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, http_status=200, error_code="client_cancelled")
+            raise
         except Exception as exc:
             logger.exception("Streaming retrieve failed")
             yield _sse_event("error", {"detail": str(exc)})
+            analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, http_status=200, error_code="retrieval_error")
 
     return StreamingResponse(
         event_stream(),
@@ -1069,19 +1205,37 @@ def _output_budget_length(placeholder_defs: dict, selections: dict[str, str]) ->
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
     placeholder_defs, selections = _resolve_chat_placeholders(request)
     length = _output_budget_length(placeholder_defs, selections)
+    started = time.perf_counter()
+    context = request_context(http_request, settings.analytics_instance_id)
+    resolved_provider = request.llm_provider
+    resolved_model = request.model
+    resolved_api_key = None
+    resolved_base_url = request.llm_base_url
+    fields = _turn_fields(
+        request,
+        operation="chat",
+        mode="blocking",
+        provider=resolved_provider,
+        requested_model=resolved_model,
+        base_url=resolved_base_url,
+        key_source="browser" if request.llm_api_key and request.llm_api_key.strip() else "none",
+    )
     try:
         if request.retrieval_query is not None and not _clean_transformed_query(request.retrieval_query):
             raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
+        key_source = _key_source(request, resolved_api_key)
+        fields.update(provider=resolved_provider, requested_model=resolved_model, endpoint_host=endpoint_host(resolved_base_url), key_source=key_source)
         _enforce_msearch_collection_policy(
             request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
         )
         _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
-        return pipeline.chat(
-            question=request.question,
+        with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="answer"):
+            response = pipeline.chat(
+                question=request.question,
             length=length,
             placeholder_defs=placeholder_defs,
             selections=selections,
@@ -1115,40 +1269,85 @@ def chat(request: ChatRequest) -> ChatResponse:
             rerank_candidates=request.rerank_candidates,
             rewrite_query_for_retrieval=request.rewrite_query_for_retrieval,
             retrieval_query_override=request.retrieval_query,
-            use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
+                use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
+            )
+        budget = response.token_budget or {}
+        event_fields = {
+            **fields,
+            "retrieval_query_was_rewritten": response.retrieval_query_was_rewritten,
+            "upstream_model": response.upstream_model,
+        }
+        analytics.event(
+            "turn", context, **event_fields, status="ok", duration_ms=ms(time.perf_counter() - started),
+            total_ms=ms(time.perf_counter() - started),
+            retrieval_ms=ms(response.retrieval_time_seconds) if response.retrieval_time_seconds is not None else None,
+            rerank_ms=ms(response.rerank_time_seconds) if response.rerank_time_seconds is not None else None,
+            prompt_prepare_ms=ms(response.prompt_prepare_time_seconds) if response.prompt_prepare_time_seconds is not None else None,
+            generation_ms=ms(response.generation_time_seconds) if response.generation_time_seconds is not None else None,
+            http_status=200, error_code=None,
+            **text_lengths(response.answer, "answer"), answer_tokens_estimated=estimated_tokens(response.answer),
+            warning_count=len(response.chunk_budget_warnings), **budget,
         )
+        return response
     except PromptBudgetError as exc:
+        analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), http_status=400, error_code="token_budget")
         raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
-    except HTTPException:
+    except HTTPException as exc:
+        analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), http_status=exc.status_code, error_code=analytics_error_code(exc, exc.status_code))
         # Intended 4xx from policy/model enforcement must keep its status, not become 500.
         raise
     except Exception as exc:
+        analytics.event("turn", context, **fields, status="error", duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started), http_status=500, error_code=analytics_error_code(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest) -> StreamingResponse:
+def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     placeholder_defs, selections = _resolve_chat_placeholders(request)
     length = _output_budget_length(placeholder_defs, selections)
+    context = request_context(http_request, settings.analytics_instance_id)
+    initial_fields = _turn_fields(
+        request,
+        operation="chat",
+        mode="streaming",
+        provider=request.llm_provider,
+        requested_model=request.model,
+        base_url=request.llm_base_url,
+        key_source="browser" if request.llm_api_key and request.llm_api_key.strip() else "none",
+    )
 
     def event_stream():
         started = time.perf_counter()
+        fields = dict(initial_fields)
+        retrieval_ms = rerank_ms = prompt_prepare_ms = None
+        preliminary_ms = final_sources_ms = None
+        ttft_ms = token_stream_ms = None
+        budget = None
+        answer = ""
         try:
             resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
+            key_source = _key_source(request, resolved_api_key)
+            fields.update(
+                provider=resolved_provider,
+                requested_model=resolved_model,
+                endpoint_host=endpoint_host(resolved_base_url),
+                key_source=key_source,
+            )
             _enforce_msearch_collection_policy(
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
             if request.retrieval_query is None:
-                retrieval_query = pipeline.rewrite_query_for_retrieval(
-                    request.question,
-                    conversation_history=request.conversation_history,
-                    conversation_summary=request.conversation_summary,
-                    enabled=request.rewrite_query_for_retrieval,
-                    model=resolved_model,
-                    api_key=resolved_api_key,
-                    base_url=resolved_base_url,
-                )
+                with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="query_rewrite"):
+                    retrieval_query = pipeline.rewrite_query_for_retrieval(
+                        request.question,
+                        conversation_history=request.conversation_history,
+                        conversation_summary=request.conversation_summary,
+                        enabled=request.rewrite_query_for_retrieval,
+                        model=resolved_model,
+                        api_key=resolved_api_key,
+                        base_url=resolved_base_url,
+                    )
             else:
                 retrieval_query = _clean_transformed_query(request.retrieval_query)
                 if not retrieval_query:
@@ -1158,6 +1357,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 if request.use_retrieval_query_for_answer
                 else request.question
             )
+            retrieval_started = time.perf_counter()
             candidates = pipeline.retrieve_candidates(
                 retrieval_query,
                 request.top_k,
@@ -1175,11 +1375,13 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 rerank_weight=request.rerank_weight,
                 rerank_candidates=request.rerank_candidates,
             )
+            retrieval_ms = ms(time.perf_counter() - retrieval_started)
             baseline_payload = [_serialize_retrieved_chunk(chunk) for chunk in candidates.baseline]
             # When reranking is active, show the first-stage hits immediately so the
             # user is not staring at an empty panel while the cross-encoder runs;
             # the final "sources" event below replaces them with the reranked order.
             if candidates.rerank_active and candidates.baseline:
+                preliminary_ms = ms(time.perf_counter() - started)
                 yield _sse_event(
                     "preliminary_sources",
                     {
@@ -1209,6 +1411,8 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                     )
                 else:  # "result"
                     retrieved, rerank_seconds = event[1], event[2]
+            rerank_ms = ms(rerank_seconds) if candidates.rerank_active else None
+            prompt_started = time.perf_counter()
             budget_config = PromptBudgetConfig.from_settings(
                 settings,
                 context_window_tokens=request.context_window_tokens,
@@ -1219,8 +1423,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 token_budget_safety_margin=request.token_budget_safety_margin,
                 conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
             )
-            budget, conversation_summary = pipeline.build_chat_prompt(
-                question=answer_question,
+            with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="conversation_summary"):
+                budget, conversation_summary = pipeline.build_chat_prompt(
+                    question=answer_question,
                 retrieved=retrieved,
                 length=length,
                 model=resolved_model,
@@ -1232,8 +1437,10 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 conversation_summary=request.conversation_summary,
                 llm_api_key=resolved_api_key,
                 llm_base_url=resolved_base_url,
-                budget_config=budget_config,
-            )
+                    budget_config=budget_config,
+                )
+            prompt_prepare_ms = ms(time.perf_counter() - prompt_started)
+            final_sources_ms = ms(time.perf_counter() - started)
             yield _sse_event(
                 "sources",
                 {
@@ -1254,18 +1461,30 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             )
             answer_parts: list[str] = []
             generation_started = time.perf_counter()
-            stream = pipeline.llm.stream_generate(
-                budget.messages,
-                model=resolved_model,
-                api_key=resolved_api_key,
-                base_url=resolved_base_url,
-            )
+            first_token_at = None
+            with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="answer"):
+                stream = pipeline.llm.stream_generate(
+                    budget.messages,
+                    model=resolved_model,
+                    api_key=resolved_api_key,
+                    base_url=resolved_base_url,
+                )
+            # Starlette advances sync response iterators in a worker thread and
+            # may resume each yield in a different copied Context.  The stream
+            # captures the analytics context above, so do not keep a ContextVar
+            # token open while yielding SSE events.
             for token in stream:
+                if first_token_at is None and token:
+                    first_token_at = time.perf_counter()
+                    ttft_ms = ms(first_token_at - generation_started)
                 answer_parts.append(token)
+                answer += token
                 yield _sse_event("token", {"text": token})
 
             generation_seconds = time.perf_counter() - generation_started
-            answer = "".join(answer_parts).strip()
+            answer = answer.strip()
+            if first_token_at is not None:
+                token_stream_ms = ms(time.perf_counter() - first_token_at)
             elapsed = time.perf_counter() - started
             upstream_model = getattr(stream, "upstream_model", None) or resolved_model
             response = {
@@ -1301,12 +1520,74 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 answer[:280] + ("…" if len(answer) > 280 else ""),
             )
             yield _sse_event("done", response)
+            event_fields = {
+                **fields,
+                "upstream_model": upstream_model,
+                "retrieval_query_was_rewritten": retrieval_query != request.question,
+            }
+            analytics.event(
+                "turn",
+                context,
+                **event_fields,
+                status="ok",
+                duration_ms=ms(time.perf_counter() - started),
+                total_ms=ms(time.perf_counter() - started),
+                retrieval_ms=retrieval_ms,
+                rerank_ms=rerank_ms,
+                prompt_prepare_ms=prompt_prepare_ms,
+                time_to_first_token_ms=ttft_ms,
+                token_stream_ms=token_stream_ms,
+                generation_ms=None,
+                time_to_preliminary_sources_ms=preliminary_ms,
+                time_to_final_sources_ms=final_sources_ms,
+                http_status=200,
+                error_code=None,
+                **text_lengths(answer, "answer"),
+                answer_tokens_estimated=estimated_tokens(answer),
+                warning_count=len(budget.warnings),
+                **budget.metadata(),
+            )
         except PromptBudgetError as exc:
             logger.info("Streaming chat rejected by token budget for question=%r: %s", request.question, exc)
             yield _sse_event("error", {"detail": exc.to_payload()})
+            analytics.event(
+                "turn", context, **fields, status="error",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, prompt_prepare_ms=prompt_prepare_ms,
+                http_status=200, error_code="token_budget",
+            )
+        except HTTPException as exc:
+            logger.info("Streaming chat rejected for question=%r: %s", request.question, exc.detail)
+            yield _sse_event("error", {"detail": exc.detail})
+            analytics.event(
+                "turn", context, **fields, status="error",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, prompt_prepare_ms=prompt_prepare_ms,
+                time_to_first_token_ms=ttft_ms, token_stream_ms=token_stream_ms,
+                http_status=200, error_code=analytics_error_code(exc, exc.status_code),
+                **text_lengths(answer, "answer"), answer_tokens_estimated=estimated_tokens(answer),
+            )
+        except GeneratorExit:
+            analytics.event(
+                "turn", context, **fields, status="cancelled",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, prompt_prepare_ms=prompt_prepare_ms,
+                time_to_first_token_ms=ttft_ms, token_stream_ms=token_stream_ms,
+                http_status=200, error_code="client_cancelled", **text_lengths(answer, "answer"),
+                answer_tokens_estimated=estimated_tokens(answer),
+            )
+            raise
         except Exception as exc:
             logger.exception("Streaming chat failed for question=%r", request.question)
             yield _sse_event("error", {"detail": str(exc)})
+            analytics.event(
+                "turn", context, **fields, status="error",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                retrieval_ms=retrieval_ms, rerank_ms=rerank_ms, prompt_prepare_ms=prompt_prepare_ms,
+                time_to_first_token_ms=ttft_ms, token_stream_ms=token_stream_ms,
+                http_status=200, error_code=analytics_error_code(exc), **text_lengths(answer, "answer"),
+                answer_tokens_estimated=estimated_tokens(answer),
+            )
 
     return StreamingResponse(
         event_stream(),

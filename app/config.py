@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     )
     query_transform_timeout: float = Field(default=15.0, alias="QUERY_TRANSFORM_TIMEOUT")
 
+    analytics_enabled: bool = Field(default=True, alias="ANALYTICS_ENABLED")
+    analytics_dir: Path = Field(default=Path("logs/events"), alias="ANALYTICS_DIR")
+    analytics_instance_id: str = Field(default="czd-avatar", alias="ANALYTICS_INSTANCE_ID")
+
 @lru_cache
 def load_env_values() -> dict[str, str]:
     # For this local prototype, prefer explicit .env values over exported shell

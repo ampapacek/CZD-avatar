@@ -35,6 +35,9 @@ class RetrieveRequest(BaseModel):
     rerank_enabled: bool | None = None
     rerank_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     rerank_candidates: int | None = Field(default=None, ge=1, le=500)
+    prompt_preset_id: str | None = None
+    query_transform_ms: int | None = Field(default=None, ge=0)
+    query_transform_kind: Literal["llm", "other"] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -79,6 +82,9 @@ class ChatRequest(BaseModel):
     rerank_enabled: bool | None = None
     rerank_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     rerank_candidates: int | None = Field(default=None, ge=1, le=500)
+    prompt_preset_id: str | None = None
+    query_transform_ms: int | None = Field(default=None, ge=0)
+    query_transform_kind: Literal["llm", "other"] | None = None
 
 
 class OptionDef(BaseModel):
@@ -296,6 +302,8 @@ class ChatResponse(BaseModel):
     model: str
     upstream_model: str | None = None
     response_time_seconds: float
+    retrieval_time_seconds: float | None = None
+    prompt_prepare_time_seconds: float | None = None
     rerank_time_seconds: float | None = None
     generation_time_seconds: float | None = None
 

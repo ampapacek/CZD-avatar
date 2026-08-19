@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 import httpx
+
+from app.analytics import bind_context, current_context, emit, endpoint_host, error_code, estimated_tokens, ms
 
 
 @dataclass(slots=True)
@@ -84,22 +88,35 @@ class OpenAICompatibleLLM(LLMClient):
             model=resolved_model,
             messages=messages,
         )
-        response = httpx.post(
-            f"{resolved_base_url}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=self.timeout,
-        )
+        started = time.perf_counter()
+        response = None
         try:
+            response = httpx.post(
+                f"{resolved_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            message = _extract_error_message(response)
-            raise RuntimeError(_format_http_error(response, message)) from exc
-        data = response.json()
-        return LLMGeneration(
-            answer=data["choices"][0]["message"]["content"].strip(),
-            model=str(data.get("model") or resolved_model),
-        )
+            data = response.json()
+            answer = data["choices"][0]["message"]["content"].strip()
+            upstream_model = str(data.get("model") or resolved_model)
+            _emit_upstream(
+                started, messages, answer, resolved_model, upstream_model, resolved_base_url,
+                streaming=False, status="ok", upstream_http_status=response.status_code,
+            )
+            return LLMGeneration(answer=answer, model=upstream_model)
+        except Exception as exc:
+            status = response.status_code if response is not None else None
+            _emit_upstream(
+                started, messages, "", resolved_model, None, resolved_base_url,
+                streaming=False, status="error", upstream_http_status=status,
+                event_error_code=error_code(exc, status),
+            )
+            if isinstance(exc, httpx.HTTPStatusError) and response is not None:
+                message = _extract_error_message(response)
+                raise RuntimeError(_format_http_error(response, message)) from exc
+            raise
 
     def stream_generate(
         self,
@@ -114,6 +131,7 @@ class OpenAICompatibleLLM(LLMClient):
             base_url=(base_url or self.base_url).rstrip("/"),
             messages=messages,
             timeout=self.timeout,
+            analytics_context=current_context(),
         )
 
 
@@ -148,6 +166,7 @@ class _OpenAICompatibleStream:
         base_url: str,
         messages: list[dict[str, str]],
         timeout: float,
+        analytics_context=None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -155,8 +174,11 @@ class _OpenAICompatibleStream:
         self.messages = messages
         self.timeout = timeout
         self.upstream_model: str | None = None
+        self.analytics_context = analytics_context
 
     def __iter__(self) -> Iterator[str]:
+        started = time.perf_counter()
+        answer_parts: list[str] = []
         payload = _chat_payload(
             model=self.model,
             messages=self.messages,
@@ -169,41 +191,102 @@ class _OpenAICompatibleStream:
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        with httpx.Client(timeout=self.timeout) as client:
-            with client.stream(
+        response = None
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-            ) as response:
-                try:
+                ) as response:
                     response.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    message = _extract_error_message(response)
-                    raise RuntimeError(_format_http_error(response, message)) from exc
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line.removeprefix("data:").strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(data)
+                        except ValueError:
+                            continue
+                        event_model = event.get("model")
+                        if isinstance(event_model, str) and event_model.strip():
+                            self.upstream_model = event_model.strip()
+                        choices = event.get("choices") or []
+                        if not choices:
+                            continue
+                        content = (choices[0].get("delta") or {}).get("content")
+                        if content:
+                            text = str(content)
+                            answer_parts.append(text)
+                            yield text
+            context_manager = bind_context(self.analytics_context) if self.analytics_context else nullcontext()
+            with context_manager:
+                _emit_upstream(
+                    started, self.messages, "".join(answer_parts), self.model,
+                    self.upstream_model or self.model, self.base_url, streaming=True,
+                    status="ok", upstream_http_status=response.status_code if response else None,
+                )
+        except GeneratorExit:
+            context_manager = bind_context(self.analytics_context) if self.analytics_context else nullcontext()
+            with context_manager:
+                _emit_upstream(
+                    started, self.messages, "".join(answer_parts), self.model, self.upstream_model,
+                    self.base_url, streaming=True, status="cancelled",
+                    upstream_http_status=response.status_code if response else None,
+                    event_error_code="client_cancelled",
+                )
+            raise
+        except Exception as exc:
+            status = response.status_code if response is not None else None
+            context_manager = bind_context(self.analytics_context) if self.analytics_context else nullcontext()
+            with context_manager:
+                _emit_upstream(
+                    started, self.messages, "".join(answer_parts), self.model, self.upstream_model,
+                    self.base_url, streaming=True, status="error", upstream_http_status=status,
+                    event_error_code=error_code(exc, status),
+                )
+            if isinstance(exc, httpx.HTTPStatusError) and response is not None:
+                message = _extract_error_message(response)
+                raise RuntimeError(_format_http_error(response, message)) from exc
+            raise
 
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if not line.startswith("data:"):
-                        continue
-                    data = line.removeprefix("data:").strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data)
-                    except ValueError:
-                        continue
-                    event_model = event.get("model")
-                    if isinstance(event_model, str) and event_model.strip():
-                        self.upstream_model = event_model.strip()
-                    choices = event.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if content:
-                        yield str(content)
+
+def _emit_upstream(
+    started: float,
+    messages: list[dict[str, str]],
+    answer: str,
+    requested_model: str,
+    upstream_model: str | None,
+    base_url: str,
+    *,
+    streaming: bool,
+    status: str,
+    upstream_http_status: int | None,
+    event_error_code: str | None = None,
+) -> None:
+    context = current_context()
+    input_text = "\n".join(str(message.get("content") or "") for message in messages)
+    emit(
+        "upstream_call",
+        status=status,
+        duration_ms=ms(time.perf_counter() - started),
+        purpose=context.purpose if context else "other",
+        provider=context.provider if context else None,
+        requested_model=requested_model,
+        upstream_model=upstream_model,
+        endpoint_host=endpoint_host(base_url),
+        key_source=context.key_source if context else ("server" if base_url else "none"),
+        streaming=streaming,
+        upstream_http_status=upstream_http_status,
+        input_chars=len(input_text),
+        input_tokens_estimated=estimated_tokens(input_text),
+        output_chars=len(answer),
+        output_tokens_estimated=estimated_tokens(answer),
+        error_code=event_error_code,
+    )
 
 
 def _extract_error_message(response: httpx.Response) -> str:
