@@ -14,6 +14,7 @@ NOISY_LOGGERS = [
     "sentence_transformers",
     "transformers",
     "urllib3",
+    "watchfiles.main",
 ]
 
 

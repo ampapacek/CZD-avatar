@@ -815,7 +815,7 @@ def transform_query(request: QueryTransformRequest, http_request: Request) -> Qu
     except HTTPException:
         raise
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-        logger.warning("Query transform failed action=%s question=%r: %s", action_id, question, exc)
+        logger.warning("Query transform failed action=%s: %s", action_id, exc)
         raise HTTPException(
             status_code=502,
             detail="Dotaz se nepodařilo upravit. Původní dotaz zůstal beze změny.",
@@ -1508,16 +1508,13 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "generation_time_seconds": round(generation_seconds, 3),
             }
             logger.info(
-                "Streamed answer question=%r retrieval_query=%r answer_question=%r length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer=%s",
-                request.question,
-                retrieval_query,
-                answer_question,
+                "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s",
                 length,
                 resolved_model,
                 elapsed,
                 rerank_seconds,
                 generation_seconds,
-                answer[:280] + ("…" if len(answer) > 280 else ""),
+                len(answer),
             )
             yield _sse_event("done", response)
             event_fields = {
@@ -1548,7 +1545,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 **budget.metadata(),
             )
         except PromptBudgetError as exc:
-            logger.info("Streaming chat rejected by token budget for question=%r: %s", request.question, exc)
+            logger.info("Streaming chat rejected by token budget: %s", exc)
             yield _sse_event("error", {"detail": exc.to_payload()})
             analytics.event(
                 "turn", context, **fields, status="error",
@@ -1557,7 +1554,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 http_status=200, error_code="token_budget",
             )
         except HTTPException as exc:
-            logger.info("Streaming chat rejected for question=%r: %s", request.question, exc.detail)
+            logger.info("Streaming chat rejected: %s", exc.detail)
             yield _sse_event("error", {"detail": exc.detail})
             analytics.event(
                 "turn", context, **fields, status="error",
@@ -1578,7 +1575,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             )
             raise
         except Exception as exc:
-            logger.exception("Streaming chat failed for question=%r", request.question)
+            logger.exception("Streaming chat failed")
             yield _sse_event("error", {"detail": str(exc)})
             analytics.event(
                 "turn", context, **fields, status="error",

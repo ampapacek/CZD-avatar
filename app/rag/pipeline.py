@@ -49,13 +49,6 @@ class RetrievalCandidates:
     resolved_top_k: int = 0
 
 
-def _shorten(text: str, limit: int = 280) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 1].rstrip() + "…"
-
-
 def _clean_retrieval_query(text: str) -> str:
     query = " ".join((text or "").split()).strip()
     if len(query) >= 2 and query[0] == query[-1] and query[0] in {'"', "'", "`"}:
@@ -274,8 +267,7 @@ class RAGPipeline:
         effective_msearch_collection = msearch_collection or self.settings.msearch_collection
         if resolved_top_k <= 0:
             logger.info(
-                "Retrieved 0 chunks for question=%r top_k=%s; retrieval disabled",
-                question,
+                "Retrieved 0 chunks for top_k=%s; retrieval disabled",
                 resolved_top_k,
             )
             return RetrievalCandidates()
@@ -304,9 +296,8 @@ class RAGPipeline:
                 rescore_method="cross_encoder" if resolved_msearch_rescore else None,
             )
             logger.info(
-                "Retrieved %s chunks from mSearch for question=%r top_k=%s candidates=%s collection=%s mode=%s min_confidence=%s rescore=%s",
+                "Retrieved %s chunks from mSearch top_k=%s candidates=%s collection=%s mode=%s min_confidence=%s rescore=%s",
                 len(chunks),
-                question,
                 resolved_top_k,
                 candidate_k,
                 effective_msearch_collection,
@@ -324,9 +315,8 @@ class RAGPipeline:
                 min_relative_score=resolved_min_relative_score,
             )
             logger.info(
-                "Retrieved %s chunks for question=%r top_k=%s dense_weight=%.3f bm25_weight=%.3f min_score=%s min_relative_score=%s",
+                "Retrieved %s chunks top_k=%s dense_weight=%.3f bm25_weight=%.3f min_score=%s min_relative_score=%s",
                 len(chunks),
-                question,
                 resolved_top_k,
                 dense_weight,
                 bm25_weight,
@@ -357,7 +347,7 @@ class RAGPipeline:
             candidates.resolved_top_k,
         )
         if chunks:
-            logger.info(
+            logger.debug(
                 "Top retrieved: %s",
                 [
                     {
@@ -398,16 +388,15 @@ class RAGPipeline:
         elapsed = time.perf_counter() - started
         self._rerank_eta.update(elapsed, texts)
         logger.info(
-            "Reranked %s candidates to %s chunks for question=%r weight=%.2f model=%s elapsed=%.2fs",
+            "Reranked %s candidates to %s chunks weight=%.2f model=%s elapsed=%.2fs",
             len(candidates.candidates),
             len(result),
-            question,
             candidates.rerank_weight,
             self.settings.reranker_model,
             elapsed,
         )
         if result:
-            logger.info(
+            logger.debug(
                 "Top retrieved: %s",
                 [
                     {
@@ -433,10 +422,9 @@ class RAGPipeline:
         started = time.perf_counter()
         reranked = self.reranker.rerank(question, chunks, weight, top_k)
         logger.info(
-            "Reranked %s candidates to %s chunks for question=%r weight=%.2f model=%s elapsed=%.2fs",
+            "Reranked %s candidates to %s chunks weight=%.2f model=%s elapsed=%.2fs",
             len(chunks),
             len(reranked),
-            question,
             weight,
             self.settings.reranker_model,
             time.perf_counter() - started,
@@ -566,14 +554,11 @@ class RAGPipeline:
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
         logger.info(
-            "Generated answer question=%r retrieval_query=%r answer_question=%r length=%s model=%s response_time=%.2fs answer=%s",
-            question,
-            retrieval_query,
-            answer_question,
+            "Generated answer length=%s model=%s response_time=%.2fs answer_chars=%s",
             length,
             resolved_model,
             elapsed,
-            _shorten(answer),
+            len(answer),
         )
         return ChatResponse(
             answer=answer,
@@ -696,7 +681,7 @@ class RAGPipeline:
             with manager:
                 generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
         except Exception as exc:
-            logger.warning("Retrieval query rewrite failed for question=%r: %s", clean_question, exc)
+            logger.warning("Retrieval query rewrite failed: %s", exc)
             return clean_question
 
         rewritten = _clean_retrieval_query(generation.answer)
