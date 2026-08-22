@@ -70,5 +70,7 @@ export function renderCitationOverview(orderedCitationIds, citationMap, escapeHt
   }).filter(Boolean).join("");
 
   if (!items) return "";
-  return `<section class="footnotes"><h4>Poznámky a zdroje</h4><ol>${items}</ol></section>`;
+  // Collapsed by default: the sources panel is citation-ordered too, so this
+  // list stays reachable without duplicating it on screen.
+  return `<section class="footnotes"><details><summary>Poznámky a zdroje</summary><ol>${items}</ol></details></section>`;
 }

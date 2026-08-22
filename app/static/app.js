@@ -265,6 +265,15 @@ let currentRetrievedChunks = [];
 let currentRetrievalQuery = "";
 let currentAnswerQuestion = "";
 let currentOmittedChunks = [];
+// Sources-panel view state (order + uncited visibility). One object per panel,
+// passed into renderSourceCards rather than read from it, so the main panel,
+// conversation mode and history cannot desync.
+let mainSourcesView = Avatar.createSourcesView();
+// null means "not decided yet" — the panel derives the settled view from the
+// stored answer on first render, and keeps whatever the user toggles after that.
+let conversationSourcesView = null;
+// The baseline column is a rank-vs-rank comparison, so it never flips.
+const STATIC_SOURCES_VIEW = Avatar.createSourcesView({ canFlip: false, complete: true });
 let currentBaselineChunks = [];
 let baselineVisible = false;
 // Whether the last query asked mSearch to rescore server-side; drives the small
@@ -1024,6 +1033,8 @@ async function runQuery(retrieveOnlyMode) {
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
+  // `Pouze vyhledat zdroje` produces no answer, so there is nothing to reorder by.
+  mainSourcesView = Avatar.createSourcesView({ canFlip: !retrieveOnlyMode });
   activeCitation = null;
   renderAnswer("");
   sourcesEl.innerHTML = "";
@@ -1070,7 +1081,7 @@ async function runQuery(retrieveOnlyMode) {
       currentRetrievalQuery = data.retrieval_query || currentRetrievalQuery;
       currentBaselineChunks = data.baseline_chunks || [];
       currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
-      renderSources(currentAnswerSources, currentRetrievedChunks, "");
+      completeMainSources(currentAnswerSources, currentRetrievedChunks, "");
       saveHistoryEntry({
         question: question.value,
         mode: "retrieve",
@@ -1152,7 +1163,7 @@ async function runQuery(retrieveOnlyMode) {
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
       currentTokenBudget = data.token_budget || currentTokenBudget;
       currentConversationSummary = data.conversation_summary || currentConversationSummary;
-      renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+      completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       saveHistoryEntry({
         question: question.value,
         mode: "chat",
@@ -4757,18 +4768,47 @@ function renderQueryUsedInfo() {
   }
 }
 
+// Chunks the token budget dropped are shown as ordinary cards inside the
+// uncited group, badged, rather than buried in a separate details block: "the
+// model did not cite it" and "the model never saw it" are different facts.
+function withOmittedChunks(sources, chunks, omittedChunks) {
+  const omitted = omittedChunks || [];
+  return {
+    sources: (sources || []).concat(chunksToSources(omitted)),
+    chunks: (chunks || []).concat(omitted),
+    omittedCitationIds: omitted.map((chunk) => chunk.citation_id).filter(Boolean),
+  };
+}
+
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
   renderQueryUsedInfo();
+  const combined = withOmittedChunks(sources, chunks, currentOmittedChunks);
+  const layout = Avatar.layoutSources(combined.sources, mainSourcesView, {
+    orderedCitationIds: Avatar.extractOrderedCitationIds(answerText),
+    omittedCitationIds: combined.omittedCitationIds,
+  });
   renderSourceCards(
     sourcesEl,
-    sources,
-    chunks,
+    combined.sources,
+    combined.chunks,
     currentRetrievalQuery || question.value,
-    AvatarMarkdown.extractCitationIds(answerText),
+    layout,
     "main-source",
+    (patch) => {
+      mainSourcesView = { ...mainSourcesView, ...patch };
+      renderSources(sources, chunks, answerText);
+    },
   );
   renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
   renderBaselineComparison();
+}
+
+// Settle the main panel once a stream finishes cleanly: flip to citation order
+// and collapse the uncited group. Never called for an aborted or errored stream,
+// where the citation set is incomplete.
+function completeMainSources(sources, chunks, answerText) {
+  mainSourcesView = Avatar.completedSourcesView(mainSourcesView, Avatar.extractOrderedCitationIds(answerText));
+  renderSources(sources, chunks, answerText);
 }
 
 function renderBaselineComparison() {
@@ -4794,7 +4834,7 @@ function renderBaselineComparison() {
       baselineSources,
       currentBaselineChunks,
       currentRetrievalQuery || question.value,
-      new Set(),
+      Avatar.layoutSources(baselineSources, STATIC_SOURCES_VIEW),
       "baseline-source",
     );
   } else {
@@ -4809,13 +4849,52 @@ toggleBaselineBtn.addEventListener("click", () => {
 
 function renderAnswer(text) {
   renderQueryUsedInfo();
-  answerEl.innerHTML = AvatarMarkdown.renderMarkdown(text, currentAnswerSources, "main-source");
-  updateUsedSourceHighlights(sourcesEl, AvatarMarkdown.extractCitationIds(text));
+  answerEl.innerHTML = Avatar.renderMarkdown(text, currentAnswerSources, "main-source");
+  updateUsedSourceHighlights(sourcesEl, Avatar.extractCitationIds(text));
 }
 
 const CITE_TOGGLE_TITLE = "Zvýraznit místa v odpovědi, kde je zdroj citován";
+const SOURCES_PROVISIONAL_ORDER_NOTE =
+  "Zdroje jsou zatím řazené podle relevance vyhledávání; po dokončení odpovědi se seřadí podle citací.";
 
-function renderSourceCards(container, sources, chunks, highlightQuery, usedCitationIds = new Set(), idPrefix = "source") {
+// Top slot of the panel: the provisional-order notice while the answer streams,
+// then either the order toggle or — when nothing was cited — the reason why the
+// panel did not reorder.
+function sourcesOrderControlHtml(layout) {
+  if (layout.showNotice) {
+    return `<p class="sources-order-note">${escapeHtml(SOURCES_PROVISIONAL_ORDER_NOTE)}</p>`;
+  }
+  if (layout.showNoCitationsNotice) {
+    return `<p class="sources-order-note sources-order-note-warning">Odpověď necituje žádný zdroj.</p>`;
+  }
+  if (!layout.showOrderToggle) {
+    return "";
+  }
+  const label =
+    layout.order === Avatar.CITATION_ORDER ? "Seřadit podle relevance" : "Seřadit podle citací";
+  return `<button type="button" class="ghost-button sources-order-toggle">${escapeHtml(label)}</button>`;
+}
+
+// Bottom slot: the uncited group's disclosure. Only meaningful in citation order.
+function sourcesUncitedControlHtml(layout) {
+  if (!layout.showUncitedToggle) {
+    return "";
+  }
+  const label = layout.hiddenCount
+    ? `Zobrazit necitované zdroje (${layout.uncitedCount})`
+    : "Skrýt necitované";
+  return `<button type="button" class="ghost-button sources-uncited-toggle">${escapeHtml(label)}</button>`;
+}
+
+/**
+ * Render one sources panel.
+ *
+ * `layout` comes from `Avatar.layoutSources` and carries the whole view
+ * decision (order, which cards are visible, whether citation numbers show).
+ * `onViewChange` receives a patch for the caller's own view state; panels that
+ * have no controls (the baseline column, history) simply omit it.
+ */
+function renderSourceCards(container, sources, chunks, highlightQuery, layout, idPrefix = "source", onViewChange = null) {
   if (!sources.length) {
     container.textContent = "Žádné zdroje nebyly vráceny.";
     applyCitationHighlights();
@@ -4823,8 +4902,9 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
   }
   const highlightTerms = extractHighlightTerms(highlightQuery);
   const chunkById = new Map((chunks || []).map((chunk) => [chunk.chunk_id, chunk]));
-  container.innerHTML = sources
-    .map((source) => {
+  const cards = layout.visible
+    .map((entry) => {
+      const source = entry.source;
       const chunk = chunkById.get(source.chunk_id);
       const title = escapeHtml(source.title || "Neznámý dokument");
       const path = escapeHtml(source.source_path_display || trimSourcePath(source.source_path || ""));
@@ -4841,15 +4921,19 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       const score = typeof source.score === "number" ? source.score.toFixed(2) : "";
       const dense = typeof chunk?.dense_score === "number" ? ` · emb ${chunk.dense_score.toFixed(2)}` : "";
       const bm25 = typeof chunk?.bm25_score === "number" ? ` · BM25 ${chunk.bm25_score.toFixed(2)}` : "";
-      const citationId = source.citation_id || "";
-      const isUsed = usedCitationIds.has(citationId);
+      const citationId = entry.citationId;
+      const isUsed = entry.cited;
       const usedClass = isUsed ? " used-source" : "";
       const budgetStatus = chunk?.metadata?.budget_status || "";
       const trimmedBadge = budgetStatus === "trimmed" ? `<span class="source-badge">zkráceno pro prompt</span>` : "";
+      // The model never saw this chunk, which is a stronger statement than "did
+      // not cite it" — worth its own badge rather than blending into the group.
+      const omittedBadge = entry.omitted ? `<span class="source-badge">vynecháno z promptu</span>` : "";
       const originalText = chunk?.metadata?.original_text || "";
+      const label = escapeHtml(Avatar.sourceCardLabel(entry, layout.showCitationNumbers));
       return `
         <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
-          <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>[${escapeHtml(citationId)}]</button> ${title} ${trimmedBadge}</strong>
+          <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>${label}</button> ${title} ${trimmedBadge}${omittedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
           <p class="score">score ${score}${dense}${bm25}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
@@ -4873,6 +4957,17 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       `;
     })
     .join("");
+  container.innerHTML = sourcesOrderControlHtml(layout) + cards + sourcesUncitedControlHtml(layout);
+  if (onViewChange) {
+    container.querySelector(".sources-order-toggle")?.addEventListener("click", () => {
+      onViewChange({
+        order: layout.order === Avatar.CITATION_ORDER ? Avatar.RETRIEVED_ORDER : Avatar.CITATION_ORDER,
+      });
+    });
+    container.querySelector(".sources-uncited-toggle")?.addEventListener("click", () => {
+      onViewChange({ showUncited: layout.hiddenCount > 0 });
+    });
+  }
   applyCitationHighlights();
 }
 
@@ -4902,16 +4997,10 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
     `);
   }
   if (omittedChunks.length) {
+    // The chunks themselves render as badged cards in the uncited group; this
+    // only says how many the budget dropped.
     parts.push(`
-      <details class="budget-details">
-        <summary>Neposlané nalezené chunky (${omittedChunks.length})</summary>
-        ${omittedChunks
-          .map((chunk) => {
-            const title = chunk.metadata?.title || chunk.metadata?.source_path || "Neznámý dokument";
-            return `<p><strong>[${escapeHtml(chunk.citation_id)}] ${escapeHtml(title)}</strong><br>${escapeHtml(shortenText(chunk.text || "", 320))}</p>`;
-          })
-          .join("")}
-      </details>
+      <p class="budget-note-line">Token budget vynechal ${omittedChunks.length} nalezených chunků z promptu.</p>
     `);
   }
   if (parts.length) {
@@ -5511,6 +5600,8 @@ function persistActiveConversationSettings() {
 // create/delete). Keeps settings application out of the streaming render path.
 function selectConversation(id) {
   selectedConversationId = id;
+  // Whatever is stored is already final; let the panel settle itself on render.
+  conversationSourcesView = null;
   if (conversationSettingsActive) {
     applyConversationSettings(ensureSelectedConversation());
   }
@@ -5592,15 +5683,38 @@ function renderConversationDetail(conversation) {
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
 
+  renderConversationSourceCards(latestAssistant, latestSources, latestChunks);
+  renderConversationRetrievalInfo(latestAssistant);
+}
+
+// Same panel machinery as the main page, driven by conversationSourcesView so
+// the two cannot drift apart. Split out so the view toggles can re-render just
+// the source column instead of the whole conversation detail.
+function renderConversationSourceCards(latestAssistant, sources, chunks) {
+  const combined = withOmittedChunks(sources, chunks, latestAssistant?.omitted_chunks || []);
+  const orderedCitationIds = Avatar.extractOrderedCitationIds(latestAssistant?.content || "");
+  if (!conversationSourcesView) {
+    conversationSourcesView = Avatar.completedSourcesView(
+      Avatar.createSourcesView({ canFlip: Boolean(latestAssistant) }),
+      orderedCitationIds,
+    );
+  }
+  const layout = Avatar.layoutSources(combined.sources, conversationSourcesView, {
+    orderedCitationIds,
+    omittedCitationIds: combined.omittedCitationIds,
+  });
   renderSourceCards(
     conversationSources,
-    latestSources,
-    latestChunks,
+    combined.sources,
+    combined.chunks,
     conversationRetrievalQuery(latestAssistant, conversationQuestion.value),
-    AvatarMarkdown.extractCitationIds(latestAssistant?.content || ""),
+    layout,
     "conversation-source",
+    (patch) => {
+      conversationSourcesView = { ...conversationSourcesView, ...patch };
+      renderConversationSourceCards(latestAssistant, sources, chunks);
+    },
   );
-  renderConversationRetrievalInfo(latestAssistant);
 }
 
 function conversationOriginalQuestion(message, fallback = "") {
@@ -5663,7 +5777,7 @@ function renderConversationMessage(message) {
   const messageClass = message.role === "assistant" ? "assistant" : "user";
   const body =
     message.role === "assistant"
-      ? AvatarMarkdown.renderMarkdown(message.content || "", message.sources || [], "conversation-source")
+      ? Avatar.renderMarkdown(message.content || "", message.sources || [], "conversation-source")
       : `<p>${escapeHtml(message.content || "")}</p>`;
   const metaParts = [];
   if (message.role === "assistant" && message.model_used) {
@@ -5850,6 +5964,8 @@ async function submitConversationTurn() {
   };
 
   try {
+    // A new turn puts the panel back in retrieved order until the answer settles.
+    conversationSourcesView = Avatar.createSourcesView();
     const handleConversationSources = (data) => {
       latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
       latestChunks = data.retrieved_chunks || [];
@@ -5962,6 +6078,10 @@ async function submitConversationTurn() {
         } else {
           messages.push(assistantMessage);
         }
+        conversationSourcesView = Avatar.completedSourcesView(
+          conversationSourcesView,
+          Avatar.extractOrderedCitationIds(assistantMessage.content || ""),
+        );
         updateConversation({
           ...liveConversation,
           conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
@@ -6635,7 +6755,7 @@ function renderHistorySettingsAndAnswer(entry) {
       entry.answer
         ? `<section class="history-block">
             <h4>Odpověď</h4>
-            <div class="history-answer">${AvatarMarkdown.renderMarkdown(entry.answer, sources, "history-source")}</div>
+            <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
           </section>`
         : ""
     }
@@ -6696,13 +6816,37 @@ function mountHistoryDetailSources(entry) {
   const chunks = entry.retrieved_chunks || [];
   const omittedChunks = entry.omitted_chunks || [];
   const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
-  const usedCitationIds = AvatarMarkdown.extractCitationIds(entry.answer || "");
   const historySources = historyDetail.querySelector("#historySources");
   if (!historySources) {
     return;
   }
   const retrievalQuery = entry.retrieval_query || entry.settings?.retrieval_query || entry.question;
-  renderSourceCards(historySources, sources, chunks, retrievalQuery, usedCitationIds, "history-source");
+  // History replays a finished answer, so it opens directly in the settled
+  // state: citation order, uncited collapsed, no streaming notice.
+  const orderedCitationIds = Avatar.extractOrderedCitationIds(entry.answer || "");
+  let historyView = Avatar.completedSourcesView(
+    Avatar.createSourcesView({ canFlip: entry.mode !== "retrieve" }),
+    orderedCitationIds,
+  );
+  const combined = withOmittedChunks(sources, chunks, omittedChunks);
+  const renderHistorySources = () => {
+    renderSourceCards(
+      historySources,
+      combined.sources,
+      combined.chunks,
+      retrievalQuery,
+      Avatar.layoutSources(combined.sources, historyView, {
+        orderedCitationIds,
+        omittedCitationIds: combined.omittedCitationIds,
+      }),
+      "history-source",
+      (patch) => {
+        historyView = { ...historyView, ...patch };
+        renderHistorySources();
+      },
+    );
+  };
+  renderHistorySources();
   renderBudgetNotes(
     historySources,
     entry.chunk_budget_warnings || [],
@@ -6887,9 +7031,12 @@ function restoreAnswerFromHistoryEntry(entry) {
   currentBaselineChunks = [];
   currentMsearchRescoreUsed = false;
   renderAnswer(streamedAnswerText);
+  // A stored answer is final, so the panel opens in the settled state rather
+  // than replaying the streaming notice.
+  mainSourcesView = Avatar.createSourcesView({ canFlip: entry.mode !== "retrieve" });
   // renderSources internally re-applies renderBudgetNotes from the current* state
   // vars set above, mirroring the live flow.
-  renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+  completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
 }
 
 function formatHistoryTime(timestamp) {

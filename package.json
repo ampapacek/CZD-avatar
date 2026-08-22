@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild frontend/markdown-renderer.js --bundle --minify --format=iife --global-name=AvatarMarkdown --outfile=app/static/markdown-renderer.bundle.js",
+    "build": "esbuild frontend/bundle.js --bundle --minify --format=iife --global-name=Avatar --outfile=app/static/avatar.bundle.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

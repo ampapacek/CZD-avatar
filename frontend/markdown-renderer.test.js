@@ -102,8 +102,8 @@ describe("untrusted and streaming output", () => {
 describe("application integration", () => {
   it("uses the shared renderer for main, conversation, and history answers", () => {
     const appSource = readFileSync("app/static/app.js", "utf8");
-    expect(appSource).toContain('answerEl.innerHTML = AvatarMarkdown.renderMarkdown(text, currentAnswerSources, "main-source")');
-    expect(appSource).toContain('AvatarMarkdown.renderMarkdown(message.content || "", message.sources || [], "conversation-source")');
-    expect(appSource).toContain('AvatarMarkdown.renderMarkdown(entry.answer, sources, "history-source")');
+    expect(appSource).toContain('answerEl.innerHTML = Avatar.renderMarkdown(text, currentAnswerSources, "main-source")');
+    expect(appSource).toContain('Avatar.renderMarkdown(message.content || "", message.sources || [], "conversation-source")');
+    expect(appSource).toContain('Avatar.renderMarkdown(entry.answer, sources, "history-source")');
   });
 });

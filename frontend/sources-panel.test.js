@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  CITATION_ORDER,
+  RETRIEVED_ORDER,
+  completedSourcesView,
+  createSourcesView,
+  extractOrderedCitationIds,
+  layoutSources,
+  sourceCardLabel,
+} from "./sources-panel.js";
+
+const sources = ["Z1", "Z2", "Z3", "Z4"].map((citation_id, index) => ({
+  citation_id,
+  title: `Zdroj ${index + 1}`,
+}));
+
+function idsOf(entries) {
+  return entries.map((entry) => entry.citationId);
+}
+
+describe("extractOrderedCitationIds", () => {
+  it("returns first-appearance order without duplicates", () => {
+    expect(extractOrderedCitationIds("a[^Z3] b[^Z1] c[^Z3] d[^Z2]")).toEqual(["Z3", "Z1", "Z2"]);
+  });
+
+  it("accepts both [^Zn] and [Zn] marker spellings", () => {
+    expect(extractOrderedCitationIds("a[Z2] b[^Z1]")).toEqual(["Z2", "Z1"]);
+  });
+
+  it("ignores ids that only occur in a stripped footnote-definition block", () => {
+    // The answer body never renders those lines, so they must not claim numbers.
+    expect(extractOrderedCitationIds("Věta.[^Z1]\n\n[^Z1]: popis\n[^Z9]: vymyšlené")).toEqual(["Z1"]);
+  });
+
+  it("ignores ids after a model-written Použité zdroje heading", () => {
+    expect(extractOrderedCitationIds("Věta.[^Z1]\n\n## Použité zdroje\n- [Z7] něco")).toEqual(["Z1"]);
+  });
+
+  it("is empty for text without markers", () => {
+    expect(extractOrderedCitationIds("Odpověď bez citací.")).toEqual([]);
+    expect(extractOrderedCitationIds("")).toEqual([]);
+  });
+});
+
+describe("layout while the answer streams", () => {
+  it("keeps retrieved order, every source visible, and no citation numbers", () => {
+    const layout = layoutSources(sources, createSourcesView(), { orderedCitationIds: ["Z3"] });
+    expect(idsOf(layout.visible)).toEqual(["Z1", "Z2", "Z3", "Z4"]);
+    expect(layout.showCitationNumbers).toBe(false);
+    expect(layout.hiddenCount).toBe(0);
+  });
+
+  it("shows the provisional-order notice and no toggles", () => {
+    const layout = layoutSources(sources, createSourcesView(), { orderedCitationIds: ["Z3"] });
+    expect(layout.showNotice).toBe(true);
+    expect(layout.showOrderToggle).toBe(false);
+    expect(layout.showUncitedToggle).toBe(false);
+  });
+});
+
+describe("layout after the answer finishes", () => {
+  const ordered = ["Z3", "Z1"];
+  const view = completedSourcesView(createSourcesView(), ordered);
+
+  it("flips to citation order and hides uncited sources", () => {
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    expect(view.order).toBe(CITATION_ORDER);
+    expect(idsOf(layout.visible)).toEqual(["Z3", "Z1"]);
+    expect(layout.hiddenCount).toBe(2);
+    expect(layout.uncitedCount).toBe(2);
+  });
+
+  it("numbers cited cards the same way the answer numbers its superscripts", () => {
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    expect(layout.visible.map((entry) => entry.citationNumber)).toEqual([1, 2]);
+    expect(layout.showCitationNumbers).toBe(true);
+  });
+
+  it("swaps the notice for the order toggle", () => {
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    expect(layout.showNotice).toBe(false);
+    expect(layout.showOrderToggle).toBe(true);
+    expect(layout.showUncitedToggle).toBe(true);
+  });
+
+  it("keeps the numbers when the user switches back to retrieved order", () => {
+    const back = { ...view, order: RETRIEVED_ORDER };
+    const layout = layoutSources(sources, back, { orderedCitationIds: ordered });
+    expect(idsOf(layout.visible)).toEqual(["Z1", "Z2", "Z3", "Z4"]);
+    expect(layout.visible.map((entry) => entry.citationNumber)).toEqual([2, null, 1, null]);
+    // Relevance order shows the ranking whole, so there is nothing to collapse.
+    expect(layout.hiddenCount).toBe(0);
+    expect(layout.showUncitedToggle).toBe(false);
+  });
+
+  it("keeps the numbers when uncited sources are revealed", () => {
+    const shown = { ...view, showUncited: true };
+    const layout = layoutSources(sources, shown, { orderedCitationIds: ordered });
+    expect(idsOf(layout.visible)).toEqual(["Z3", "Z1", "Z2", "Z4"]);
+    expect(layout.hiddenCount).toBe(0);
+    expect(layout.visible.map((entry) => entry.citationNumber)).toEqual([1, 2, null, null]);
+  });
+});
+
+describe("cases where the flip must not happen", () => {
+  it("stays in retrieved order for an aborted or errored stream", () => {
+    // The stream never completes, so the view state is never marked complete.
+    const layout = layoutSources(sources, createSourcesView(), { orderedCitationIds: ["Z3", "Z1"] });
+    expect(idsOf(layout.visible)).toEqual(["Z1", "Z2", "Z3", "Z4"]);
+    expect(layout.showCitationNumbers).toBe(false);
+  });
+
+  it("stays in retrieved order in retrieve-only mode, with no notice", () => {
+    const view = completedSourcesView(createSourcesView({ canFlip: false }), []);
+    const layout = layoutSources(sources, view, { orderedCitationIds: [] });
+    expect(view.order).toBe(RETRIEVED_ORDER);
+    expect(idsOf(layout.visible)).toEqual(["Z1", "Z2", "Z3", "Z4"]);
+    expect(layout.showNotice).toBe(false);
+    expect(layout.showOrderToggle).toBe(false);
+    expect(layout.showNoCitationsNotice).toBe(false);
+  });
+
+  it("does not flip when the answer cites nothing, and says so", () => {
+    const view = completedSourcesView(createSourcesView(), []);
+    const layout = layoutSources(sources, view, { orderedCitationIds: [] });
+    expect(view.order).toBe(RETRIEVED_ORDER);
+    expect(idsOf(layout.visible)).toEqual(["Z1", "Z2", "Z3", "Z4"]);
+    expect(layout.showNoCitationsNotice).toBe(true);
+    expect(layout.showUncitedToggle).toBe(false);
+  });
+});
+
+describe("edge cases", () => {
+  it("hides the uncited control when every source is cited", () => {
+    const ordered = ["Z4", "Z3", "Z2", "Z1"];
+    const view = completedSourcesView(createSourcesView(), ordered);
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    expect(layout.showUncitedToggle).toBe(false);
+    expect(layout.uncitedCount).toBe(0);
+    expect(idsOf(layout.visible)).toEqual(ordered);
+  });
+
+  it("ignores a citation of an id that was never retrieved", () => {
+    const ordered = ["Z9", "Z2"];
+    const view = completedSourcesView(createSourcesView(), ordered);
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    // Z9 is unknown, so Z2 is citation number 1 — matching the answer, where the
+    // markdown plugin renders [Z9] as literal text rather than a superscript.
+    expect(layout.visible.map((entry) => [entry.citationId, entry.citationNumber])).toEqual([["Z2", 1]]);
+  });
+
+  it("marks budget-omitted sources so they can carry their own badge", () => {
+    const ordered = ["Z1"];
+    const view = completedSourcesView(createSourcesView(), ordered);
+    const layout = layoutSources(sources, { ...view, showUncited: true }, {
+      orderedCitationIds: ordered,
+      omittedCitationIds: ["Z4"],
+    });
+    const omitted = layout.entries.filter((entry) => entry.omitted).map((entry) => entry.citationId);
+    expect(omitted).toEqual(["Z4"]);
+  });
+
+  it("survives an empty source list", () => {
+    const layout = layoutSources([], createSourcesView(), { orderedCitationIds: [] });
+    expect(layout.visible).toEqual([]);
+    expect(layout.showNoCitationsNotice).toBe(false);
+  });
+});
+
+describe("sourceCardLabel", () => {
+  it("shows citation number and retrieval rank for a cited card", () => {
+    expect(sourceCardLabel({ cited: true, citationNumber: 2, citationId: "Z7" }, true)).toBe("[2] · Z7");
+  });
+
+  it("shows the retrieval rank alone for an uncited card", () => {
+    expect(sourceCardLabel({ cited: false, citationNumber: null, citationId: "Z7" }, true)).toBe("[Z7]");
+  });
+
+  it("shows the retrieval rank alone before the answer settles", () => {
+    expect(sourceCardLabel({ cited: true, citationNumber: 1, citationId: "Z7" }, false)).toBe("[Z7]");
+  });
+});

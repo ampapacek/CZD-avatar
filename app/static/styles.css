@@ -1892,9 +1892,12 @@ button:hover {
   border-top: 1px solid var(--line);
 }
 
-.footnotes h4 {
-  margin: 0 0 0.75rem;
+.footnotes summary {
+  cursor: pointer;
+  margin-bottom: 0.75rem;
   font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .footnotes ol {
@@ -2124,6 +2127,32 @@ body[data-theme="dark"] .source-highlight {
   white-space: pre-wrap;
   overflow: visible;
   overflow-wrap: anywhere;
+}
+
+/* Sources panel: order notice / toggles.
+   The panel is a grid, so these controls are grid children like the cards. The
+   order control is the first child, the uncited disclosure the last. */
+.sources-order-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted, var(--text));
+}
+
+.sources-order-note-warning {
+  color: var(--warn);
+  font-weight: 650;
+}
+
+.sources-order-toggle,
+.sources-uncited-toggle {
+  justify-self: start;
+}
+
+.budget-note-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted, var(--text));
 }
 
 .budget-note,
