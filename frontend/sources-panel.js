@@ -149,3 +149,44 @@ export function sourceCardLabel(entry, showCitationNumbers) {
   }
   return `[${entry.citationId}]`;
 }
+
+export const SEMANTIC_CHANNEL_LABEL = "sémanticky";
+export const KEYWORD_CHANNEL_LABEL = "klíčová slova";
+
+function scoreComponent(value) {
+  return typeof value === "number" ? value : null;
+}
+
+/**
+ * The diagnostics parts of one card: `["score 0.48", "emb 0.61", "BM25 0.22"]`.
+ *
+ * Local hybrid retrieval normalizes both channels and blends them, so all three
+ * numbers differ and all three are worth showing. mSearch is different: it
+ * returns one score per hit and copies it into whichever channel found the
+ * document, leaving the other one absent — so `score 0.53 · BM25 0.53` printed
+ * the same number twice. The only information there is *which* channel found
+ * it, so name the channel instead of repeating the number.
+ */
+export function sourceScoreParts(source, chunk) {
+  const score = scoreComponent(source?.score);
+  const dense = scoreComponent(chunk?.dense_score);
+  const bm25 = scoreComponent(chunk?.bm25_score);
+  const parts = [score === null ? "score" : `score ${score.toFixed(2)}`];
+  const onlyDense = dense !== null && bm25 === null;
+  const onlyBm25 = bm25 !== null && dense === null;
+  if (score !== null && onlyDense && dense === score) {
+    parts.push(SEMANTIC_CHANNEL_LABEL);
+    return parts;
+  }
+  if (score !== null && onlyBm25 && bm25 === score) {
+    parts.push(KEYWORD_CHANNEL_LABEL);
+    return parts;
+  }
+  if (dense !== null) {
+    parts.push(`emb ${dense.toFixed(2)}`);
+  }
+  if (bm25 !== null) {
+    parts.push(`BM25 ${bm25.toFixed(2)}`);
+  }
+  return parts;
+}

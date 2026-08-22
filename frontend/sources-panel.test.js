@@ -8,6 +8,7 @@ import {
   extractOrderedCitationIds,
   layoutSources,
   sourceCardLabel,
+  sourceScoreParts,
 } from "./sources-panel.js";
 
 const sources = ["Z1", "Z2", "Z3", "Z4"].map((citation_id, index) => ({
@@ -179,5 +180,55 @@ describe("sourceCardLabel", () => {
 
   it("shows the retrieval rank alone before the answer settles", () => {
     expect(sourceCardLabel({ cited: true, citationNumber: 1, citationId: "Z7" }, false)).toBe("[Z7]");
+  });
+});
+
+describe("sourceScoreParts", () => {
+  it("keeps all three numbers for local hybrid retrieval", () => {
+    // Both channels are always set locally (0.0 for a channel that missed), and
+    // `score` is their weighted blend, so the three numbers say three things.
+    expect(sourceScoreParts({ score: 0.48 }, { dense_score: 0.61, bm25_score: 0.22 })).toEqual([
+      "score 0.48",
+      "emb 0.61",
+      "BM25 0.22",
+    ]);
+  });
+
+  it("keeps the numbers when one local channel missed the document", () => {
+    expect(sourceScoreParts({ score: 0.43 }, { dense_score: 0.61, bm25_score: 0 })).toEqual([
+      "score 0.43",
+      "emb 0.61",
+      "BM25 0.00",
+    ]);
+  });
+
+  it("names the channel for an mSearch semantic hit instead of repeating the score", () => {
+    expect(sourceScoreParts({ score: 0.53 }, { dense_score: 0.53, bm25_score: null })).toEqual([
+      "score 0.53",
+      "sémanticky",
+    ]);
+  });
+
+  it("names the channel for an mSearch keyword hit", () => {
+    expect(sourceScoreParts({ score: 0.53 }, { dense_score: null, bm25_score: 0.53 })).toEqual([
+      "score 0.53",
+      "klíčová slova",
+    ]);
+  });
+
+  it("still prints a lone component that differs from the score", () => {
+    expect(sourceScoreParts({ score: 0.4 }, { dense_score: 0.53, bm25_score: null })).toEqual([
+      "score 0.40",
+      "emb 0.53",
+    ]);
+  });
+
+  it("survives a missing chunk and a missing score", () => {
+    expect(sourceScoreParts({ score: 0.53 }, undefined)).toEqual(["score 0.53"]);
+    expect(sourceScoreParts({}, { dense_score: 0.61, bm25_score: 0.22 })).toEqual([
+      "score",
+      "emb 0.61",
+      "BM25 0.22",
+    ]);
   });
 });

@@ -5085,9 +5085,7 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
       const excerpt = highlightText(excerptText, highlightTerms);
       const fullChunk = highlightText(fullText, highlightTerms);
       const canExpand = fullText.length > 420;
-      const score = typeof source.score === "number" ? source.score.toFixed(2) : "";
-      const dense = typeof chunk?.dense_score === "number" ? ` · emb ${chunk.dense_score.toFixed(2)}` : "";
-      const bm25 = typeof chunk?.bm25_score === "number" ? ` · BM25 ${chunk.bm25_score.toFixed(2)}` : "";
+      const scoreLine = Avatar.sourceScoreParts(source, chunk).join(" · ");
       const citationId = entry.citationId;
       const isUsed = entry.cited;
       const usedClass = isUsed ? " used-source" : "";
@@ -5102,7 +5100,7 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
         <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
           <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>${label}</button> ${title} ${trimmedBadge}${omittedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
-          <p class="score">score ${score}${dense}${bm25}</p>
+          <p class="score">${escapeHtml(scoreLine)}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
           ${
             canExpand
