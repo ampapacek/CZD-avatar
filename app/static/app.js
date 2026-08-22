@@ -5469,6 +5469,10 @@ function createConversation() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     conversation_summary: "",
+    // How many leading messages the server has already folded into
+    // conversation_summary. They stay on screen but are no longer uploaded, so
+    // the running context shrinks instead of growing forever.
+    conversation_compacted_through: 0,
     rewrite_query_for_retrieval: true,
     // New conversations inherit the main page's current settings, then own them.
     settings: currentMainSettings(),
@@ -5964,7 +5968,12 @@ function renderConversationContextStatus(message) {
       : budget
         ? "bez zdrojových chunků"
         : "stav kontextu";
-  const compressionText = budget?.conversation_summary_used || summary ? "komprese zapnutá" : "bez komprese";
+  const foldedMessages = Number(message?.conversation_compacted_through) || 0;
+  const compressionText = foldedMessages
+    ? `${foldedMessages} starších zpráv ve shrnutí`
+    : budget?.conversation_summary_used || summary
+      ? "komprese zapnutá"
+      : "bez komprese";
   const visibleParts = [sourceText, compressionText];
   if (trimmedChunks > 0) {
     visibleParts.push(`${trimmedChunks} zkráceno`);
@@ -5998,6 +6007,7 @@ function renderConversationContextStatus(message) {
         ["Vynechané chunky", omittedChunks],
         ["Zkrácené chunky", trimmedChunks],
         ["Komprese konverzace", budget.conversation_summary_used || summary ? "ano" : "ne"],
+        ["Zprávy složené do shrnutí", foldedMessages],
       ]
     : [["Komprese konverzace", "ano"]];
   const detailTable = detailRows
@@ -6079,11 +6089,12 @@ async function submitConversationTurn() {
   // Build the payload from the conversation's own settings rather than the live
   // main-page controls, so each turn uses the settings this conversation owns.
   const convSettings = conversationSettingsFor(conversation);
+  const compactedThrough = Number(conversation.conversation_compacted_through) || 0;
   const payload = buildRequestPayload({
     question: prompt,
     conversation_summary: conversation.conversation_summary || null,
     rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-    conversation_history: conversation.messages.map((message) => ({
+    conversation_history: conversation.messages.slice(compactedThrough).map((message) => ({
       role: message.role,
       content: message.content,
     })),
@@ -6211,6 +6222,7 @@ async function submitConversationTurn() {
           token_budget: data.token_budget || null,
           chunk_budget_warnings: data.chunk_budget_warnings || [],
           conversation_summary: data.conversation_summary || null,
+          conversation_compacted_through: compactedThrough + (Number(data.conversation_folded_message_count) || 0),
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
@@ -6225,9 +6237,13 @@ async function submitConversationTurn() {
           conversationSourcesView,
           Avatar.extractOrderedCitationIds(assistantMessage.content || ""),
         );
+        // The server folded this many of the messages we uploaded, so stop
+        // uploading them. The marker only ever moves forward.
+        const foldedNow = Number(data.conversation_folded_message_count) || 0;
         updateConversation({
           ...liveConversation,
           conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
+          conversation_compacted_through: compactedThrough + foldedNow,
           rewrite_query_for_retrieval: rewriteQueryForRetrieval,
           updatedAt: new Date().toISOString(),
           messages,

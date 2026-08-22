@@ -6,12 +6,20 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import Settings
-from app.rag.prompts import PlaceholderDef, build_messages, format_context
+from app.rag.prompts import (
+    DEFAULT_CONVERSATION_PROMPT_MESSAGES,
+    PlaceholderDef,
+    build_messages,
+    format_context,
+)
 
 try:
     import tiktoken
 except Exception:  # pragma: no cover - exercised only when dependency is unavailable
     tiktoken = None
+
+
+DEFAULT_CONVERSATION_RECENT_MESSAGES = 6
 
 
 class PromptBudgetError(RuntimeError):
@@ -54,6 +62,10 @@ class PromptBudgetConfig:
     min_prompt_chunks: int
     token_budget_safety_margin: float
     conversation_summary_trigger_tokens: int
+    # Defaults so callers that build a config by hand (tests, scripts) do not
+    # have to know about compaction; `from_settings` always fills them in.
+    conversation_recent_messages: int = DEFAULT_CONVERSATION_RECENT_MESSAGES
+    conversation_prompt_messages: int = DEFAULT_CONVERSATION_PROMPT_MESSAGES
 
     @classmethod
     def from_settings(
@@ -67,6 +79,8 @@ class PromptBudgetConfig:
         min_prompt_chunks: int | None = None,
         token_budget_safety_margin: float | None = None,
         conversation_summary_trigger_tokens: int | None = None,
+        conversation_recent_messages: int | None = None,
+        conversation_prompt_messages: int | None = None,
     ) -> "PromptBudgetConfig":
         return cls(
             context_window_tokens=context_window_tokens or settings.context_window_tokens,
@@ -81,6 +95,12 @@ class PromptBudgetConfig:
             ),
             conversation_summary_trigger_tokens=(
                 conversation_summary_trigger_tokens or settings.conversation_summary_trigger_tokens
+            ),
+            conversation_recent_messages=(
+                conversation_recent_messages or settings.conversation_recent_messages
+            ),
+            conversation_prompt_messages=(
+                conversation_prompt_messages or settings.conversation_prompt_messages
             ),
         )
 
@@ -157,16 +177,20 @@ def prepare_prompt_budget(
     placeholder_defs: dict[str, "PlaceholderDef"] | None = None,
     selections: dict[str, str] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
+    conversation_summary: str | None = None,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
 ) -> PromptBudgetResult:
     empty_context = ""
+    history_limit = config.conversation_prompt_messages
     non_source_messages = build_messages(
         question,
         [],
         placeholder_defs,
         selections,
         conversation_history=conversation_history,
+        conversation_summary=conversation_summary,
+        history_limit=history_limit,
         system_prompt=system_prompt,
         user_prompt_template=user_prompt_template,
         context_text=empty_context,
@@ -174,7 +198,7 @@ def prepare_prompt_budget(
     usable_input = config.usable_input_tokens(length)
     reserved_output = config.output_budget_for_length(length)
     non_source_tokens = estimate_messages_tokens(non_source_messages, model)
-    history_tokens = estimate_history_tokens_for_prompt(conversation_history, model)
+    history_tokens = estimate_history_tokens_for_prompt(conversation_history, model, history_limit)
     if non_source_tokens > usable_input:
         over_by = non_source_tokens - usable_input
         raise PromptBudgetError(
@@ -210,6 +234,8 @@ def prepare_prompt_budget(
         placeholder_defs,
         selections,
         conversation_history=conversation_history,
+        conversation_summary=conversation_summary,
+        history_limit=history_limit,
         system_prompt=system_prompt,
         user_prompt_template=user_prompt_template,
         context_text=context_text,
@@ -240,8 +266,12 @@ def prepare_prompt_budget(
     )
 
 
-def estimate_history_tokens_for_prompt(history: list[dict[str, str]] | None, model: str | None = None) -> int:
-    messages = _history_messages_for_prompt(history)
+def estimate_history_tokens_for_prompt(
+    history: list[dict[str, str]] | None,
+    model: str | None = None,
+    limit: int = DEFAULT_CONVERSATION_PROMPT_MESSAGES,
+) -> int:
+    messages = _history_messages_for_prompt(history, limit)
     if not messages:
         return 0
     return sum(
@@ -261,23 +291,29 @@ def conversation_history_tokens(history: list[dict[str, str]] | None, model: str
     return estimate_messages_tokens(messages, model) if messages else 0
 
 
-def summarized_history(summary: str, history: list[dict[str, str]] | None, recent_turns: int = 6) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
-    clean_summary = summary.strip()
-    if clean_summary:
-        result.append(
-            {
-                "role": "assistant",
-                "content": f"Shrnutí předchozí konverzace pro navazující odpověď:\n{clean_summary}",
-            }
-        )
-    result.extend((history or [])[-recent_turns:])
-    return result
+def conversation_summary_message(summary: str | None) -> dict[str, str] | None:
+    """The rolling summary as one prompt message, or None if there is none.
+
+    It is passed to the prompt separately from the history so it can never be
+    pushed out by the message cap: dropping the summary would silently discard
+    everything the conversation has already folded into it.
+    """
+
+    clean_summary = (summary or "").strip()
+    if not clean_summary:
+        return None
+    return {
+        "role": "assistant",
+        "content": f"Shrnutí předchozí konverzace pro navazující odpověď:\n{clean_summary}",
+    }
 
 
-def _history_messages_for_prompt(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+def _history_messages_for_prompt(
+    history: list[dict[str, str]] | None,
+    limit: int = DEFAULT_CONVERSATION_PROMPT_MESSAGES,
+) -> list[dict[str, str]]:
     messages = []
-    for turn in (history or [])[-8:]:
+    for turn in (history or [])[-limit:]:
         role = turn.get("role")
         content = (turn.get("content") or "").strip()
         if role in {"user", "assistant"} and content:

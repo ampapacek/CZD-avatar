@@ -299,6 +299,9 @@ class ChatResponse(BaseModel):
     token_budget: TokenBudgetMetadata | None = None
     chunk_budget_warnings: list[str] = Field(default_factory=list)
     conversation_summary: str | None = None
+    # How many of the uploaded history messages this turn folded into the
+    # summary. The client drops that many so the next upload is smaller.
+    conversation_folded_message_count: int = 0
     model: str
     upstream_model: str | None = None
     response_time_seconds: float

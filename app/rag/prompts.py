@@ -11,6 +11,10 @@ from typing import Any
 # from request data; ``{current_date}`` is the server-local date.
 SYSTEM_PLACEHOLDERS = frozenset({"question", "retrieved_snippets", "current_date"})
 
+# Fallback cap on history messages in the prompt for callers without settings;
+# the configured value is `Settings.conversation_prompt_messages`.
+DEFAULT_CONVERSATION_PROMPT_MESSAGES = 8
+
 
 @dataclass(frozen=True)
 class OptionDef:
@@ -124,6 +128,8 @@ def build_messages(
     placeholder_defs: dict[str, PlaceholderDef] | None = None,
     selections: dict[str, str] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
+    conversation_summary: str | None = None,
+    history_limit: int = DEFAULT_CONVERSATION_PROMPT_MESSAGES,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
     context_text: str | None = None,
@@ -150,7 +156,17 @@ def build_messages(
     )
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-    for turn in (conversation_history or [])[-8:]:
+    # The rolling summary stands for every turn already folded away, so it goes
+    # in ahead of the history and is never subject to `history_limit`.
+    clean_summary = (conversation_summary or "").strip()
+    if clean_summary:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": f"Shrnutí předchozí konverzace pro navazující odpověď:\n{clean_summary}",
+            }
+        )
+    for turn in (conversation_history or [])[-history_limit:]:
         role = turn.get("role")
         content = (turn.get("content") or "").strip()
         if role not in {"user", "assistant"} or not content:

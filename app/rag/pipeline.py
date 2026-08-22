@@ -25,11 +25,25 @@ from app.rag.token_budget import (
     PromptBudgetConfig,
     conversation_history_tokens,
     prepare_prompt_budget,
-    summarized_history,
 )
 from app.rag.vector_store import QdrantVectorStore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationContext:
+    """What one turn sends of the conversation, and what the client should drop.
+
+    ``folded_message_count`` is how many of the uploaded messages were folded
+    into ``summary`` on this turn. The client advances its own compaction marker
+    by that many so it stops uploading them.
+    """
+
+    history: list[dict[str, str]]
+    summary: str | None = None
+    folded_message_count: int = 0
+    warning: str | None = None
 
 
 @dataclass
@@ -482,7 +496,7 @@ class RAGPipeline:
             token_budget_safety_margin=token_budget_safety_margin,
             conversation_summary_trigger_tokens=conversation_summary_trigger_tokens,
         )
-        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+        conversation = self._resolve_conversation_context(
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=resolved_model,
@@ -535,13 +549,14 @@ class RAGPipeline:
             config=budget_config,
             placeholder_defs=placeholder_defs,
             selections=selections,
-            conversation_history=effective_history,
+            conversation_history=conversation.history,
+            conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
         )
-        if summary_warning:
-            budget.warnings.append(summary_warning)
-        budget.conversation_summary_used = bool(effective_summary)
+        if conversation.warning:
+            budget.warnings.append(conversation.warning)
+        budget.conversation_summary_used = bool(conversation.summary)
         prompt_prepare_seconds = time.perf_counter() - prompt_prepare_started
         generation_started = time.perf_counter()
         generation = self.llm.generate(
@@ -574,7 +589,8 @@ class RAGPipeline:
             baseline_chunks=[_retrieved_chunk_from_record(chunk) for chunk in baseline_retrieved],
             token_budget=budget.metadata(),
             chunk_budget_warnings=budget.warnings,
-            conversation_summary=effective_summary,
+            conversation_summary=conversation.summary,
+            conversation_folded_message_count=conversation.folded_message_count,
             model=resolved_model,
             upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),
@@ -602,7 +618,7 @@ class RAGPipeline:
         budget_config: PromptBudgetConfig | None = None,
     ):
         resolved_config = budget_config or PromptBudgetConfig.from_settings(self.settings)
-        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+        conversation = self._resolve_conversation_context(
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=model,
@@ -618,14 +634,15 @@ class RAGPipeline:
             config=resolved_config,
             placeholder_defs=placeholder_defs,
             selections=selections,
-            conversation_history=effective_history,
+            conversation_history=conversation.history,
+            conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
         )
-        if summary_warning:
-            budget.warnings.append(summary_warning)
-        budget.conversation_summary_used = bool(effective_summary)
-        return budget, effective_summary
+        if conversation.warning:
+            budget.warnings.append(conversation.warning)
+        budget.conversation_summary_used = bool(conversation.summary)
+        return budget, conversation
 
     def rewrite_query_for_retrieval(
         self,
@@ -705,52 +722,108 @@ class RAGPipeline:
         budget_config: PromptBudgetConfig,
         api_key: str | None,
         base_url: str | None,
-    ) -> tuple[list[dict[str, str]], str | None, str | None]:
-        clean_summary = (conversation_summary or "").strip()
+    ) -> ConversationContext:
+        """Decide what of the conversation goes into this turn's prompt.
+
+        The client uploads only the messages that have not been folded into the
+        summary yet, so `history` is the live tail. While that tail is under the
+        trigger, nothing happens: the existing summary and the whole tail are
+        used as they are, and no summarisation call is made.
+
+        Once the tail crosses the trigger, everything except the last
+        `conversation_recent_messages` is folded into the summary and reported
+        back as `folded_message_count`. The client drops exactly that many
+        messages from what it uploads next time, so the running context actually
+        shrinks instead of the summary being rebuilt from a transcript that only
+        ever grows.
+        """
+
+        clean_summary = (conversation_summary or "").strip() or None
         history_tokens = conversation_history_tokens(history, model)
-        if clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
-            return summarized_history(clean_summary, history), clean_summary, None
-        if not clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
-            return history, None, None
+        if history_tokens < budget_config.conversation_summary_trigger_tokens:
+            return ConversationContext(history=history, summary=clean_summary)
+
+        keep = budget_config.conversation_recent_messages
+        to_fold = history[:-keep] if keep else list(history)
+        if not to_fold:
+            # The tail is over the trigger but is nothing but recent messages;
+            # folding would throw away context the model still needs verbatim.
+            return ConversationContext(history=history, summary=clean_summary)
+
         try:
-            summary = self._summarize_conversation(history, model=model, api_key=api_key, base_url=base_url)
+            summary = self._summarize_conversation(
+                to_fold,
+                previous_summary=clean_summary,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+            )
         except Exception as exc:
+            # Compaction is an optimisation: on failure fall back to sending the
+            # tail as it is rather than losing the turn.
             if clean_summary:
-                return (
-                    summarized_history(clean_summary, history),
-                    clean_summary,
-                    f"Conversation compression failed; the previous compressed summary was used instead: {exc}",
+                return ConversationContext(
+                    history=history,
+                    summary=clean_summary,
+                    warning=(
+                        "Conversation compression failed; the previous compressed summary "
+                        f"was used instead: {exc}"
+                    ),
                 )
-            return history, None, f"Conversation compression failed; raw recent history was used instead: {exc}"
-        return summarized_history(summary, history), summary, None
+            return ConversationContext(
+                history=history,
+                summary=None,
+                warning=f"Conversation compression failed; raw recent history was used instead: {exc}",
+            )
+
+        return ConversationContext(
+            history=history[-keep:],
+            summary=summary,
+            folded_message_count=len(to_fold),
+        )
 
     def _summarize_conversation(
         self,
-        history: list[dict[str, str]],
+        messages_to_fold: list[dict[str, str]],
         *,
+        previous_summary: str | None,
         model: str,
         api_key: str | None,
         base_url: str | None,
     ) -> str:
+        """Fold `messages_to_fold` into `previous_summary` and return the result.
+
+        Incremental on purpose: the model sees the summary so far plus only the
+        turns being folded now, not the whole transcript. Cost stays flat as the
+        conversation grows, and nothing already folded is re-read.
+        """
+
         turns = []
-        for turn in history:
+        for turn in messages_to_fold:
             role = turn.get("role")
             content = (turn.get("content") or "").strip()
             if role in {"user", "assistant"} and content:
                 label = "Uživatel" if role == "user" else "Avatar"
                 turns.append(f"{label}: {content}")
+        sections = []
+        if previous_summary:
+            sections.append(f"Dosavadní shrnutí:\n{previous_summary}")
+        sections.append("Nové zprávy k zahrnutí:\n" + "\n\n".join(turns))
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "Compress the conversation for a RAG assistant. Preserve user preferences, unresolved "
-                    "references, named entities, constraints, and commitments from previous answers. Do not "
-                    "invent facts. Write a concise Czech summary unless the conversation is clearly in another language."
+                    "Compress the conversation for a RAG assistant. You are given the summary so far "
+                    "(may be empty) and the new messages to fold into it. Return one merged summary that "
+                    "replaces the previous one; keep everything from the previous summary that is still "
+                    "relevant. Preserve user preferences, unresolved references, named entities, "
+                    "constraints, and commitments from previous answers. Do not invent facts. Write a "
+                    "concise Czech summary unless the conversation is clearly in another language."
                 ),
             },
             {
                 "role": "user",
-                "content": "\n\n".join(turns),
+                "content": "\n\n".join(sections),
             },
         ]
         context = current_context()

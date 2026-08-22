@@ -1425,7 +1425,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
             )
             with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="conversation_summary"):
-                budget, conversation_summary = pipeline.build_chat_prompt(
+                budget, conversation = pipeline.build_chat_prompt(
                     question=answer_question,
                 retrieved=retrieved,
                 length=length,
@@ -1457,7 +1457,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                     "token_budget": budget.metadata(),
                     "chunk_budget_warnings": budget.warnings,
-                    "conversation_summary": conversation_summary,
+                    "conversation_summary": conversation.summary,
+                    "conversation_folded_message_count": conversation.folded_message_count,
                 },
             )
             answer_parts: list[str] = []
@@ -1503,7 +1504,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "baseline_chunks": baseline_payload,
                 "token_budget": budget.metadata(),
                 "chunk_budget_warnings": budget.warnings,
-                "conversation_summary": conversation_summary,
+                "conversation_summary": conversation.summary,
+                "conversation_folded_message_count": conversation.folded_message_count,
                 "model": resolved_model,
                 "upstream_model": upstream_model,
                 "response_time_seconds": round(elapsed, 3),
