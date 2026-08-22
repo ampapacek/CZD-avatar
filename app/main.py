@@ -1300,7 +1300,8 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
                 use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
                 reasoning=_reasoning_payload(resolved_model, resolved_provider, request.reasoning_effort),
             )
-        budget = response.token_budget or {}
+        # A pydantic model, not a mapping — analytics splats it as kwargs.
+        budget = response.token_budget.model_dump() if response.token_budget else {}
         event_fields = {
             **fields,
             "retrieval_query_was_rewritten": response.retrieval_query_was_rewritten,
