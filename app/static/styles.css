@@ -2171,6 +2171,42 @@ body[data-theme="dark"] .source-highlight {
   line-height: 1.45;
 }
 
+.budget-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-table th,
+.budget-table td {
+  padding: 2px 0;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.budget-table th {
+  text-align: left;
+}
+
+.budget-table td {
+  text-align: right;
+}
+
+/* Separates each block's running total from the lines it sums. */
+.budget-table .budget-row-subtotal th,
+.budget-table .budget-row-subtotal td {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  font-weight: 700;
+}
+
+.budget-table tbody + tbody th,
+.budget-table tbody + tbody td {
+  padding-top: 10px;
+}
+
 .budget-details summary {
   cursor: pointer;
   color: var(--accent);

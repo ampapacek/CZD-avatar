@@ -4971,6 +4971,61 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
   applyCitationHighlights();
 }
 
+// The token budget as a subtraction the reader can follow: the context window
+// is what the model has, the output reserve comes off the top, and the rest is
+// what the prompt is allowed to fill. The old one-line version listed the same
+// four numbers in an order that implied no relationship between them.
+function tokenBudgetRow(label, value, { kind = "" } = {}) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const className = kind ? ` class="budget-row-${kind}"` : "";
+  return `<tr${className}><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(formatTokenCount(value))}</td></tr>`;
+}
+
+function renderTokenBudgetDetails(tokenBudget) {
+  if (!tokenBudget) {
+    return "";
+  }
+  const contextWindow = tokenBudget.context_window_tokens ?? null;
+  const reservedOutput = tokenBudget.reserved_output_tokens ?? null;
+  const usableInput = tokenBudget.usable_input_tokens ?? null;
+  const totalInput = tokenBudget.estimated_total_input_tokens ?? null;
+  const share =
+    usableInput && totalInput ? Math.round((totalInput / usableInput) * 100) : null;
+  const headline =
+    totalInput !== null && usableInput !== null
+      ? `Tokenový rozpočet · ${formatTokenCount(totalInput)} z ${formatTokenCount(usableInput)} tokenů vstupu${share !== null ? ` (${share} %)` : ""}`
+      : "Tokenový rozpočet";
+
+  const chunkCounts = [
+    tokenBudget.used_chunk_count ? `${tokenBudget.used_chunk_count} v promptu` : "",
+    tokenBudget.trimmed_chunk_count ? `${tokenBudget.trimmed_chunk_count} zkráceno` : "",
+    tokenBudget.omitted_chunk_count ? `${tokenBudget.omitted_chunk_count} vynecháno` : "",
+  ].filter(Boolean);
+
+  return `
+    <details class="budget-details">
+      <summary>${escapeHtml(headline)}</summary>
+      <table class="budget-table">
+        <tbody>
+          ${tokenBudgetRow("Kontextové okno", contextWindow)}
+          ${tokenBudgetRow("− rezerva na odpověď", reservedOutput)}
+          ${tokenBudgetRow("= k dispozici pro vstup", usableInput, { kind: "subtotal" })}
+        </tbody>
+        <tbody>
+          ${tokenBudgetRow("Prompt bez zdrojů", tokenBudget.estimated_non_source_tokens)}
+          ${tokenBudgetRow("Historie konverzace", tokenBudget.estimated_conversation_history_tokens)}
+          ${tokenBudgetRow("Nalezené zdroje", tokenBudget.estimated_source_tokens)}
+          ${tokenBudgetRow("= vstup celkem", totalInput, { kind: "subtotal" })}
+        </tbody>
+      </table>
+      ${chunkCounts.length ? `<p class="budget-note-line">Zdroje: ${escapeHtml(chunkCounts.join(" · "))}.</p>` : ""}
+      ${tokenBudget.conversation_summary_used ? `<p class="budget-note-line">Historie konverzace je poslána jako shrnutí.</p>` : ""}
+    </details>
+  `;
+}
+
 function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBudget = null, conversationSummary = "") {
   const parts = [];
   if (warnings.length) {
@@ -4980,13 +5035,9 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
       </div>
     `);
   }
-  if (tokenBudget) {
-    parts.push(`
-      <details class="budget-details">
-        <summary>Tokenový rozpočet</summary>
-        <p>Prompt bez zdrojů: ${escapeHtml(tokenBudget.estimated_non_source_tokens ?? "?")} tokenů · zdroje: ${escapeHtml(tokenBudget.estimated_source_tokens ?? "?")} · rezerva odpovědi: ${escapeHtml(tokenBudget.reserved_output_tokens ?? "?")} · window: ${escapeHtml(tokenBudget.context_window_tokens ?? "?")}</p>
-      </details>
-    `);
+  const tokenBudgetHtml = renderTokenBudgetDetails(tokenBudget);
+  if (tokenBudgetHtml) {
+    parts.push(tokenBudgetHtml);
   }
   if (conversationSummary) {
     parts.push(`
