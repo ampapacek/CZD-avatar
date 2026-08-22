@@ -23,7 +23,11 @@ Stack: FastAPI · hosted `msearch` retrieval (default) · local/remote Qdrant ·
 - `app/rag/` — ingestion, chunking, retrieval, prompting, vector store, pipeline
 - `app/rag/wp_config.py` — single source of WP config (labels, built-in prompts, collections, defaults)
 - `app/rag/placeholders.py` — placeholder engine + `DEFAULT_PLACEHOLDERS` floor
-- `app/static/` — frontend (index.html, app.js, styles.css)
+- `app/static/` — frontend (index.html, app.js, styles.css) + the built `avatar.bundle.js`
+- `frontend/` — ES modules bundled into `app/static/avatar.bundle.js` (global `Avatar`) by
+  `npm run build`, with vitest coverage: `markdown-renderer.js`, `citations.js`,
+  `sources-panel.js` (panel ordering/flip rules), `answer-export.js` (clipboard text).
+  Entry point is `frontend/bundle.js`; rebuild after editing any of them.
 - `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)
@@ -73,8 +77,12 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 - UI controls: `top_k` 0–50 (`0` disables retrieval), dense/BM25 weights, min score, min relative score, backend, mSearch collection/mode/confidence floor, retrieve-only mode, reranking controls, LLM provider/model + custom base URL/key.
 - Optional cross-encoder reranking runs after first-stage retrieval when enabled and available (`RERANKER_ENABLED`, `RERANKER_WEIGHT`, `RERANKER_CANDIDATES`, default model `BAAI/bge-reranker-v2-m3`). It uses `local_files_only=True`, so developers must pre-download the model; otherwise rerank controls stay hidden.
 - Streaming `/chat/stream` can emit preliminary first-stage sources before reranking finishes, then final reranked sources. Responses may include `baseline_chunks` for comparing pre/post-rerank ordering in the UI.
-- Implemented UX: dark mode, help modal, streaming `/chat/stream`, conversation threads + history in `localStorage`, random question (`/questions/random`), prepared questions (`/questions`), editable presets (`/prompt-presets`), expandable sources, lexical query-term highlighting (not embedding-similarity).
+- Implemented UX: dark mode, help modal, streaming `/chat/stream`, conversation threads + history in `localStorage`, random question (`/questions/random`), prepared questions (`/questions`), editable presets (`/prompt-presets`), expandable sources, lexical query-term highlighting (not embedding-similarity), copy-answer buttons (main/conversation/history).
+- Sources panel: retrieval order while streaming, then flips to first-citation order when the answer finishes, hiding uncited sources behind a control. Cards are labelled `[2] · Z7` (citation number · retrieval rank). The view state is a parameter of `renderSourceCards`, shared by the main, conversation and history panels — do not turn it back into a module global. No flip for aborted/errored streams, retrieve-only mode, or an answer that cites nothing.
+- Conversation compaction is rolling: the server folds all but the last `CONVERSATION_RECENT_MESSAGES` into a summary once the uploaded history passes `CONVERSATION_SUMMARY_TRIGGER_TOKENS`, returns `conversation_folded_message_count`, and the browser advances `conversation_compacted_through` so it stops uploading them.
+- Reasoning: declared per model in `data/model_reasoning.json` (request field, effort vocabulary, default, `mandatory`). Nothing is sent for an undeclared model. Traces that come back are shown collapsed rather than discarded. Add models to the JSON, never to code.
 
 ## Prompting
 
-- Base prompt helpers live in `app/rag/prompts.py`; WP-specific built-in prompts live in `app/rag/wp_config.py`. WP1 still uses Czech-history personas, while WP2–WP4 use generic domain prompts. Model is asked to: answer in the question's language, separate sourced info from general knowledge, cite only used sources, avoid weak chunks, not force a rigid `Podle nalezených zdrojů...` opener, and not generate its own final source list.
+- Base prompt helpers live in `app/rag/prompts.py`; WP-specific built-in prompts live in `app/rag/wp_config.py`. WP1 still uses Czech-history personas, while WP2–WP4 use generic domain prompts. Model is asked to: answer in the question's language, separate sourced info from general knowledge, cite only used sources, avoid weak chunks, not force a rigid `Podle nalezených zdrojů...` opener, and not generate its own final source list or `[^Zn]:` footnote definitions.
+- Models emit that closing list anyway. `strip_model_source_list` (`app/rag/answer_cleanup.py`) removes it server-side; `prepareCitationMarkdown` (`frontend/citations.js`) does the same at render time for streaming tokens. Keep the two in sync — `tests/test_answer_cleanup.py` is the shared contract.
