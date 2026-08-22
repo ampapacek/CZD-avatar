@@ -170,16 +170,55 @@ describe("edge cases", () => {
 });
 
 describe("sourceCardLabel", () => {
-  it("shows citation number and retrieval rank for a cited card", () => {
-    expect(sourceCardLabel({ cited: true, citationNumber: 2, citationId: "Z7" }, true)).toBe("[2] · Z7");
+  it("shows the citation number alone for a cited card", () => {
+    // The retrieval id moved to the diagnostics line; the title keeps the number
+    // the answer superscripts.
+    expect(sourceCardLabel({ cited: true, citationNumber: 2, citationId: "Z7" }, true)).toBe("[2]");
   });
 
-  it("shows the retrieval rank alone for an uncited card", () => {
-    expect(sourceCardLabel({ cited: false, citationNumber: null, citationId: "Z7" }, true)).toBe("[Z7]");
+  it("labels an uncited card with nothing", () => {
+    expect(sourceCardLabel({ cited: false, citationNumber: null, citationId: "Z7" }, true)).toBe("");
   });
 
-  it("shows the retrieval rank alone before the answer settles", () => {
-    expect(sourceCardLabel({ cited: true, citationNumber: 1, citationId: "Z7" }, false)).toBe("[Z7]");
+  it("labels nothing before the answer settles and numbers exist", () => {
+    expect(sourceCardLabel({ cited: true, citationNumber: 1, citationId: "Z7" }, false)).toBe("");
+  });
+});
+
+describe("highlightCited", () => {
+  it("is on while cited and uncited cards are visible together", () => {
+    const ordered = ["Z3", "Z1"];
+    const view = { ...completedSourcesView(createSourcesView(), ordered), showUncited: true };
+    expect(layoutSources(sources, view, { orderedCitationIds: ordered }).highlightCited).toBe(true);
+  });
+
+  it("is off once the settled panel hides the uncited sources", () => {
+    // Every visible card is then cited, so the green would distinguish nothing.
+    const ordered = ["Z3", "Z1"];
+    const view = completedSourcesView(createSourcesView(), ordered);
+    const layout = layoutSources(sources, view, { orderedCitationIds: ordered });
+    expect(layout.visible.every((entry) => entry.cited)).toBe(true);
+    expect(layout.highlightCited).toBe(false);
+  });
+
+  it("is off when the answer cites every retrieved source", () => {
+    const ordered = ["Z1", "Z2", "Z3", "Z4"];
+    const view = completedSourcesView(createSourcesView(), ordered);
+    expect(layoutSources(sources, view, { orderedCitationIds: ordered }).highlightCited).toBe(false);
+  });
+
+  it("is off when the answer cites nothing", () => {
+    const view = completedSourcesView(createSourcesView(), []);
+    expect(layoutSources(sources, view, { orderedCitationIds: [] }).highlightCited).toBe(false);
+  });
+
+  it("is on while the answer streams and only some sources are cited", () => {
+    const layout = layoutSources(sources, createSourcesView(), { orderedCitationIds: ["Z3"] });
+    expect(layout.highlightCited).toBe(true);
+  });
+
+  it("is off for an empty panel", () => {
+    expect(layoutSources([], createSourcesView(), {}).highlightCited).toBe(false);
   });
 });
 

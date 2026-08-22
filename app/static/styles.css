@@ -2047,12 +2047,25 @@ button:hover {
     transform 0.18s ease;
 }
 
+/* A card the answer cites is clickable: it highlights its own markers in the
+   answer. The green below says something stronger — "this one, unlike those" —
+   so it is painted only where cited and uncited cards sit side by side, and the
+   click affordance rides on the pointer plus a hover border instead. */
+.source.cited-source {
+  cursor: pointer;
+}
+
+/* Stronger than the cited-card border below, so hovering intensifies it rather
+   than dimming it. `active-source` keeps its own full-accent ring. */
+.source.cited-source:hover:not(.active-source) {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+
 .source.used-source {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--surface-3) 72%, var(--accent) 28%);
   box-shadow: 0 10px 24px rgba(15, 104, 95, 0.12);
   transform: translateY(-1px);
-  cursor: pointer;
 }
 
 .source.used-source strong {

@@ -120,6 +120,11 @@ export function layoutSources(sources, view, { orderedCitationIds = [], omittedC
     entries: ordered,
     visible,
     showCitationNumbers,
+    // The cited-source highlight is a contrast, so it is worth painting only
+    // when the visible cards actually contrast: once the panel settles it hides
+    // the uncited ones, and colouring every remaining card green distinguishes
+    // nothing. Same when the answer happens to cite everything retrieved.
+    highlightCited: visible.some((entry) => entry.cited) && visible.some((entry) => !entry.cited),
     citedCount: citedEntries.length,
     uncitedCount: uncitedEntries.length,
     hiddenCount: hideUncited ? uncitedEntries.length : 0,
@@ -142,12 +147,20 @@ export function layoutSources(sources, view, { orderedCitationIds = [], omittedC
   };
 }
 
-/** Card label: citation number plus retrieval rank for cited, rank alone otherwise. */
+/**
+ * Card label: the citation number, or nothing.
+ *
+ * `[1]` is what the reader sees as a superscript in the answer and is the click
+ * target for the highlight. The retrieval id `Zn` used to sit next to it, but it
+ * is an internal diagnostic and belongs on the score line with the rest of them.
+ * A card with no citation number therefore has no label at all — its cite button
+ * would be disabled anyway, so nothing is lost but the ragged edge.
+ */
 export function sourceCardLabel(entry, showCitationNumbers) {
   if (showCitationNumbers && entry.cited) {
-    return `[${entry.citationNumber}] · ${entry.citationId}`;
+    return `[${entry.citationNumber}]`;
   }
-  return `[${entry.citationId}]`;
+  return "";
 }
 
 export const SEMANTIC_CHANNEL_LABEL = "sémanticky";

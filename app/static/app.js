@@ -5085,10 +5085,15 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
       const excerpt = highlightText(excerptText, highlightTerms);
       const fullChunk = highlightText(fullText, highlightTerms);
       const canExpand = fullText.length > 420;
-      const scoreLine = Avatar.sourceScoreParts(source, chunk).join(" · ");
       const citationId = entry.citationId;
+      // The retrieval id sits with the other diagnostics rather than in the
+      // title, where it competed with the citation number the answer shows.
+      const scoreLine = [citationId, ...Avatar.sourceScoreParts(source, chunk)].filter(Boolean).join(" · ");
       const isUsed = entry.cited;
-      const usedClass = isUsed ? " used-source" : "";
+      // `cited-source` is the fact (click target, cite toggle); `used-source` is
+      // the green, painted only where it tells the cited from the uncited.
+      const citedClass = isUsed ? " cited-source" : "";
+      const usedClass = isUsed && layout.highlightCited ? " used-source" : "";
       const budgetStatus = chunk?.metadata?.budget_status || "";
       const trimmedBadge = budgetStatus === "trimmed" ? `<span class="source-badge">zkráceno pro prompt</span>` : "";
       // The model never saw this chunk, which is a stronger statement than "did
@@ -5096,9 +5101,14 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
       const omittedBadge = entry.omitted ? `<span class="source-badge">vynecháno z promptu</span>` : "";
       const originalText = chunk?.metadata?.original_text || "";
       const label = escapeHtml(Avatar.sourceCardLabel(entry, layout.showCitationNumbers));
+      // No citation number means no button: it would be an empty disabled
+      // control. The whole card stays clickable through `cited-source`.
+      const citeButton = label
+        ? `<button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>${label}</button> `
+        : "";
       return `
-        <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
-          <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>${label}</button> ${title} ${trimmedBadge}${omittedBadge}</strong>
+        <article class="source${citedClass}${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
+          <strong>${citeButton}${title} ${trimmedBadge}${omittedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
           <p class="score">${escapeHtml(scoreLine)}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
@@ -5242,10 +5252,16 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
 }
 
 function updateUsedSourceHighlights(container, usedCitationIds) {
-  for (const card of container.querySelectorAll(".source")) {
+  const cards = Array.from(container.querySelectorAll(".source"));
+  const citedCount = cards.filter((card) => usedCitationIds.has(card.dataset.citationId || "")).length;
+  // Same rule as the rendered layout: the green only means something while some
+  // card on screen is still uncited.
+  const highlightCited = citedCount > 0 && citedCount < cards.length;
+  for (const card of cards) {
     const citationId = card.dataset.citationId || "";
     const isUsed = usedCitationIds.has(citationId);
-    card.classList.toggle("used-source", isUsed);
+    card.classList.toggle("cited-source", isUsed);
+    card.classList.toggle("used-source", isUsed && highlightCited);
     // A card can become cited mid-stream, so its toggle is enabled here rather
     // than only at render time.
     const toggle = card.querySelector(".source-cite-btn");
@@ -5468,7 +5484,7 @@ function applyCitationHighlights() {
   const card = scope
     ? document.querySelector(`${scope.sourcesSelector} ${sourceCardSelector(activeCitation.citationId)}`)
     : null;
-  if (!card || !card.classList.contains("used-source")) {
+  if (!card || !card.classList.contains("cited-source")) {
     activeCitation = null;
     return;
   }
@@ -5525,7 +5541,7 @@ function toggleCitationHighlightFromSource(event) {
   }
   const citationId = card.dataset.citationId || "";
   const scope = citationScopeForCard(card);
-  if (!citationId || !scope || !card.classList.contains("used-source")) {
+  if (!citationId || !scope || !card.classList.contains("cited-source")) {
     return;
   }
   const isActive = activeCitation?.scope === scope.name && activeCitation.citationId === citationId;
