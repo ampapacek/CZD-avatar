@@ -65,6 +65,9 @@ class ChatRequest(BaseModel):
     min_prompt_chunks: int | None = Field(default=None, ge=0, le=20)
     token_budget_safety_margin: float | None = Field(default=None, ge=0.0, le=0.5)
     conversation_summary_trigger_tokens: int | None = Field(default=None, ge=256)
+    # One of the effort values the selected model declares in
+    # data/model_reasoning.json; anything else is ignored server-side.
+    reasoning_effort: str | None = Field(default=None, max_length=32)
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     llm_provider: str | None = None
@@ -302,6 +305,9 @@ class ChatResponse(BaseModel):
     # How many of the uploaded history messages this turn folded into the
     # summary. The client drops that many so the next upload is smaller.
     conversation_folded_message_count: int = 0
+    # Reasoning traces the model returned, if any. Shown collapsed rather than
+    # discarded — some models cannot be told to stop reasoning.
+    reasoning: str = ""
     model: str
     upstream_model: str | None = None
     response_time_seconds: float

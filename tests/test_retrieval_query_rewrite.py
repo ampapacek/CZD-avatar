@@ -14,13 +14,14 @@ class _FakeLLM:
         self.answer = answer
         self.calls = []
 
-    def generate(self, messages, model=None, api_key=None, base_url=None):
+    def generate(self, messages, model=None, api_key=None, base_url=None, reasoning=None):
         self.calls.append(
             {
                 "messages": messages,
                 "model": model,
                 "api_key": api_key,
                 "base_url": base_url,
+                "reasoning": reasoning,
             }
         )
         return LLMGeneration(answer=self.answer, model=model)

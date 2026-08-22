@@ -131,6 +131,10 @@
                 <span>Context window</span>
                 <input id="mainContextWindowTokens" type="number" min="1024" step="1" />
               </label>
+              <label class="field" id="reasoningEffortField" hidden>
+                <span>Uvažování (reasoning)</span>
+                <select id="reasoningEffort"></select>
+              </label>
               <label class="field" id="customModelField" hidden>
                 <span>Jiný model</span>
                 <input id="customModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
@@ -208,6 +212,10 @@
             <span id="rerankProgressLabel" class="rerank-progress-label"></span>
           </div>
           <p id="answerQuestionInfo" class="query-used-info" hidden>Odpověď generována na dotaz: <strong id="answerQuestionText"></strong></p>
+          <details id="reasoningPanel" class="reasoning-panel" hidden>
+            <summary>Uvažování modelu</summary>
+            <pre id="reasoningText" class="reasoning-text"></pre>
+          </details>
           <div id="answerActions" class="answer-actions" hidden>
             <button type="button" id="copyAnswerButton" class="ghost-button" data-copy-scope="main">Kopírovat odpověď</button>
             <button type="button" id="copyAnswerWithSourcesButton" class="ghost-button" data-copy-scope="main" data-copy-sources="1">Kopírovat se zdroji</button>

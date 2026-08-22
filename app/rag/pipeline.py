@@ -483,6 +483,7 @@ class RAGPipeline:
         rewrite_query_for_retrieval: bool = False,
         retrieval_query_override: str | None = None,
         use_retrieval_query_for_answer: bool = False,
+        reasoning: dict[str, object] | None = None,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -559,11 +560,15 @@ class RAGPipeline:
         budget.conversation_summary_used = bool(conversation.summary)
         prompt_prepare_seconds = time.perf_counter() - prompt_prepare_started
         generation_started = time.perf_counter()
+        # Only the answering call carries the reasoning parameter: the query
+        # rewrite and the conversation summary are utility calls where reasoning
+        # would be paid for and thrown away.
         generation = self.llm.generate(
             budget.messages,
             model=resolved_model,
             api_key=llm_api_key,
             base_url=llm_base_url,
+            reasoning=reasoning,
         )
         answer = strip_model_source_list(generation.answer)
         generation_seconds = time.perf_counter() - generation_started
@@ -591,6 +596,7 @@ class RAGPipeline:
             chunk_budget_warnings=budget.warnings,
             conversation_summary=conversation.summary,
             conversation_folded_message_count=conversation.folded_message_count,
+            reasoning=generation.reasoning,
             model=resolved_model,
             upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),

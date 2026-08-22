@@ -88,6 +88,13 @@ class Settings(BaseSettings):
         default=Path("data/model_context_windows.json"),
         alias="MODEL_CONTEXT_WINDOWS_PATH",
     )
+    # Which models accept a reasoning-effort parameter, and which values.
+    # Declared as data because providers disagree and none of it is
+    # discoverable; a missing file simply means no reasoning controls.
+    model_reasoning_path: Path = Field(
+        default=Path("data/model_reasoning.json"),
+        alias="MODEL_REASONING_PATH",
+    )
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")
     placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")

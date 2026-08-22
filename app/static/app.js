@@ -16,6 +16,10 @@ const refreshModelsButton = document.querySelector("#refreshModelsButton");
 const modelRefreshStatus = document.querySelector("#modelRefreshStatus");
 const mainContextWindowTokens = document.querySelector("#mainContextWindowTokens");
 const modelContextWindowNote = document.querySelector("#modelContextWindowNote");
+const reasoningEffortField = document.querySelector("#reasoningEffortField");
+const reasoningEffort = document.querySelector("#reasoningEffort");
+const reasoningPanel = document.querySelector("#reasoningPanel");
+const reasoningText = document.querySelector("#reasoningText");
 const contextWindowTokens = document.querySelector("#contextWindowTokens");
 const outputBudgetShort = document.querySelector("#outputBudgetShort");
 const outputBudgetMedium = document.querySelector("#outputBudgetMedium");
@@ -267,6 +271,7 @@ let currentRetrievedChunks = [];
 let currentRetrievalQuery = "";
 let currentAnswerQuestion = "";
 let currentOmittedChunks = [];
+let currentReasoning = "";
 // Sources-panel view state (order + uncited visibility). One object per panel,
 // passed into renderSourceCards rather than read from it, so the main panel,
 // conversation mode and history cannot desync.
@@ -1035,6 +1040,8 @@ async function runQuery(retrieveOnlyMode) {
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
+  currentReasoning = "";
+  renderReasoning("");
   // `Pouze vyhledat zdroje` produces no answer, so there is nothing to reorder by.
   mainSourcesView = Avatar.createSourcesView({ canFlip: !retrieveOnlyMode });
   activeCitation = null;
@@ -1151,6 +1158,8 @@ async function runQuery(retrieveOnlyMode) {
           currentBudgetWarnings = doneData.chunk_budget_warnings || currentBudgetWarnings;
           currentTokenBudget = doneData.token_budget || currentTokenBudget;
           currentConversationSummary = doneData.conversation_summary || currentConversationSummary;
+          currentReasoning = doneData.reasoning || currentReasoning;
+          renderReasoning(currentReasoning);
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
         },
       }, { signal: controller.signal, turnId });
@@ -1165,6 +1174,8 @@ async function runQuery(retrieveOnlyMode) {
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
       currentTokenBudget = data.token_budget || currentTokenBudget;
       currentConversationSummary = data.conversation_summary || currentConversationSummary;
+      currentReasoning = data.reasoning || currentReasoning;
+      renderReasoning(currentReasoning);
       completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       saveHistoryEntry({
         question: question.value,
@@ -1178,6 +1189,7 @@ async function runQuery(retrieveOnlyMode) {
         token_budget: data.token_budget || null,
         chunk_budget_warnings: data.chunk_budget_warnings || [],
         conversation_summary: data.conversation_summary || null,
+        reasoning: data.reasoning || "",
         sources: data.sources || [],
         model_used: data.model || model.value,
         upstream_model: data.upstream_model || null,
@@ -1833,6 +1845,7 @@ function buildRequestPayload(overrides = {}) {
     llm_provider: llmProvider.value,
     llm_base_url: nullableString(selectedProviderBaseUrl()),
     llm_api_key: nullableString(selectedProviderApiKey()),
+    reasoning_effort: nullableString(reasoningEffort?.value),
     admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: "msearch",
@@ -2306,6 +2319,14 @@ function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
       data.provider_context_window_defaults && typeof data.provider_context_window_defaults === "object"
         ? data.provider_context_window_defaults
         : appSettings.provider_context_window_defaults,
+    model_reasoning:
+      data.model_reasoning && typeof data.model_reasoning === "object"
+        ? data.model_reasoning
+        : appSettings.model_reasoning,
+    provider_reasoning_defaults:
+      data.provider_reasoning_defaults && typeof data.provider_reasoning_defaults === "object"
+        ? data.provider_reasoning_defaults
+        : appSettings.provider_reasoning_defaults,
     llm_policy: data.llm_policy && typeof data.llm_policy === "object" ? data.llm_policy : appSettings.llm_policy,
   };
   const providers = getLlmProviders(appSettings);
@@ -2431,6 +2452,7 @@ function syncContextWindowTokenInputs(sourceInput) {
 function updateContextWindowForSelectedModel({ force = false, persist = false } = {}) {
   if (!force && contextWindowManuallyEdited) {
     updateModelContextWindowNote();
+    refreshReasoningEffortOptions();
     return;
   }
   setContextWindowTokensValue(selectedModelContextWindow() ?? defaultContextWindowTokens());
@@ -2438,6 +2460,68 @@ function updateContextWindowForSelectedModel({ force = false, persist = false } 
     persistTokenBudgetSettings();
   }
   updateModelContextWindowNote();
+  refreshReasoningEffortOptions();
+}
+
+// Reasoning support is server-declared data (data/model_reasoning.json), not
+// something the client knows how to guess. A model that declares nothing gets
+// no control at all and no reasoning parameter is sent — the old behaviour.
+const REASONING_DEFAULT_VALUE = "";
+
+function selectedModelReasoning(modelName = selectedModelValue(), provider = selectedProviderConfig()) {
+  const byModel = appSettings.model_reasoning && typeof appSettings.model_reasoning === "object"
+    ? appSettings.model_reasoning
+    : {};
+  const byProvider =
+    appSettings.provider_reasoning_defaults && typeof appSettings.provider_reasoning_defaults === "object"
+      ? appSettings.provider_reasoning_defaults
+      : {};
+  const modelKey = String(modelName || "").trim();
+  const support = byModel[modelKey] || byProvider[String(provider?.label || "").trim()] || null;
+  return support && Array.isArray(support.efforts) && support.efforts.length ? support : null;
+}
+
+const REASONING_EFFORT_LABELS = {
+  none: "vypnuto",
+  minimal: "minimální",
+  low: "nízké",
+  medium: "střední",
+  high: "vysoké",
+};
+
+function refreshReasoningEffortOptions() {
+  if (!reasoningEffortField || !reasoningEffort) {
+    return;
+  }
+  const support = selectedModelReasoning();
+  if (!support) {
+    reasoningEffortField.hidden = true;
+    reasoningEffort.innerHTML = "";
+    return;
+  }
+  const previous = reasoningEffort.value;
+  const defaultLabel = support.default
+    ? `Výchozí (${REASONING_EFFORT_LABELS[support.default] || support.default})`
+    : "Výchozí";
+  const options = [`<option value="${REASONING_DEFAULT_VALUE}">${escapeHtml(defaultLabel)}</option>`].concat(
+    support.efforts.map(
+      (effort) => `<option value="${escapeHtml(effort)}">${escapeHtml(REASONING_EFFORT_LABELS[effort] || effort)}</option>`,
+    ),
+  );
+  reasoningEffort.innerHTML = options.join("");
+  reasoningEffort.value = support.efforts.includes(previous) ? previous : REASONING_DEFAULT_VALUE;
+  reasoningEffortField.hidden = false;
+}
+
+// Some models reason whether or not they are asked to. Showing the trace beats
+// discarding it silently, but it is not part of the answer, so it stays folded.
+function renderReasoning(text) {
+  if (!reasoningPanel || !reasoningText) {
+    return;
+  }
+  const trimmed = String(text || "").trim();
+  reasoningPanel.hidden = !trimmed;
+  reasoningText.textContent = trimmed;
 }
 
 function updateModelContextWindowNote() {
@@ -5562,6 +5646,7 @@ function captureSettingsSnapshot() {
     model: selectedModelValue(),
     msearch_collection: msearchCollection.value,
     context_window_tokens: nullableInteger(contextWindowTokens.value),
+    reasoning_effort: reasoningEffort?.value || "",
   };
 }
 
@@ -5620,6 +5705,13 @@ function applySettingsToGlobals(settings) {
     setContextWindowTokensValue(s.context_window_tokens);
   }
   updateModelContextWindowNote();
+  refreshReasoningEffortOptions();
+  if (reasoningEffort && s.reasoning_effort !== undefined) {
+    const wanted = String(s.reasoning_effort || "");
+    reasoningEffort.value = Array.from(reasoningEffort.options).some((option) => option.value === wanted)
+      ? wanted
+      : REASONING_DEFAULT_VALUE;
+  }
 }
 
 // Apply a WP for conversation mode: WP + its default collection + default
@@ -5931,6 +6023,13 @@ function renderConversationMessage(message, index = 0) {
           .join("")}</div>`
       : "";
   const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
+  const reasoningBlock =
+    message.role === "assistant" && (message.reasoning || "").trim()
+      ? `<details class="reasoning-panel">
+          <summary>Uvažování modelu</summary>
+          <pre class="reasoning-text">${escapeHtml(message.reasoning)}</pre>
+        </details>`
+      : "";
   const copyActions =
     message.role === "assistant" && (message.content || "").trim()
       ? `<div class="answer-actions">
@@ -5942,6 +6041,7 @@ function renderConversationMessage(message, index = 0) {
   return `
     <article class="conversation-message ${messageClass}" data-message-index="${index}">
       <div class="conversation-message-label">${roleLabel}</div>
+      ${reasoningBlock}
       <div class="conversation-message-body">${body}</div>
       ${budgetWarnings}
       ${contextStatus}
@@ -6111,6 +6211,7 @@ async function submitConversationTurn() {
     llm_api_key: nullableString(selectedProviderApiKey(convSettings.llm_provider)),
     msearch_collection: convSettings.msearch_collection,
     context_window_tokens: convSettings.context_window_tokens,
+    reasoning_effort: nullableString(convSettings.reasoning_effort),
   });
   const sanitizedPayload = {
     ...sanitizeHistorySettings(payload),
@@ -6222,6 +6323,7 @@ async function submitConversationTurn() {
           token_budget: data.token_budget || null,
           chunk_budget_warnings: data.chunk_budget_warnings || [],
           conversation_summary: data.conversation_summary || null,
+          reasoning: data.reasoning || "",
           conversation_compacted_through: compactedThrough + (Number(data.conversation_folded_message_count) || 0),
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
@@ -7195,6 +7297,8 @@ function restoreAnswerFromHistoryEntry(entry) {
   currentBudgetWarnings = entry.chunk_budget_warnings || [];
   currentTokenBudget = entry.token_budget || null;
   currentConversationSummary = entry.conversation_summary || "";
+  currentReasoning = entry.reasoning || "";
+  renderReasoning(currentReasoning);
   // Stored entries have no baseline / rescore comparison to show.
   currentBaselineChunks = [];
   currentMsearchRescoreUsed = false;

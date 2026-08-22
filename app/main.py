@@ -51,7 +51,11 @@ from app.models import (
 )
 from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.msearch import clear_collections_cache
-from app.rag.model_metadata import load_model_context_metadata
+from app.rag.model_metadata import (
+    load_model_context_metadata,
+    load_model_reasoning_metadata,
+    resolve_reasoning_support,
+)
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import (
@@ -126,6 +130,7 @@ analytics = AnalyticsWriter(
     settings.analytics_instance_id,
 )
 model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
+model_reasoning, provider_reasoning_defaults = load_model_reasoning_metadata(settings.model_reasoning_path)
 provider_presets = available_llm_providers(
     model_context_windows=model_context_windows,
     provider_context_window_defaults=provider_context_window_defaults,
@@ -138,8 +143,10 @@ default_model = ""
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
     global model_context_windows, provider_context_window_defaults
+    global model_reasoning, provider_reasoning_defaults
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
     model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
+    model_reasoning, provider_reasoning_defaults = load_model_reasoning_metadata(settings.model_reasoning_path)
     provider_presets = available_llm_providers(
         force_model_refresh=force_model_refresh,
         model_context_windows=model_context_windows,
@@ -154,6 +161,26 @@ def _refresh_provider_state(force_model_refresh: bool = False) -> None:
     all_llm_models = _dedupe_preserve_order(provider_model_presets)
 
 
+def _reasoning_payload(model: str | None, provider_id: str | None, effort: str | None) -> dict[str, object]:
+    """Request fragment for the model's reasoning setting, or {} to send nothing.
+
+    An effort the model does not declare is dropped rather than forwarded: a
+    stale client or a hand-made request must not be able to put an arbitrary
+    value into the upstream payload.
+    """
+
+    label = str(provider_preset(provider_id or "", provider_presets).get("label") or "")
+    support = resolve_reasoning_support(
+        model,
+        provider_label=label,
+        model_reasoning=model_reasoning,
+        provider_reasoning_defaults=provider_reasoning_defaults,
+    )
+    if support is None:
+        return {}
+    return support.payload(effort)
+
+
 def _llm_settings_payload() -> dict[str, object]:
     selected_provider = default_provider_preset
     return {
@@ -165,6 +192,10 @@ def _llm_settings_payload() -> dict[str, object]:
         "all_model_presets": all_llm_models,
         "model_context_windows": model_context_windows,
         "provider_context_window_defaults": provider_context_window_defaults,
+        "model_reasoning": {name: support.as_dict() for name, support in model_reasoning.items()},
+        "provider_reasoning_defaults": {
+            name: support.as_dict() for name, support in provider_reasoning_defaults.items()
+        },
         "llm_policy": {
             "provider": default_provider,
             "providers": provider_presets,
@@ -1271,6 +1302,7 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
             rewrite_query_for_retrieval=request.rewrite_query_for_retrieval,
             retrieval_query_override=request.retrieval_query,
                 use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
+                reasoning=_reasoning_payload(resolved_model, resolved_provider, request.reasoning_effort),
             )
         budget = response.token_budget or {}
         event_fields = {
@@ -1470,6 +1502,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     model=resolved_model,
                     api_key=resolved_api_key,
                     base_url=resolved_base_url,
+                    reasoning=_reasoning_payload(resolved_model, resolved_provider, request.reasoning_effort),
                 )
             # Starlette advances sync response iterators in a worker thread and
             # may resume each yield in a different copied Context.  The stream
@@ -1487,12 +1520,16 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             # Tokens went out raw so the client could render them as they
             # arrived; the stored/replayed answer is the cleaned one.
             answer = strip_model_source_list(answer)
+            # Reasoning deltas were collected alongside the content rather than
+            # streamed, so the token stream stays the answer alone.
+            reasoning_text = (getattr(stream, "reasoning_text", "") or "").strip()
             if first_token_at is not None:
                 token_stream_ms = ms(time.perf_counter() - first_token_at)
             elapsed = time.perf_counter() - started
             upstream_model = getattr(stream, "upstream_model", None) or resolved_model
             response = {
                 "answer": answer,
+                "reasoning": reasoning_text,
                 "original_question": request.question,
                 "retrieval_query": retrieval_query,
                 "answer_question": answer_question,
