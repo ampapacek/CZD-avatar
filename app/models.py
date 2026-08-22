@@ -66,7 +66,7 @@ class ChatRequest(BaseModel):
     token_budget_safety_margin: float | None = Field(default=None, ge=0.0, le=0.5)
     conversation_summary_trigger_tokens: int | None = Field(default=None, ge=256)
     # One of the effort values the selected model declares in
-    # data/model_reasoning.json; anything else is ignored server-side.
+    # data/models.json; anything else is ignored server-side.
     reasoning_effort: str | None = Field(default=None, max_length=32)
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None

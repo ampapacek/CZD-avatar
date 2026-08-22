@@ -52,8 +52,7 @@ from app.models import (
 from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.msearch import clear_collections_cache
 from app.rag.model_metadata import (
-    load_model_context_metadata,
-    load_model_reasoning_metadata,
+    load_model_metadata,
     resolve_reasoning_support,
 )
 from app.rag.pipeline import RAGPipeline
@@ -129,11 +128,10 @@ analytics = AnalyticsWriter(
     settings.analytics_dir,
     settings.analytics_instance_id,
 )
-model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
-model_reasoning, provider_reasoning_defaults = load_model_reasoning_metadata(settings.model_reasoning_path)
+model_metadata = load_model_metadata(settings.model_metadata_path)
 provider_presets = available_llm_providers(
-    model_context_windows=model_context_windows,
-    provider_context_window_defaults=provider_context_window_defaults,
+    model_context_windows=model_metadata.context_windows,
+    provider_context_window_defaults=model_metadata.provider_context_windows,
 )
 default_provider = ""
 default_provider_preset: dict[str, object] = {}
@@ -142,15 +140,13 @@ default_model = ""
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
-    global model_context_windows, provider_context_window_defaults
-    global model_reasoning, provider_reasoning_defaults
+    global model_metadata
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
-    model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
-    model_reasoning, provider_reasoning_defaults = load_model_reasoning_metadata(settings.model_reasoning_path)
+    model_metadata = load_model_metadata(settings.model_metadata_path)
     provider_presets = available_llm_providers(
         force_model_refresh=force_model_refresh,
-        model_context_windows=model_context_windows,
-        provider_context_window_defaults=provider_context_window_defaults,
+        model_context_windows=model_metadata.context_windows,
+        provider_context_window_defaults=model_metadata.provider_context_windows,
     )
     default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
     default_provider_preset = provider_preset(default_provider, provider_presets)
@@ -173,8 +169,8 @@ def _reasoning_payload(model: str | None, provider_id: str | None, effort: str |
     support = resolve_reasoning_support(
         model,
         provider_label=label,
-        model_reasoning=model_reasoning,
-        provider_reasoning_defaults=provider_reasoning_defaults,
+        model_reasoning=model_metadata.reasoning,
+        provider_reasoning_defaults=model_metadata.provider_reasoning,
     )
     if support is None:
         return {}
@@ -190,11 +186,11 @@ def _llm_settings_payload() -> dict[str, object]:
         "llm_providers": provider_presets,
         "model_presets": selected_provider["model_presets"],
         "all_model_presets": all_llm_models,
-        "model_context_windows": model_context_windows,
-        "provider_context_window_defaults": provider_context_window_defaults,
-        "model_reasoning": {name: support.as_dict() for name, support in model_reasoning.items()},
+        "model_context_windows": model_metadata.context_windows,
+        "provider_context_window_defaults": model_metadata.provider_context_windows,
+        "model_reasoning": {name: support.as_dict() for name, support in model_metadata.reasoning.items()},
         "provider_reasoning_defaults": {
-            name: support.as_dict() for name, support in provider_reasoning_defaults.items()
+            name: support.as_dict() for name, support in model_metadata.provider_reasoning.items()
         },
         "llm_policy": {
             "provider": default_provider,

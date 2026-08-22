@@ -84,16 +84,13 @@ class Settings(BaseSettings):
 
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
-    model_context_windows_path: Path = Field(
-        default=Path("data/model_context_windows.json"),
-        alias="MODEL_CONTEXT_WINDOWS_PATH",
-    )
-    # Which models accept a reasoning-effort parameter, and which values.
-    # Declared as data because providers disagree and none of it is
-    # discoverable; a missing file simply means no reasoning controls.
-    model_reasoning_path: Path = Field(
-        default=Path("data/model_reasoning.json"),
-        alias="MODEL_REASONING_PATH",
+    # One file describing every known model: context window, reasoning support,
+    # and whatever else we learn later. Declared as data because providers
+    # disagree and none of it is discoverable; a missing file simply means no
+    # known context windows and no reasoning controls.
+    model_metadata_path: Path = Field(
+        default=Path("data/models.json"),
+        alias="MODEL_METADATA_PATH",
     )
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")

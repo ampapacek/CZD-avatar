@@ -1,71 +1,20 @@
-"""Reasoning metadata, request payloads, and trace capture.
+"""Reasoning resolution, request payloads, and trace capture.
 
 Reasoning support is declared in data, not code: providers disagree on both the
 request field and the effort vocabulary, and none of it is discoverable. These
 tests pin the two rules that follow from that — nothing is sent for a model that
 declares nothing, and nothing outside a model's declared vocabulary is ever
-forwarded upstream.
+forwarded upstream. Parsing `data/models.json` is covered by
+`tests/test_model_metadata.py`.
 """
 
-import json
-import tempfile
 import unittest
-from pathlib import Path
 
 from app.rag.llm import _chat_payload, _reasoning_text
-from app.rag.model_metadata import (
-    ReasoningSupport,
-    load_model_reasoning_metadata,
-    resolve_reasoning_support,
-)
+from app.rag.model_metadata import ReasoningSupport, resolve_reasoning_support
 
 
-def write_metadata(payload: object) -> Path:
-    directory = Path(tempfile.mkdtemp())
-    path = directory / "model_reasoning.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
-
-
-class ReasoningMetadataTests(unittest.TestCase):
-    def test_missing_file_means_no_reasoning_anywhere(self) -> None:
-        models, providers = load_model_reasoning_metadata(Path("does/not/exist.json"))
-        self.assertEqual((models, providers), ({}, {}))
-
-    def test_loads_models_and_provider_defaults(self) -> None:
-        path = write_metadata(
-            {
-                "models": {"m": {"param": "reasoning", "efforts": ["none", "low"], "default": "none"}},
-                "provider_defaults": {"P": {"param": "reasoning_effort", "efforts": ["low", "high"]}},
-            }
-        )
-        models, providers = load_model_reasoning_metadata(path)
-        self.assertEqual(models["m"].efforts, ("none", "low"))
-        self.assertEqual(models["m"].default, "none")
-        self.assertEqual(providers["P"].param, "reasoning_effort")
-
-    def test_rejects_unknown_param_empty_efforts_and_bad_default(self) -> None:
-        path = write_metadata(
-            {
-                "models": {
-                    "bad-param": {"param": "think_harder", "efforts": ["low"]},
-                    "no-efforts": {"param": "reasoning", "efforts": []},
-                    "not-an-object": "low",
-                    "bad-default": {"param": "reasoning", "efforts": ["low"], "default": "extreme"},
-                }
-            }
-        )
-        models, _ = load_model_reasoning_metadata(path)
-        self.assertEqual(list(models), ["bad-default"])
-        # The entry survives; only the unusable default is dropped.
-        self.assertIsNone(models["bad-default"].default)
-
-    def test_malformed_file_is_ignored_rather_than_fatal(self) -> None:
-        directory = Path(tempfile.mkdtemp())
-        path = directory / "model_reasoning.json"
-        path.write_text("{not json", encoding="utf-8")
-        self.assertEqual(load_model_reasoning_metadata(path), ({}, {}))
-
+class ReasoningResolutionTests(unittest.TestCase):
     def test_model_declaration_wins_over_its_provider_default(self) -> None:
         model_support = ReasoningSupport(param="reasoning", efforts=("none",))
         provider_support = ReasoningSupport(param="reasoning_effort", efforts=("high",))

@@ -2463,7 +2463,7 @@ function updateContextWindowForSelectedModel({ force = false, persist = false } 
   refreshReasoningEffortOptions();
 }
 
-// Reasoning support is server-declared data (data/model_reasoning.json), not
+// Reasoning support is server-declared data (data/models.json), not
 // something the client knows how to guess. A model that declares nothing gets
 // no control at all and no reasoning parameter is sent — the old behaviour.
 const REASONING_DEFAULT_VALUE = "";

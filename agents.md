@@ -30,6 +30,7 @@ Stack: FastAPI · hosted `msearch` retrieval (default) · local/remote Qdrant ·
   Entry point is `frontend/bundle.js`; rebuild after editing any of them.
 - `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
+- `data/models.json` — the one tracked file describing models: context window, reasoning support, room for more. `MODEL_METADATA_PATH` overrides it.
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)
 - `data/questions/*.txt` — private per-WP random/prepared questions (gitignored, may be absent)
 - `data/collections/czech_history/` — Czech-history assets/metadata kept for the current WP1 setup
@@ -80,7 +81,8 @@ CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 - Implemented UX: dark mode, help modal, streaming `/chat/stream`, conversation threads + history in `localStorage`, random question (`/questions/random`), prepared questions (`/questions`), editable presets (`/prompt-presets`), expandable sources, lexical query-term highlighting (not embedding-similarity), copy-answer buttons (main/conversation/history).
 - Sources panel: retrieval order while streaming, then flips to first-citation order when the answer finishes, hiding uncited sources behind a control. Cards are labelled `[2] · Z7` (citation number · retrieval rank). The view state is a parameter of `renderSourceCards`, shared by the main, conversation and history panels — do not turn it back into a module global. No flip for aborted/errored streams, retrieve-only mode, or an answer that cites nothing.
 - Conversation compaction is rolling: the server folds all but the last `CONVERSATION_RECENT_MESSAGES` into a summary once the uploaded history passes `CONVERSATION_SUMMARY_TRIGGER_TOKENS`, returns `conversation_folded_message_count`, and the browser advances `conversation_compacted_through` so it stops uploading them.
-- Reasoning: declared per model in `data/model_reasoning.json` (request field, effort vocabulary, default, `mandatory`). Nothing is sent for an undeclared model. Traces that come back are shown collapsed rather than discarded. Add models to the JSON, never to code.
+- Reasoning: declared per model in `data/models.json` (request field, effort vocabulary, default, `mandatory`, human-only `note`). Nothing is sent for an undeclared model. An empty/absent `efforts` list with `mandatory: true` is the "reasons anyway, cannot be steered" case: no control is offered, no parameter is sent, the trace is still shown collapsed. Add models to the JSON, never to code.
+- The AI Ufal Open WebUI gateway **drops** `reasoning_effort` and `reasoning` on every endpoint (`/api`, `/api/v1`, `/openai`) — probed 2026-08-22, gpt-oss self-reports `Reasoning: medium` whatever is sent, and Qwen3.6 returns byte-identical output at temperature 0 across all efforts. So no ai.ufal model declares efforts. OpenRouter honours both forms. Re-probe if the gateway is upgraded.
 
 ## Prompting
 

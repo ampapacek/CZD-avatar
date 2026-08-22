@@ -302,7 +302,7 @@ The web UI lets you tune retrieval while testing:
 - mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
 - LLM model preset or custom model id
-- context-window size, with known model defaults from `data/model_context_windows.json`
+- context-window size, with known model defaults from `data/models.json`
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
 - editable prompts (see [Prompts And Placeholders](#prompts-and-placeholders))
 
