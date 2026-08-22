@@ -270,6 +270,10 @@ class TokenBudgetMetadata(BaseModel):
     context_window_tokens: int
     usable_input_tokens: int
     reserved_output_tokens: int
+    # Residual of context window − output reserve − usable input, so the
+    # subtraction rendered in the UI adds up.
+    safety_margin_tokens: int = 0
+    safety_margin_ratio: float = 0.0
     estimated_non_source_tokens: int
     estimated_source_tokens: int
     estimated_conversation_history_tokens: int = 0

@@ -101,6 +101,63 @@ class TokenBudgetTests(unittest.TestCase):
             metadata["estimated_conversation_history_tokens"],
         )
 
+    def test_safety_margin_completes_the_subtraction(self) -> None:
+        # The UI renders context window − output reserve − safety margin =
+        # usable input, so the reported margin has to be exactly the residual.
+        config = PromptBudgetConfig(
+            context_window_tokens=40000,
+            output_token_budget_short=768,
+            output_token_budget_medium=768,
+            output_token_budget_long=768,
+            min_prompt_chunks=3,
+            token_budget_safety_margin=0.1,
+            conversation_summary_trigger_tokens=3000,
+        )
+
+        budget = prepare_prompt_budget(
+            question="Jaký byl význam husitských válek?",
+            retrieved_chunks=[],
+            length="short",
+            model="unknown-model",
+            config=config,
+        )
+
+        metadata = budget.metadata()
+        self.assertEqual(metadata["context_window_tokens"], 40000)
+        self.assertEqual(metadata["reserved_output_tokens"], 768)
+        self.assertEqual(metadata["usable_input_tokens"], 35308)
+        self.assertEqual(metadata["safety_margin_tokens"], 3924)
+        self.assertEqual(metadata["safety_margin_ratio"], 0.1)
+        self.assertEqual(
+            metadata["context_window_tokens"]
+            - metadata["reserved_output_tokens"]
+            - metadata["safety_margin_tokens"],
+            metadata["usable_input_tokens"],
+        )
+
+    def test_safety_margin_is_zero_without_a_configured_margin(self) -> None:
+        config = PromptBudgetConfig(
+            context_window_tokens=4096,
+            output_token_budget_short=384,
+            output_token_budget_medium=768,
+            output_token_budget_long=1024,
+            min_prompt_chunks=3,
+            token_budget_safety_margin=0.0,
+            conversation_summary_trigger_tokens=3000,
+        )
+
+        budget = prepare_prompt_budget(
+            question="Otázka?",
+            retrieved_chunks=[],
+            length="short",
+            model="unknown-model",
+            config=config,
+        )
+
+        metadata = budget.metadata()
+        self.assertEqual(metadata["safety_margin_tokens"], 0)
+        self.assertEqual(metadata["safety_margin_ratio"], 0.0)
+
     def test_drops_least_relevant_chunks_first(self) -> None:
         chunks = [
             chunk("z1", "První relevantní text. " * 20, 0.9),

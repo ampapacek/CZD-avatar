@@ -131,12 +131,26 @@ class PromptBudgetResult:
     estimated_total_input_tokens: int = 0
     trimmed_chunk_count: int = 0
     conversation_summary_used: bool = False
+    safety_margin_ratio: float = 0.0
+
+    @property
+    def safety_margin_tokens(self) -> int:
+        """The safety margin as the residual of the subtraction the UI shows.
+
+        Derived from the three numbers already reported rather than from
+        `token_budget_safety_margin`, so the displayed column adds up by
+        construction even if the flooring or the formula changes.
+        """
+
+        return max(0, self.context_window_tokens - self.reserved_output_tokens - self.usable_input_tokens)
 
     def metadata(self) -> dict[str, object]:
         return {
             "context_window_tokens": self.context_window_tokens,
             "usable_input_tokens": self.usable_input_tokens,
             "reserved_output_tokens": self.reserved_output_tokens,
+            "safety_margin_tokens": self.safety_margin_tokens,
+            "safety_margin_ratio": self.safety_margin_ratio,
             "estimated_non_source_tokens": self.estimated_non_source_tokens,
             "estimated_source_tokens": self.estimated_source_tokens,
             "estimated_conversation_history_tokens": self.estimated_conversation_history_tokens,
@@ -263,6 +277,7 @@ def prepare_prompt_budget(
         estimated_conversation_history_tokens=history_tokens,
         estimated_total_input_tokens=total_input_tokens,
         trimmed_chunk_count=trimmed_count,
+        safety_margin_ratio=config.token_budget_safety_margin,
     )
 
 

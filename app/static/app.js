@@ -5158,6 +5158,22 @@ function renderTokenBudgetDetails(tokenBudget) {
   const reservedOutput = tokenBudget.reserved_output_tokens ?? null;
   const usableInput = tokenBudget.usable_input_tokens ?? null;
   const totalInput = tokenBudget.estimated_total_input_tokens ?? null;
+  // The safety margin the server applies on top of the output reserve. Recovered
+  // as the residual for entries stored before the server started reporting it,
+  // so old history renders a column that adds up too.
+  const safetyMargin =
+    tokenBudget.safety_margin_tokens ??
+    (contextWindow !== null && reservedOutput !== null && usableInput !== null
+      ? Math.max(0, contextWindow - reservedOutput - usableInput)
+      : null);
+  const safetyMarginPercent =
+    typeof tokenBudget.safety_margin_ratio === "number" && tokenBudget.safety_margin_ratio > 0
+      ? Math.round(tokenBudget.safety_margin_ratio * 100)
+      : null;
+  const safetyMarginLabel =
+    safetyMarginPercent !== null
+      ? `− bezpečnostní rezerva ${safetyMarginPercent} %`
+      : "− bezpečnostní rezerva";
   const share =
     usableInput && totalInput ? Math.round((totalInput / usableInput) * 100) : null;
   const headline =
@@ -5178,6 +5194,7 @@ function renderTokenBudgetDetails(tokenBudget) {
         <tbody>
           ${tokenBudgetRow("Kontextové okno", contextWindow)}
           ${tokenBudgetRow("− rezerva na odpověď", reservedOutput)}
+          ${safetyMargin ? tokenBudgetRow(safetyMarginLabel, safetyMargin) : ""}
           ${tokenBudgetRow("= k dispozici pro vstup", usableInput, { kind: "subtotal" })}
         </tbody>
         <tbody>
