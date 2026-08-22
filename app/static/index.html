@@ -208,6 +208,11 @@
             <span id="rerankProgressLabel" class="rerank-progress-label"></span>
           </div>
           <p id="answerQuestionInfo" class="query-used-info" hidden>Odpověď generována na dotaz: <strong id="answerQuestionText"></strong></p>
+          <div id="answerActions" class="answer-actions" hidden>
+            <button type="button" id="copyAnswerButton" class="ghost-button" data-copy-scope="main">Kopírovat odpověď</button>
+            <button type="button" id="copyAnswerWithSourcesButton" class="ghost-button" data-copy-scope="main" data-copy-sources="1">Kopírovat se zdroji</button>
+            <span id="copyAnswerStatus" class="copy-status" role="status" aria-live="polite"></span>
+          </div>
           <article id="answer" class="answer"></article>
         </section>
       </section>

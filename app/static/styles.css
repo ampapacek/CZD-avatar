@@ -1954,6 +1954,23 @@ button:hover {
   color: var(--text);
 }
 
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.copy-status {
+  font-size: 0.8rem;
+  color: var(--muted, var(--text));
+}
+
+.copy-status-error {
+  color: var(--warn);
+}
+
 .msearch-rescore-note {
   margin: 0;
   font-size: 0.8rem;

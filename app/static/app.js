@@ -128,6 +128,8 @@ const answerEl = document.querySelector("#answer");
 const answerQuestionInfo = document.querySelector("#answerQuestionInfo");
 const answerQuestionText = document.querySelector("#answerQuestionText");
 const sourcesEl = document.querySelector("#sources");
+const answerActions = document.querySelector("#answerActions");
+const copyAnswerStatus = document.querySelector("#copyAnswerStatus");
 const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
 const retrievalQueryText = document.querySelector("#retrievalQueryText");
 const baselineSourcesEl = document.querySelector("#baselineSources");
@@ -4842,13 +4844,94 @@ function renderBaselineComparison() {
   }
 }
 
+conversationMessages?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='conversation']");
+  if (!button) {
+    return;
+  }
+  const index = Number(button.closest(".conversation-message")?.dataset.messageIndex);
+  const message = ensureSelectedConversation()?.messages?.[index];
+  if (!message) {
+    return;
+  }
+  copyAnswerText(message.content || "", message.sources || [], {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: button.parentElement?.querySelector(".copy-status"),
+  });
+});
+
+historyDetail?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='history']");
+  if (!button || !historyDetailEntry) {
+    return;
+  }
+  const entry = historyDetailEntry;
+  const sources =
+    entry.sources && entry.sources.length ? entry.sources : chunksToSources(entry.retrieved_chunks || []);
+  copyAnswerText(entry.answer || "", sources, {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: button.parentElement?.querySelector(".copy-status"),
+  });
+});
+
+answerActions?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='main']");
+  if (!button) {
+    return;
+  }
+  copyAnswerText(streamedAnswerText, currentAnswerSources, {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: copyAnswerStatus,
+  });
+});
+
 toggleBaselineBtn.addEventListener("click", () => {
   baselineVisible = !baselineVisible;
   renderBaselineComparison();
 });
 
+// Copy support. The clipboard gets the answer as displayed — citation markers
+// renumbered to the superscripts the reader saw, model-invented source lists
+// gone — optionally followed by a numbered key of the cited sources.
+let copyStatusTimer = null;
+
+function showCopyStatus(statusEl, message, isError = false) {
+  if (!statusEl) {
+    return;
+  }
+  statusEl.textContent = message;
+  statusEl.classList.toggle("copy-status-error", isError);
+  window.clearTimeout(copyStatusTimer);
+  copyStatusTimer = window.setTimeout(() => {
+    statusEl.textContent = "";
+    statusEl.classList.remove("copy-status-error");
+  }, 2500);
+}
+
+async function copyAnswerText(answerText, sources, { includeSources, statusEl }) {
+  const text = Avatar.answerForCopy(answerText, sources, { includeSources });
+  if (!text) {
+    showCopyStatus(statusEl, "Není co kopírovat.", true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showCopyStatus(statusEl, includeSources ? "Zkopírováno se zdroji." : "Zkopírováno.");
+  } catch (error) {
+    showCopyStatus(statusEl, `Kopírování selhalo: ${error.message}`, true);
+  }
+}
+
+// The main panel's buttons appear only once there is an answer to copy.
+function updateAnswerActions() {
+  if (answerActions) {
+    answerActions.hidden = !streamedAnswerText.trim();
+  }
+}
+
 function renderAnswer(text) {
   renderQueryUsedInfo();
+  updateAnswerActions();
   answerEl.innerHTML = Avatar.renderMarkdown(text, currentAnswerSources, "main-source");
   updateUsedSourceHighlights(sourcesEl, Avatar.extractCitationIds(text));
 }
@@ -5729,7 +5812,7 @@ function renderConversationDetail(conversation) {
     conversationMessages.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
     conversationMessages.innerHTML = messages
-      .map((message) => renderConversationMessage(message))
+      .map((message, index) => renderConversationMessage(message, index))
       .join("");
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
@@ -5823,7 +5906,7 @@ function retrievalInfoFromEvent(data = {}, fallbackQuestion = "", previous = nul
   };
 }
 
-function renderConversationMessage(message) {
+function renderConversationMessage(message, index = 0) {
   const roleLabel = message.role === "assistant" ? "Avatar" : "Ty";
   const messageClass = message.role === "assistant" ? "assistant" : "user";
   const body =
@@ -5844,12 +5927,21 @@ function renderConversationMessage(message) {
           .join("")}</div>`
       : "";
   const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
+  const copyActions =
+    message.role === "assistant" && (message.content || "").trim()
+      ? `<div class="answer-actions">
+          <button type="button" class="ghost-button" data-copy-scope="conversation">Kopírovat odpověď</button>
+          <button type="button" class="ghost-button" data-copy-scope="conversation" data-copy-sources="1">Kopírovat se zdroji</button>
+          <span class="copy-status" role="status" aria-live="polite"></span>
+        </div>`
+      : "";
   return `
-    <article class="conversation-message ${messageClass}">
+    <article class="conversation-message ${messageClass}" data-message-index="${index}">
       <div class="conversation-message-label">${roleLabel}</div>
       <div class="conversation-message-body">${body}</div>
       ${budgetWarnings}
       ${contextStatus}
+      ${copyActions}
       ${metaParts.length ? `<div class="conversation-message-meta">${metaParts.join(" · ")}</div>` : ""}
     </article>
   `;
@@ -6708,7 +6800,11 @@ async function unshareSharedItem(item) {
   }
 }
 
+// The entry currently mounted in the history detail, for the copy buttons.
+let historyDetailEntry = null;
+
 function renderHistoryDetail(entry) {
+  historyDetailEntry = entry;
   const sharedBadge = entry.shared_id
     ? ` <span class="history-shared-badge">Sdíleno ✓</span>`
     : "";
@@ -6806,6 +6902,11 @@ function renderHistorySettingsAndAnswer(entry) {
       entry.answer
         ? `<section class="history-block">
             <h4>Odpověď</h4>
+            <div class="answer-actions">
+              <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
+              <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
+              <span class="copy-status" role="status" aria-live="polite"></span>
+            </div>
             <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
           </section>`
         : ""
