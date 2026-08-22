@@ -100,7 +100,7 @@ Forma odpovědi:
 - Zvol přirozenou strukturu podle otázky.
 - Pokud cituješ nalezený kontext, používej značky uvedené v kontextu jako markdownové poznámky pod čarou ve tvaru [^Z1], [^Z2] atd. Poznámku dávej vždy až za interpunkci, bez mezery mezi interpunkcí a značkou, např. věta končí tečkou.[^Z1] nebo vsuvka končí čárkou,[^Z2] a text pokračuje. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. tvrzení podporuje více zdrojů.[^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5].
 - Zmiňuj pouze zdroje, které v odpovědi skutečně používáš.
-- Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů. Přehled zdrojů vytvoří rozhraní samo.
+- Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů a nepiš ani definiční řádky poznámek pod čarou ve tvaru "[^Z1]: ...". Používej pouze značky [^Z1] v textu; přehled zdrojů vytvoří rozhraní samo.
 - Neuzavírej odpověď nabídkami typu "Pokud chceš..." nebo podobnými dodatky. Odpověz přímo a přirozeně.
 """.strip()
 

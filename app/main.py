@@ -49,6 +49,7 @@ from app.models import (
     UnlockRequest,
     UnlockResponse,
 )
+from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.msearch import clear_collections_cache
 from app.rag.model_metadata import load_model_context_metadata
 from app.rag.pipeline import RAGPipeline
@@ -1482,7 +1483,9 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 yield _sse_event("token", {"text": token})
 
             generation_seconds = time.perf_counter() - generation_started
-            answer = answer.strip()
+            # Tokens went out raw so the client could render them as they
+            # arrived; the stored/replayed answer is the cleaned one.
+            answer = strip_model_source_list(answer)
             if first_token_at is not None:
                 token_stream_ms = ms(time.perf_counter() - first_token_at)
             elapsed = time.perf_counter() - started

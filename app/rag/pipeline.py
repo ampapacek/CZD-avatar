@@ -11,6 +11,7 @@ from typing import Any
 from app.config import Settings
 from app.analytics import bind_context, current_context
 from app.models import ChatResponse, RetrievedChunk, Source
+from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.catalog import save_chunk_catalog
 from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
@@ -549,7 +550,7 @@ class RAGPipeline:
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
-        answer = generation.answer
+        answer = strip_model_source_list(generation.answer)
         generation_seconds = time.perf_counter() - generation_started
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started

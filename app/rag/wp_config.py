@@ -115,7 +115,7 @@ Forma odpovědi:
 - Piš v Markdownu.
 - Zvol přirozenou strukturu podle otázky.
 - Zmiňuj pouze zdroje, které v odpovědi skutečně používáš.
-- Nevytvářej na konci samostatný seznam "Použité zdroje"; přehled zdrojů vytvoří rozhraní samo.
+- Nevytvářej na konci samostatný seznam "Použité zdroje" a nepiš ani definiční řádky poznámek pod čarou ve tvaru "[^Z1]: ..."; přehled zdrojů vytvoří rozhraní samo.
 - Odpověz přímo a přirozeně, bez závěrečných nabídek typu "Pokud chceš...".
 """.strip()
 
