@@ -248,7 +248,7 @@ class _OpenAICompatibleStream:
                 headers=headers,
                 json=payload,
                 ) as response:
-                    response.raise_for_status()
+                    _raise_for_status_with_body(response)
                     for line in response.iter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -343,21 +343,44 @@ def _emit_upstream(
     )
 
 
+def _raise_for_status_with_body(response: httpx.Response) -> None:
+    """`raise_for_status`, but keep the error body readable.
+
+    A streaming response only holds its body while `client.stream(...)` is open.
+    Raising here and reading later got us the opposite of an error message: the
+    body was gone, so `_extract_error_message` reported httpx complaining about
+    an unread stream instead of the "rate limit exceeded" the provider sent.
+    Read it while we still can — it is an error payload, so it is small.
+    """
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError:
+        try:
+            response.read()
+        except Exception:  # A body we cannot read must not mask the status.
+            pass
+        raise
+
+
 def _extract_error_message(response: httpx.Response) -> str:
     try:
         response.read()
-    except httpx.ResponseNotRead:
-        pass
     except Exception:
+        # Already read, or no longer readable. Either way the decoding below
+        # says what is actually available.
         pass
 
     try:
         payload = response.json()
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError, httpx.ResponseNotRead, httpx.StreamError):
         try:
             return response.text[:500] or "No response body."
-        except httpx.ResponseNotRead:
+        except (httpx.ResponseNotRead, httpx.StreamError):
             return "No response body."
+
+    if not isinstance(payload, dict):
+        # Not every gateway answers an error with an object.
+        return str(payload)[:500]
 
     error = payload.get("error")
     if isinstance(error, dict):
