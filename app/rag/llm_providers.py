@@ -10,13 +10,19 @@ from typing import Any
 import httpx
 
 from app.config import load_env_values
-from app.rag.model_metadata import OFF_EFFORTS, ReasoningSupport, filter_model_context_windows
+from app.rag.model_metadata import (
+    MIN_CONTEXT_WINDOW_TOKENS,
+    OFF_EFFORTS,
+    ReasoningSupport,
+    filter_model_context_windows,
+    sort_efforts,
+)
 
 
 logger = logging.getLogger(__name__)
 
 _PROVIDER_ENV_PATTERN = re.compile(
-    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|MODEL_INFO_URL|DISCOVER_MODELS|DISCOVER_REASONING|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
+    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|MODEL_INFO_URL|DISCOVER_MODELS|DISCOVER_CATALOG|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
 )
 _EXCLUDED_MODEL_PATTERNS = (
     "rag-*",
@@ -43,15 +49,22 @@ class ModelContextDiscoveryCacheEntry:
 
 
 @dataclass(slots=True)
-class ModelReasoningDiscoveryCacheEntry:
+class ModelCatalogDiscoveryCacheEntry:
+    """One read of a provider's own `/models` catalogue.
+
+    Reasoning support and context length come from the same records, so they are
+    fetched and cached together rather than costing two requests for one page.
+    """
+
     reasoning: dict[str, ReasoningSupport]
+    context_windows: dict[str, int]
     refreshed_at: float
     error: str = ""
 
 
 _model_discovery_cache: dict[str, ModelDiscoveryCacheEntry] = {}
 _model_context_discovery_cache: dict[str, ModelContextDiscoveryCacheEntry] = {}
-_model_reasoning_discovery_cache: dict[str, ModelReasoningDiscoveryCacheEntry] = {}
+_model_catalog_discovery_cache: dict[str, ModelCatalogDiscoveryCacheEntry] = {}
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -219,19 +232,6 @@ def _extract_model_context_windows(payload: Any, model_names: list[str] | tuple[
     return windows
 
 
-# Cheapest first. Providers publish their effort lists in whatever order they
-# like (OpenRouter counts down from "high"), and the UI shows them as given, so
-# a discovered vocabulary is sorted into this one. Anything unrecognised keeps
-# its published position at the end rather than being dropped.
-_EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
-
-
-def _sorted_efforts(efforts: tuple[str, ...]) -> tuple[str, ...]:
-    known = [effort for effort in _EFFORT_ORDER if effort in efforts]
-    unknown = [effort for effort in efforts if effort not in _EFFORT_ORDER]
-    return tuple(known + unknown)
-
-
 def _reasoning_from_catalog_record(record: dict[str, Any]) -> ReasoningSupport | None:
     """One catalogue entry's reasoning support, or None when it declares none.
 
@@ -270,7 +270,7 @@ def _reasoning_from_catalog_record(record: dict[str, Any]) -> ReasoningSupport |
 
     return ReasoningSupport(
         param=param,
-        efforts=_sorted_efforts(efforts),
+        efforts=sort_efforts(efforts),
         # No default: discovery adds a control, it does not change how the model
         # answers for anyone who never touches it. `data/models.json` is where a
         # deliberate default goes.
@@ -280,12 +280,34 @@ def _reasoning_from_catalog_record(record: dict[str, Any]) -> ReasoningSupport |
     )
 
 
-def _extract_model_reasoning(payload: Any, model_names: list[str] | tuple[str, ...]) -> dict[str, ReasoningSupport]:
+def _context_length_from_catalog_record(record: dict[str, Any]) -> int | None:
+    """A catalogue record's context length.
+
+    OpenRouter publishes it flat as `context_length`, unlike e-infra's LiteLLM,
+    which nests `model_info.context_size` — so both keys are tried and the
+    nested one is reused rather than reimplemented.
+    """
+
+    raw_tokens = record.get("context_length")
+    if raw_tokens is None:
+        return _context_size_from_model_info(record)
+    try:
+        tokens = int(raw_tokens)
+    except (TypeError, ValueError):
+        return None
+    return tokens if tokens >= MIN_CONTEXT_WINDOW_TOKENS else None
+
+
+def _extract_model_catalog(
+    payload: Any,
+    model_names: list[str] | tuple[str, ...],
+) -> tuple[dict[str, ReasoningSupport], dict[str, int]]:
     wanted = {name for name in model_names if name}
     records = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(records, list):
-        return {}
-    discovered: dict[str, ReasoningSupport] = {}
+        return {}, {}
+    reasoning: dict[str, ReasoningSupport] = {}
+    context_windows: dict[str, int] = {}
     for record in records:
         if not isinstance(record, dict):
             continue
@@ -294,8 +316,11 @@ def _extract_model_reasoning(payload: Any, model_names: list[str] | tuple[str, .
             continue
         support = _reasoning_from_catalog_record(record)
         if support is not None:
-            discovered[name] = support
-    return discovered
+            reasoning[name] = support
+        context_length = _context_length_from_catalog_record(record)
+        if context_length is not None:
+            context_windows[name] = context_length
+    return reasoning, context_windows
 
 
 def _is_excluded_model_name(model_name: str) -> bool:
@@ -348,13 +373,13 @@ def _discover_model_context_windows(
         raise RuntimeError(f"Could not discover model context windows from {resolved_url}: {exc}") from exc
 
 
-def _discover_model_reasoning(
+def _discover_model_catalog(
     base_url: str,
     api_key: str,
     model_names: list[str] | tuple[str, ...],
     timeout: float = 20.0,
     models_url: str | None = None,
-) -> dict[str, ReasoningSupport]:
+) -> tuple[dict[str, ReasoningSupport], dict[str, int]]:
     resolved_url = (models_url or f"{base_url.rstrip('/')}/models").rstrip("/")
     headers = {
         "Content-Type": "application/json",
@@ -366,9 +391,9 @@ def _discover_model_reasoning(
     try:
         response = httpx.get(resolved_url, headers=headers, timeout=timeout)
         response.raise_for_status()
-        return _extract_model_reasoning(response.json(), model_names)
+        return _extract_model_catalog(response.json(), model_names)
     except Exception as exc:
-        raise RuntimeError(f"Could not discover model reasoning from {resolved_url}: {exc}") from exc
+        raise RuntimeError(f"Could not read the model catalogue from {resolved_url}: {exc}") from exc
 
 
 def _discovery_cache_key(provider_id: str, base_url: str, endpoint_url: str | None) -> str:
@@ -444,7 +469,7 @@ def _discover_model_context_windows_cached(
         return ModelContextDiscoveryCacheEntry(context_windows={}, refreshed_at=now, error=str(exc))
 
 
-def _discover_model_reasoning_cached(
+def _discover_model_catalog_cached(
     provider_id: str,
     base_url: str,
     api_key: str,
@@ -452,33 +477,48 @@ def _discover_model_reasoning_cached(
     models_url: str | None,
     ttl_seconds: float,
     force_refresh: bool,
-) -> ModelReasoningDiscoveryCacheEntry:
+) -> ModelCatalogDiscoveryCacheEntry:
     cache_key = _discovery_cache_key(provider_id, base_url, models_url)
-    cached = _model_reasoning_discovery_cache.get(cache_key)
+    cached = _model_catalog_discovery_cache.get(cache_key)
     now = time.time()
     if cached and not force_refresh and now - cached.refreshed_at < ttl_seconds:
         return cached
 
     try:
-        reasoning = _discover_model_reasoning(base_url, api_key, model_names, models_url=models_url)
-        entry = ModelReasoningDiscoveryCacheEntry(reasoning=reasoning, refreshed_at=now)
-        _model_reasoning_discovery_cache[cache_key] = entry
+        reasoning, context_windows = _discover_model_catalog(
+            base_url,
+            api_key,
+            model_names,
+            models_url=models_url,
+        )
+        entry = ModelCatalogDiscoveryCacheEntry(
+            reasoning=reasoning,
+            context_windows=context_windows,
+            refreshed_at=now,
+        )
+        _model_catalog_discovery_cache[cache_key] = entry
         return entry
     except RuntimeError as exc:
         logger.debug("%s", exc)
         if cached:
-            return ModelReasoningDiscoveryCacheEntry(
+            return ModelCatalogDiscoveryCacheEntry(
                 reasoning=cached.reasoning,
+                context_windows=cached.context_windows,
                 refreshed_at=cached.refreshed_at,
                 error=str(exc),
             )
-        return ModelReasoningDiscoveryCacheEntry(reasoning={}, refreshed_at=now, error=str(exc))
+        return ModelCatalogDiscoveryCacheEntry(
+            reasoning={},
+            context_windows={},
+            refreshed_at=now,
+            error=str(exc),
+        )
 
 
 def clear_model_discovery_cache() -> None:
     _model_discovery_cache.clear()
     _model_context_discovery_cache.clear()
-    _model_reasoning_discovery_cache.clear()
+    _model_catalog_discovery_cache.clear()
 
 
 def _supports_model_info_context_discovery(provider_id: str, label: str, base_url: str, model_info_url: str | None) -> bool:
@@ -494,20 +534,21 @@ def _supports_model_info_context_discovery(provider_id: str, label: str, base_ur
     )
 
 
-def _supports_catalog_reasoning_discovery(
+def _supports_model_catalog_discovery(
     provider_id: str,
     label: str,
     base_url: str,
     configured: str | None,
 ) -> bool:
-    """Whether this provider's `/models` is worth asking about reasoning.
+    """Whether this provider's `/models` is worth reading for model metadata.
 
     OpenRouter is the only catalogue we know that answers. The ai.ufal Open WebUI
     gateway publishes no metadata at all, and e-infra's LiteLLM `/model/info`
     reports `reasoning_effort` under `supported_openai_params` for every model
     its vLLM adapter serves — embedding models included — while omitting it for
     `thinker`, which actually reasons. Asking either would produce noise, so
-    those stay hand-declared in `data/models.json`.
+    those stay hand-declared in `data/models.json`. (e-infra's context sizes are
+    read separately: those it does publish accurately.)
     """
 
     if configured is not None:
@@ -516,12 +557,13 @@ def _supports_catalog_reasoning_discovery(
     return "openrouter" in provider_keys or "openrouter.ai" in base_url.lower()
 
 
-def _provider_context_window_default(
-    provider_context_window_defaults: dict[str, int] | None,
+def _provider_token_setting(
+    settings: dict[str, int] | None,
     provider_id: str,
     label: str,
 ) -> int | None:
-    defaults = provider_context_window_defaults or {}
+    """Look up a per-provider token count by id or UI label, either spelling."""
+    defaults = settings or {}
     for key in (provider_id, label, _normalize_provider_id(provider_id), _normalize_provider_id(label)):
         tokens = defaults.get(key)
         if tokens:
@@ -530,11 +572,31 @@ def _provider_context_window_default(
     return normalized_defaults.get(_normalize_provider_id(provider_id)) or normalized_defaults.get(_normalize_provider_id(label))
 
 
+def _clamped_context_windows(discovered: dict[str, int], ceiling: int | None) -> dict[str, int]:
+    """Discovered windows, held under a ceiling.
+
+    A published `context_length` is the model's capacity, not a budget: several
+    OpenRouter models advertise a million tokens. Nothing here would spend it —
+    the output budget is a fixed setting and the input side is bounded by
+    `top_k` chunks — but the number reaches the browser as the working context
+    window, and a window nothing can fill turns trimming off and misreports how
+    full the prompt is. So the provider default doubles as a ceiling: discovery
+    can only ever tell us a model is *smaller* than we assumed, which is the
+    case that was silently over-packing. Raise `max_context_window` on the
+    provider in `data/models.json` to actually use the bigger windows.
+    """
+
+    if not ceiling:
+        return dict(discovered)
+    return {model: min(tokens, ceiling) for model, tokens in discovered.items()}
+
+
 def load_provider_configs(
     env: dict[str, str] | None = None,
     force_model_refresh: bool = False,
     model_context_windows: dict[str, int] | None = None,
     provider_context_window_defaults: dict[str, int] | None = None,
+    provider_context_window_ceilings: dict[str, int] | None = None,
     model_reasoning: dict[str, ReasoningSupport] | None = None,
 ) -> list[LLMProviderConfig]:
     resolved_env = env or load_env_values()
@@ -553,7 +615,7 @@ def load_provider_configs(
         models_url = _env_value(resolved_env, provider_id, "MODELS_URL") or None
         model_info_url = _env_value(resolved_env, provider_id, "MODEL_INFO_URL") or None
         discover_models = _parse_bool(resolved_env.get(_env_key(provider_id, "DISCOVER_MODELS")), default=False)
-        discover_reasoning = resolved_env.get(_env_key(provider_id, "DISCOVER_REASONING"))
+        discover_catalog = resolved_env.get(_env_key(provider_id, "DISCOVER_CATALOG"))
         cache_ttl_seconds = _models_cache_ttl_seconds(resolved_env, provider_id)
         supports_streaming = _parse_bool(
             resolved_env.get(_env_key(provider_id, "SUPPORTS_STREAMING")),
@@ -590,10 +652,14 @@ def load_provider_configs(
             public_models = tuple(model for model in public_models if model in model_presets)
         resolved_default_model = default_model if default_model in model_presets else (model_presets[0] if model_presets else "")
         resolved_model_presets = tuple(dict.fromkeys(model_presets))
-        default_context_window_tokens = _provider_context_window_default(
+        default_context_window_tokens = _provider_token_setting(
             provider_context_window_defaults,
             provider_id,
             label,
+        )
+        context_window_ceiling = (
+            _provider_token_setting(provider_context_window_ceilings, provider_id, label)
+            or default_context_window_tokens
         )
         resolved_model_context_windows = filter_model_context_windows(model_context_windows, resolved_model_presets)
         if base_url and resolved_model_presets and _supports_model_info_context_discovery(
@@ -611,24 +677,21 @@ def load_provider_configs(
                 cache_ttl_seconds,
                 force_model_refresh,
             )
-            resolved_model_context_windows.update(context_discovery_entry.context_windows)
-        if default_context_window_tokens:
-            resolved_model_context_windows = {
-                model: resolved_model_context_windows.get(model, default_context_window_tokens)
-                for model in resolved_model_presets
-            }
+            resolved_model_context_windows.update(
+                _clamped_context_windows(context_discovery_entry.context_windows, context_window_ceiling)
+            )
 
         declared_reasoning = model_reasoning or {}
         resolved_model_reasoning = {
             model: declared_reasoning[model] for model in resolved_model_presets if model in declared_reasoning
         }
-        if base_url and resolved_model_presets and _supports_catalog_reasoning_discovery(
+        if base_url and resolved_model_presets and _supports_model_catalog_discovery(
             provider_id,
             label,
             base_url,
-            discover_reasoning,
+            discover_catalog,
         ):
-            reasoning_discovery_entry = _discover_model_reasoning_cached(
+            catalog_entry = _discover_model_catalog_cached(
                 provider_id,
                 base_url,
                 api_key,
@@ -641,8 +704,17 @@ def load_provider_configs(
             # Discovery is a convenience; `data/models.json` is where a probe of
             # what the model *actually did* gets recorded, and that has to be
             # able to correct a catalogue that is wrong or behind.
-            for model, support in reasoning_discovery_entry.reasoning.items():
+            for model, support in catalog_entry.reasoning.items():
                 resolved_model_reasoning.setdefault(model, support)
+            resolved_model_context_windows.update(
+                _clamped_context_windows(catalog_entry.context_windows, context_window_ceiling)
+            )
+
+        if default_context_window_tokens:
+            resolved_model_context_windows = {
+                model: resolved_model_context_windows.get(model, default_context_window_tokens)
+                for model in resolved_model_presets
+            }
 
         providers.append(
             LLMProviderConfig(
@@ -671,6 +743,7 @@ def available_llm_providers(
     force_model_refresh: bool = False,
     model_context_windows: dict[str, int] | None = None,
     provider_context_window_defaults: dict[str, int] | None = None,
+    provider_context_window_ceilings: dict[str, int] | None = None,
     model_reasoning: dict[str, ReasoningSupport] | None = None,
 ) -> list[dict[str, Any]]:
     return [
@@ -680,6 +753,7 @@ def available_llm_providers(
             force_model_refresh=force_model_refresh,
             model_context_windows=model_context_windows,
             provider_context_window_defaults=provider_context_window_defaults,
+            provider_context_window_ceilings=provider_context_window_ceilings,
             model_reasoning=model_reasoning,
         )
     ]

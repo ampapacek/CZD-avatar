@@ -150,6 +150,7 @@ def _refresh_provider_state(force_model_refresh: bool = False) -> None:
         force_model_refresh=force_model_refresh,
         model_context_windows=model_metadata.context_windows,
         provider_context_window_defaults=model_metadata.provider_context_windows,
+        provider_context_window_ceilings=model_metadata.provider_context_window_ceilings,
         model_reasoning=model_metadata.reasoning,
     )
     provider_presets = [provider.to_dict() for provider in provider_configs]

@@ -99,6 +99,9 @@ class ModelMetadata:
 
     context_windows: dict[str, int] = field(default_factory=dict)
     provider_context_windows: dict[str, int] = field(default_factory=dict)
+    # Per provider: the largest window a discovered `context_length` may set.
+    # Absent means the provider's own default doubles as the ceiling.
+    provider_context_window_ceilings: dict[str, int] = field(default_factory=dict)
     reasoning: dict[str, ReasoningSupport] = field(default_factory=dict)
     provider_reasoning: dict[str, ReasoningSupport] = field(default_factory=dict)
 
@@ -196,12 +199,13 @@ def _parse_entries(
     payload: object,
     path: Path,
     label: str,
-) -> tuple[dict[str, int], dict[str, ReasoningSupport]]:
+) -> tuple[dict[str, int], dict[str, int], dict[str, ReasoningSupport]]:
     if not isinstance(payload, dict):
         logger.warning("Ignoring %s metadata from %s: expected a JSON object.", label, path)
-        return {}, {}
+        return {}, {}, {}
 
     windows: dict[str, int] = {}
+    ceilings: dict[str, int] = {}
     reasoning: dict[str, ReasoningSupport] = {}
     for raw_name, entry in payload.items():
         name = str(raw_name).strip()
@@ -214,11 +218,15 @@ def _parse_entries(
             tokens = _parse_context_window(entry["context_window"], path, name)
             if tokens is not None:
                 windows[name] = tokens
+        if "max_context_window" in entry:
+            tokens = _parse_context_window(entry["max_context_window"], path, name)
+            if tokens is not None:
+                ceilings[name] = tokens
         if "reasoning" in entry:
             support = _parse_reasoning(entry["reasoning"], path, name)
             if support is not None:
                 reasoning[name] = support
-    return windows, reasoning
+    return windows, ceilings, reasoning
 
 
 def load_model_metadata(path: Path) -> ModelMetadata:
@@ -234,13 +242,14 @@ def load_model_metadata(path: Path) -> ModelMetadata:
         logger.warning("Ignoring model metadata from %s: expected a JSON object.", path)
         return ModelMetadata()
 
-    model_windows, model_reasoning = _parse_entries(payload.get("models", {}), path, "model")
-    provider_windows, provider_reasoning = _parse_entries(
+    model_windows, _model_ceilings, model_reasoning = _parse_entries(payload.get("models", {}), path, "model")
+    provider_windows, provider_ceilings, provider_reasoning = _parse_entries(
         payload.get("provider_defaults", {}), path, "provider"
     )
     return ModelMetadata(
         context_windows=model_windows,
         provider_context_windows=provider_windows,
+        provider_context_window_ceilings=provider_ceilings,
         reasoning=model_reasoning,
         provider_reasoning=provider_reasoning,
     )

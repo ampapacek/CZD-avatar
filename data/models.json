@@ -6,7 +6,17 @@
     "",
     "context_window — usable input+output tokens. Omitted means fall back to the",
     "provider default, then to CONTEXT_WINDOW_TOKENS.",
-
+    "",
+    "max_context_window — provider_defaults only. The largest window a value",
+    "discovered from the provider's catalogue may set. Absent means the",
+    "provider's own context_window doubles as the ceiling, so discovery can only",
+    "reveal that a model is SMALLER than we assumed. Several OpenRouter models",
+    "advertise a million tokens; that is capacity, not a budget, and letting it",
+    "through would switch off trimming and misreport how full the prompt is.",
+    "Raise this to use the bigger windows on purpose. e-infra is raised to",
+    "262144 because it costs no tokens and genuinely serves 131k-262k slots;",
+    "only its six models that claim a million are held down. OpenRouter keeps",
+    "the default as its ceiling, because there the window is a bill.",
     "",
     "reasoning — omitted means the model does not reason and nothing is sent.",
     "  param      'reasoning' sends {reasoning: {effort: X}}, 'reasoning_effort'",
@@ -161,7 +171,8 @@
       "context_window": 16000
     },
     "e-infra": {
-      "context_window": 60000
+      "context_window": 60000,
+      "max_context_window": 262144
     },
     "OpenRouter": {
       "context_window": 60000

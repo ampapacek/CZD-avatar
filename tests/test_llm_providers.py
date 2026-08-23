@@ -216,6 +216,9 @@ class LLMProviderTests(unittest.TestCase):
         self.assertIsNone(discovered["openai/gpt-5.4"]["default"])
         # A mandatory model keeps no off switch, whatever the catalogue says.
         self.assertEqual(discovered["openai/gpt-oss-120b"]["efforts"], ["low", "medium", "high"])
+        # It reasons either way, so the untouched selector asks for the cheapest
+        # level rather than leaving it at the catalogue's "medium".
+        self.assertEqual(discovered["openai/gpt-oss-120b"]["default"], "low")
         # "Reasons, but not by effort level" is nothing we can express: no
         # control, no parameter, exactly as before discovery existed.
         self.assertNotIn("anthropic/claude-haiku-4.5", discovered)
@@ -251,6 +254,117 @@ class LLMProviderTests(unittest.TestCase):
         # `/models` and `/model/info`, and no third call for reasoning.
         self.assertEqual(get.call_count, 2)
         self.assertEqual(providers[0]["model_reasoning"], {})
+
+    def test_catalogue_context_length_is_imported_under_the_provider_ceiling(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "data": [
+                # Smaller than the provider default: the case worth importing,
+                # because assuming 60000 for it was over-packing the prompt.
+                {"id": "small/model", "context_length": 32768},
+                # A capacity nothing here can spend. Held at the ceiling.
+                {"id": "huge/model", "context_length": 1048576},
+                # Nonsense and absent both leave the provider default standing.
+                {"id": "broken/model", "context_length": "lots"},
+                {"id": "quiet/model"},
+            ]
+        }
+        response.raise_for_status.return_value = None
+
+        env = {
+            "LLM_PROVIDERS": "openrouter",
+            "LLM_PROVIDER_OPENROUTER_NAME": "OpenRouter",
+            "LLM_PROVIDER_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+            "LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL": "small/model",
+            "LLM_PROVIDER_OPENROUTER_MODELS": "small/model,huge/model,broken/model,quiet/model",
+        }
+
+        with patch("app.rag.llm_providers.httpx.get", return_value=response):
+            providers = available_llm_providers(
+                env, provider_context_window_defaults={"OpenRouter": 60000}
+            )
+
+        self.assertEqual(
+            providers[0]["model_context_windows"],
+            {
+                "small/model": 32768,
+                "huge/model": 60000,
+                "broken/model": 60000,
+                "quiet/model": 60000,
+            },
+        )
+
+        # Raising the ceiling is how the big windows get used on purpose.
+        clear_model_discovery_cache()
+        with patch("app.rag.llm_providers.httpx.get", return_value=response):
+            raised = available_llm_providers(
+                env,
+                provider_context_window_defaults={"OpenRouter": 60000},
+                provider_context_window_ceilings={"OpenRouter": 200000},
+            )
+
+        self.assertEqual(raised[0]["model_context_windows"]["huge/model"], 200000)
+        self.assertEqual(raised[0]["model_context_windows"]["small/model"], 32768)
+
+    def test_model_info_context_windows_obey_the_same_ceiling(self) -> None:
+        # e-infra serves several models that report a million tokens. One policy
+        # for the field, whichever endpoint published it.
+        models_response = Mock()
+        models_response.json.return_value = {"data": [{"id": "kimi"}, {"id": "mini"}]}
+        models_response.raise_for_status.return_value = None
+        model_info_response = Mock()
+        model_info_response.json.return_value = {
+            "data": [
+                {"model_name": "kimi", "model_info": {"context_size": 1048576}},
+                {"model_name": "mini", "model_info": {"context_size": 32768}},
+            ]
+        }
+        model_info_response.raise_for_status.return_value = None
+
+        with patch(
+            "app.rag.llm_providers.httpx.get", side_effect=[models_response, model_info_response]
+        ):
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "einfra",
+                    "LLM_PROVIDER_EINFRA_NAME": "e-infra",
+                    "LLM_PROVIDER_EINFRA_BASE_URL": "https://llm.ai.e-infra.cz/v1",
+                    "LLM_PROVIDER_EINFRA_DEFAULT_MODEL": "mini",
+                    "LLM_PROVIDER_EINFRA_DISCOVER_MODELS": "true",
+                },
+                provider_context_window_defaults={"e-infra": 60000},
+            )
+
+        self.assertEqual(providers[0]["model_context_windows"], {"kimi": 60000, "mini": 32768})
+
+    def test_catalogue_is_read_once_for_reasoning_and_context(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "data": [
+                {
+                    "id": "openai/gpt-5.4",
+                    "context_length": 40000,
+                    "reasoning": {"mandatory": True, "supported_efforts": ["high", "low"]},
+                }
+            ]
+        }
+        response.raise_for_status.return_value = None
+
+        with patch("app.rag.llm_providers.httpx.get", return_value=response) as get:
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "openrouter",
+                    "LLM_PROVIDER_OPENROUTER_NAME": "OpenRouter",
+                    "LLM_PROVIDER_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                    "LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL": "openai/gpt-5.4",
+                    "LLM_PROVIDER_OPENROUTER_MODELS": "openai/gpt-5.4",
+                }
+            )
+
+        # Both facts come from the same records, so they cost one request.
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(providers[0]["model_context_windows"], {"openai/gpt-5.4": 40000})
+        self.assertEqual(providers[0]["model_reasoning"]["openai/gpt-5.4"]["default"], "low")
 
     def test_unreachable_catalogue_leaves_reasoning_undeclared(self) -> None:
         with patch("app.rag.llm_providers.httpx.get", side_effect=RuntimeError("boom")):
