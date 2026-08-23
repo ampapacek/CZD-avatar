@@ -141,7 +141,39 @@ class ModelMetadataTests(unittest.TestCase):
         # The default went with it rather than being sent as an unlisted value.
         self.assertIsNone(support.default)
         self.assertEqual(support.payload("none"), {})
-        self.assertEqual(support.payload(None), {})
+        # It does not fall back to sending nothing either: the model reasons
+        # regardless, so the derived default is the cheapest level it accepts.
+        self.assertEqual(support.payload(None), {"reasoning_effort": "low"})
+
+    def test_the_default_effort_is_derived_from_whether_reasoning_is_mandatory(self) -> None:
+        # The whole rule in one place. Lowering a mandatory model changes only
+        # how much it thinks; sending anything to an optional one changes
+        # whether it thinks at all, which is not ours to decide.
+        path = write_metadata(
+            {
+                "models": {
+                    "forced": {"reasoning": {"mandatory": True, "efforts": ["high", "medium", "low"]}},
+                    "optional": {"reasoning": {"efforts": ["none", "low", "high"]}},
+                    "unsteerable": {"reasoning": {"mandatory": True}},
+                    "declared": {
+                        "reasoning": {"mandatory": True, "efforts": ["low", "high"], "default": "high"}
+                    },
+                }
+            }
+        )
+        reasoning = load_model_metadata(path).reasoning
+
+        # Cheapest of what it accepts, not the first one listed.
+        self.assertEqual(reasoning["forced"].effective_default, "low")
+        self.assertEqual(reasoning["forced"].payload(None), {"reasoning_effort": "low"})
+        # An off switch exists, so leaving it alone is a real choice: say nothing.
+        self.assertIsNone(reasoning["optional"].effective_default)
+        self.assertEqual(reasoning["optional"].payload(None), {})
+        # Reasons anyway and takes no levels: there is nothing to send.
+        self.assertIsNone(reasoning["unsteerable"].effective_default)
+        self.assertEqual(reasoning["unsteerable"].payload(None), {})
+        # A declared default overrules the rule, which is what it is for.
+        self.assertEqual(reasoning["declared"].effective_default, "high")
 
     def test_optional_reasoning_keeps_its_off_switch(self) -> None:
         path = write_metadata(

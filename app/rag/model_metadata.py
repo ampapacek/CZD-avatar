@@ -24,6 +24,10 @@ class ReasoningSupport:
     the model returns a trace whatever we ask, but the effort parameter does not
     reach it — so no control is offered and no parameter is sent, while the
     trace is still shown.
+
+    `default` may be left unset: `effective_default` then derives one from
+    `mandatory`, so neither the file nor a provider catalogue has to state the
+    obvious for every model.
     """
 
     # Request field: "reasoning" sends {"reasoning": {"effort": ...}},
@@ -32,7 +36,8 @@ class ReasoningSupport:
     # Literal values the provider accepts, in the order to show them. Empty
     # means the effort cannot be steered.
     efforts: tuple[str, ...] = ()
-    # What to send when the user has not chosen: usually the cheapest option.
+    # Sent when the user has not chosen. Leave it None to derive one from
+    # `mandatory`; see `effective_default`.
     default: str | None = None
     # True when the model reasons whether or not it is asked to.
     mandatory: bool = False
@@ -43,9 +48,35 @@ class ReasoningSupport:
     def controllable(self) -> bool:
         return bool(self.efforts)
 
+    @property
+    def effective_default(self) -> str | None:
+        """What to send when the user has not picked an effort.
+
+        A declared `default` wins. Otherwise the rule is: a model that reasons
+        whether or not it is asked gets the cheapest level it accepts, and a
+        model that can be left alone is left alone.
+
+        The asymmetry is the point. Lowering a mandatory model's effort only
+        changes *how much* it thinks — it was going to think regardless, and the
+        trace it writes is output nobody asked for and everybody pays for.
+        Sending a level to an optional model would change *whether* it thinks,
+        which is a different answer than the user got yesterday, so those keep
+        sending nothing. It also keeps us off the levels a model does not take:
+        `mistral-medium-3.5` accepts only `none`/`high` and 400s on `low`.
+        """
+        if self.default:
+            return self.default
+        if not self.mandatory:
+            return None
+        # Off-efforts are stripped from a mandatory model at parse time, but a
+        # hand-built object could still carry one, and defaulting a model to a
+        # switch it cannot honour is exactly the bug this rule exists to avoid.
+        steerable = sort_efforts(tuple(e for e in self.efforts if e not in OFF_EFFORTS))
+        return steerable[0] if steerable else None
+
     def payload(self, effort: str | None) -> dict[str, object]:
         """The request fragment for one effort, or {} when nothing should be sent."""
-        chosen = (effort or self.default or "").strip()
+        chosen = (effort or self.effective_default or "").strip()
         if not chosen or chosen not in self.efforts:
             return {}
         if self.param == "reasoning":
@@ -56,7 +87,7 @@ class ReasoningSupport:
         return {
             "param": self.param,
             "efforts": list(self.efforts),
-            "default": self.default,
+            "default": self.effective_default,
             "mandatory": self.mandatory,
             "note": self.note,
         }
@@ -77,6 +108,20 @@ VALID_REASONING_PARAMS = ("reasoning", "reasoning_effort")
 # Effort values that mean "do not reason". Providers spell it differently, and a
 # model that reasons unconditionally accepts none of them.
 OFF_EFFORTS = ("none", "off")
+
+# Cheapest first. Providers publish their effort lists in whatever order they
+# like (OpenRouter counts down from "high") and the UI shows them as given, so a
+# discovered vocabulary is sorted into this one and "the cheapest level this
+# model takes" is read off it. Anything unrecognised keeps its published
+# position at the end rather than being dropped or guessed at.
+EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def sort_efforts(efforts: tuple[str, ...]) -> tuple[str, ...]:
+    known = [effort for effort in EFFORT_ORDER if effort in efforts]
+    unknown = [effort for effort in efforts if effort not in EFFORT_ORDER]
+    return tuple(known + unknown)
+
 
 MIN_CONTEXT_WINDOW_TOKENS = 1024
 
