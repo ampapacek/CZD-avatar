@@ -1142,7 +1142,14 @@ async function runQuery(retrieveOnlyMode) {
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
           statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
         },
+        onReasoning(delta) {
+          currentReasoning += delta;
+          renderReasoning(currentReasoning, { streaming: true });
+        },
         onToken(token) {
+          if (!streamedAnswerText) {
+            collapseReasoning();
+          }
           streamedAnswerText += token;
           renderAnswer(streamedAnswerText);
         },
@@ -2518,13 +2525,28 @@ function refreshReasoningEffortOptions() {
 
 // Some models reason whether or not they are asked to. Showing the trace beats
 // discarding it silently, but it is not part of the answer, so it stays folded.
-function renderReasoning(text) {
+//
+// While it streams it is the exception: a reasoning model writes its whole
+// trace before its first answer token, so for those seconds the trace is the
+// only thing happening and the panel is worth having open. `collapseReasoning`
+// folds it again as soon as the answer starts.
+function renderReasoning(text, { streaming = false } = {}) {
   if (!reasoningPanel || !reasoningText) {
     return;
   }
   const trimmed = String(text || "").trim();
   reasoningPanel.hidden = !trimmed;
   reasoningText.textContent = trimmed;
+  if (streaming && trimmed) {
+    reasoningPanel.open = true;
+    reasoningText.scrollTop = reasoningText.scrollHeight;
+  }
+}
+
+function collapseReasoning() {
+  if (reasoningPanel) {
+    reasoningPanel.open = false;
+  }
 }
 
 function updateModelContextWindowNote() {
@@ -2681,6 +2703,8 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
         handlers.onRerankProgress?.(event.data);
       } else if (event.event === "sources") {
         handlers.onSources?.(event.data);
+      } else if (event.event === "reasoning") {
+        handlers.onReasoning?.(event.data.text || "", event.data);
       } else if (event.event === "token") {
         handlers.onToken?.(event.data.text || "", event.data);
       } else if (event.event === "done") {
@@ -6059,7 +6083,7 @@ function renderConversationMessage(message, index = 0) {
   const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
   const reasoningBlock =
     message.role === "assistant" && (message.reasoning || "").trim()
-      ? `<details class="reasoning-panel">
+      ? `<details class="reasoning-panel"${message.reasoning_streaming ? " open" : ""}>
           <summary>Uvažování modelu</summary>
           <pre class="reasoning-text">${escapeHtml(message.reasoning)}</pre>
         </details>`
@@ -6217,6 +6241,61 @@ async function submitConversationTurn() {
   conversationQuestion.value = "";
 
   let assistantText = "";
+  let assistantReasoning = "";
+  // Reasoning deltas and answer tokens both grow the same in-progress assistant
+  // message, so they share one writer rather than two copies that drift.
+  const upsertStreamingAssistantMessage = ({ reasoningStreaming }) => {
+    const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
+    if (!liveConversation) {
+      return;
+    }
+    const messages = [...liveConversation.messages];
+    const lastMessage = messages[messages.length - 1];
+    const streamed = {
+      content: assistantText,
+      reasoning: assistantReasoning,
+      reasoning_streaming: reasoningStreaming,
+      sources: latestSources,
+      retrieved_chunks: latestChunks,
+    };
+    if (lastMessage?.role === "assistant") {
+      Object.assign(lastMessage, streamed, latestRetrievalInfo);
+    } else {
+      messages.push({
+        role: "assistant",
+        question: prompt,
+        ...latestRetrievalInfo,
+        ...streamed,
+        settings: sanitizedPayload,
+        omitted_chunks: [],
+        token_budget: null,
+        chunk_budget_warnings: [],
+        conversation_summary: liveConversation.conversation_summary || null,
+        model_used: payload.model,
+        upstream_model: null,
+        response_time_seconds: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    updateConversation({
+      ...liveConversation,
+      rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+      updatedAt: new Date().toISOString(),
+      messages,
+    });
+    renderConversationWorkspace();
+  };
+  const clearStreamingReasoningFlag = () => {
+    const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
+    const lastMessage = liveConversation?.messages?.[liveConversation.messages.length - 1];
+    if (!lastMessage?.reasoning_streaming) {
+      return;
+    }
+    const messages = [...liveConversation.messages];
+    messages[messages.length - 1] = { ...lastMessage, reasoning_streaming: false };
+    updateConversation({ ...liveConversation, messages });
+    renderConversationWorkspace();
+  };
   let latestSources = [];
   let latestChunks = [];
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
@@ -6301,45 +6380,16 @@ async function submitConversationTurn() {
       onSources(data) {
         handleConversationSources(data);
       },
+      onReasoning(delta) {
+        assistantReasoning += delta;
+        // The trace arrives before the answer does, so this is what creates the
+        // assistant bubble on a reasoning model — with `reasoning_streaming` set
+        // so the panel renders open until the first answer token clears it.
+        upsertStreamingAssistantMessage({ reasoningStreaming: true });
+      },
       onToken(token) {
         assistantText += token;
-        const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
-        if (!liveConversation) {
-          return;
-        }
-        const messages = [...liveConversation.messages];
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage?.role === "assistant") {
-          lastMessage.content = assistantText;
-          lastMessage.sources = latestSources;
-          lastMessage.retrieved_chunks = latestChunks;
-          Object.assign(lastMessage, latestRetrievalInfo);
-        } else {
-          messages.push({
-            role: "assistant",
-            question: prompt,
-            ...latestRetrievalInfo,
-            content: assistantText,
-            settings: sanitizedPayload,
-            sources: latestSources,
-            retrieved_chunks: latestChunks,
-            omitted_chunks: [],
-            token_budget: null,
-            chunk_budget_warnings: [],
-            conversation_summary: liveConversation.conversation_summary || null,
-            model_used: payload.model,
-            upstream_model: null,
-            response_time_seconds: null,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        updateConversation({
-          ...liveConversation,
-          rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-          updatedAt: new Date().toISOString(),
-          messages,
-        });
-        renderConversationWorkspace();
+        upsertStreamingAssistantMessage({ reasoningStreaming: false });
       },
       onDone(data) {
         latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
@@ -6357,7 +6407,8 @@ async function submitConversationTurn() {
           token_budget: data.token_budget || null,
           chunk_budget_warnings: data.chunk_budget_warnings || [],
           conversation_summary: data.conversation_summary || null,
-          reasoning: data.reasoning || "",
+          reasoning: data.reasoning || assistantReasoning,
+          reasoning_streaming: false,
           conversation_compacted_through: compactedThrough + (Number(data.conversation_folded_message_count) || 0),
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
@@ -6417,6 +6468,10 @@ async function submitConversationTurn() {
     if (activeConversationController === controller) {
       activeConversationController = null;
     }
+    // An aborted or failed stream never reaches `onDone`, and the flag is
+    // stored with the message — leave it set and the panel stays wedged open
+    // for the life of the conversation.
+    clearStreamingReasoningFlag();
     conversationSubmitButton.disabled = false;
     if (conversationCancelButton) {
       conversationCancelButton.hidden = true;

@@ -89,7 +89,7 @@ from app.rag.llm_providers import (
     provider_public_models,
     resolve_llm_provider,
 )
-from app.rag.llm import validate_api_key
+from app.rag.llm import REASONING, validate_api_key
 from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
@@ -1515,20 +1515,29 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             # may resume each yield in a different copied Context.  The stream
             # captures the analytics context above, so do not keep a ContextVar
             # token open while yielding SSE events.
-            for token in stream:
-                if first_token_at is None and token:
+            for kind, text in stream:
+                if kind == REASONING:
+                    # A separate event, so the trace can be shown as it is
+                    # written without ever being mistaken for the answer. Note
+                    # that it deliberately does not start the TTFT clock: a
+                    # reasoning model sends its whole trace first, and counting
+                    # that as "time to first token" would report a model as
+                    # faster the longer it thinks.
+                    yield _sse_event("reasoning", {"text": text})
+                    continue
+                if first_token_at is None and text:
                     first_token_at = time.perf_counter()
                     ttft_ms = ms(first_token_at - generation_started)
-                answer_parts.append(token)
-                answer += token
-                yield _sse_event("token", {"text": token})
+                answer_parts.append(text)
+                answer += text
+                yield _sse_event("token", {"text": text})
 
             generation_seconds = time.perf_counter() - generation_started
             # Tokens went out raw so the client could render them as they
             # arrived; the stored/replayed answer is the cleaned one.
             answer = strip_model_source_list(answer)
-            # Reasoning deltas were collected alongside the content rather than
-            # streamed, so the token stream stays the answer alone.
+            # The whole trace, for history and for a client that missed the
+            # deltas (a reconnect, or one that does not handle the event).
             reasoning_text = (getattr(stream, "reasoning_text", "") or "").strip()
             if first_token_at is not None:
                 token_stream_ms = ms(time.perf_counter() - first_token_at)

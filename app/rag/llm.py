@@ -34,19 +34,34 @@ def _reasoning_text(payload: dict | None) -> str:
     return ""
 
 
+ANSWER = "answer"
+REASONING = "reasoning"
+
+#: One piece of the stream: ``(ANSWER | REASONING, text)``.
+StreamChunk = tuple[str, str]
+
+
 @runtime_checkable
 class TokenStream(Protocol):
     """Contract for ``stream_generate`` return values.
 
-    Callers iterate the stream to receive token strings, then read
+    Callers iterate the stream to receive ``(kind, text)`` chunks, then read
     ``upstream_model`` (populated as a side effect of iteration) to learn the
     model the upstream provider actually served. Implementations and test
     doubles must expose both; a bare generator does not satisfy this.
+
+    The two kinds are interleaved as the provider sends them, which in practice
+    means a reasoning model emits its whole trace before its first answer token.
+    That is exactly why the kinds are yielded rather than the trace being held
+    back until the end: waiting is the part the reader most wants to see into.
+    ``reasoning_text`` still accumulates the whole trace for the caller that
+    wants it in one piece.
     """
 
     upstream_model: str | None
+    reasoning_text: str
 
-    def __iter__(self) -> Iterator[str]: ...
+    def __iter__(self) -> Iterator[StreamChunk]: ...
 
 
 class LLMClient:
@@ -201,12 +216,13 @@ class _OpenAICompatibleStream:
         self.upstream_model: str | None = None
         self.analytics_context = analytics_context
         self.reasoning = reasoning
-        # Reasoning deltas arrive interleaved with content. They are collected
-        # here rather than yielded, so the caller's token stream stays the
-        # answer alone; the caller reads this once iteration finishes.
+        # Reasoning deltas arrive interleaved with content and are yielded under
+        # their own kind, so a caller can show the trace as it is written while
+        # keeping it out of the answer. Also joined here for the caller that
+        # wants the finished trace in one piece.
         self.reasoning_text: str = ""
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[StreamChunk]:
         started = time.perf_counter()
         answer_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -254,11 +270,12 @@ class _OpenAICompatibleStream:
                         if reasoning_delta:
                             reasoning_parts.append(reasoning_delta)
                             self.reasoning_text = "".join(reasoning_parts)
+                            yield (REASONING, reasoning_delta)
                         content = delta.get("content")
                         if content:
                             text = str(content)
                             answer_parts.append(text)
-                            yield text
+                            yield (ANSWER, text)
             context_manager = bind_context(self.analytics_context) if self.analytics_context else nullcontext()
             with context_manager:
                 _emit_upstream(

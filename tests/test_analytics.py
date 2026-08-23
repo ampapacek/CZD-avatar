@@ -140,7 +140,10 @@ class AnalyticsEndpointTests(unittest.TestCase):
         real_client = httpx.Client(transport=httpx.MockTransport(stream_handler))
         with bind_context(context):
             with patch("app.rag.llm.httpx.Client", return_value=real_client):
-                self.assertEqual(list(client.stream_generate([{"role": "user", "content": "another secret"}])), ["token"])
+                self.assertEqual(
+                    list(client.stream_generate([{"role": "user", "content": "another secret"}])),
+                    [("answer", "token")],
+                )
         calls = [event for event in self.events() if event["event"] == "upstream_call"]
         self.assertEqual(len(calls), 2)
         self.assertEqual({event["streaming"] for event in calls}, {False, True})
