@@ -72,6 +72,10 @@ class ModelMetadata:
 
 VALID_REASONING_PARAMS = ("reasoning", "reasoning_effort")
 
+# Effort values that mean "do not reason". Providers spell it differently, and a
+# model that reasons unconditionally accepts none of them.
+OFF_EFFORTS = ("none", "off")
+
 MIN_CONTEXT_WINDOW_TOKENS = 1024
 
 
@@ -108,6 +112,23 @@ def _parse_reasoning(payload: object, path: Path, name: str) -> ReasoningSupport
         # Says neither "you can steer it" nor "it happens anyway" — nothing to act on.
         logger.warning("Ignoring reasoning for %r in %s: no efforts and not mandatory.", name, path)
         return None
+
+    if mandatory:
+        # "Mandatory" and an off switch contradict each other, and we shipped the
+        # contradiction: `openai/gpt-oss-120b` listed "none", which OpenRouter
+        # answers with `400 Reasoning is mandatory for this endpoint and cannot
+        # be disabled` — so *every* answer from that model failed. Drop the
+        # switch rather than offer one that cannot work. A model that really can
+        # be turned off must not claim to be mandatory.
+        steerable = tuple(effort for effort in efforts if effort not in OFF_EFFORTS)
+        if steerable != efforts:
+            logger.warning(
+                "Dropping the off switch from mandatory reasoning for %r in %s: %s cannot be disabled.",
+                name,
+                path,
+                ", ".join(effort for effort in efforts if effort in OFF_EFFORTS),
+            )
+        efforts = steerable
 
     raw_default = payload.get("default")
     default = str(raw_default).strip() if raw_default is not None else None

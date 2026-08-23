@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.rag.model_metadata import load_model_metadata
+from app.rag.model_metadata import OFF_EFFORTS, load_model_metadata
 
 
 def write_metadata(payload: object) -> Path:
@@ -118,6 +118,39 @@ class ModelMetadataTests(unittest.TestCase):
         self.assertEqual(support.payload("high"), {})
 
 
+    def test_mandatory_reasoning_loses_its_off_switch(self) -> None:
+        # `openai/gpt-oss-120b` shipped `mandatory` alongside "none", and
+        # OpenRouter answers "none" with a 400 that killed every answer. The
+        # steerable levels survive; the switch that cannot work does not.
+        path = write_metadata(
+            {
+                "models": {
+                    "m": {
+                        "reasoning": {
+                            "mandatory": True,
+                            "efforts": ["none", "off", "low", "high"],
+                            "default": "none",
+                        }
+                    }
+                }
+            }
+        )
+        support = load_model_metadata(path).reasoning["m"]
+        self.assertEqual(support.efforts, ("low", "high"))
+        # The default went with it rather than being sent as an unlisted value.
+        self.assertIsNone(support.default)
+        self.assertEqual(support.payload("none"), {})
+        self.assertEqual(support.payload(None), {})
+
+    def test_optional_reasoning_keeps_its_off_switch(self) -> None:
+        path = write_metadata(
+            {"models": {"m": {"reasoning": {"efforts": ["none", "high"], "default": "none"}}}}
+        )
+        support = load_model_metadata(path).reasoning["m"]
+        self.assertEqual(support.efforts, ("none", "high"))
+        self.assertEqual(support.payload(None), {"reasoning_effort": "none"})
+
+
 class ShippedMetadataTests(unittest.TestCase):
     """The file we actually ship must parse — a typo here silently drops a model."""
 
@@ -129,6 +162,22 @@ class ShippedMetadataTests(unittest.TestCase):
                 self.assertIn(name, metadata.context_windows, f"{name} lost its context window")
             if "reasoning" in entry:
                 self.assertIn(name, metadata.reasoning, f"{name} lost its reasoning declaration")
+
+    def test_no_shipped_model_offers_an_off_switch_it_does_not_have(self) -> None:
+        # The loader strips the contradiction, so a typo here is silent rather
+        # than fatal. Catch it in the file instead.
+        declared = json.loads(Path("data/models.json").read_text(encoding="utf-8"))
+        for group in ("models", "provider_defaults"):
+            for name, entry in declared.get(group, {}).items():
+                reasoning = entry.get("reasoning") or {}
+                if not reasoning.get("mandatory"):
+                    continue
+                offered = set(reasoning.get("efforts") or [])
+                self.assertEqual(
+                    offered & set(OFF_EFFORTS),
+                    set(),
+                    f"{name} is mandatory but offers a way to turn reasoning off",
+                )
 
 
 if __name__ == "__main__":
