@@ -64,13 +64,13 @@ describe("application citations", () => {
     expect(dom.querySelector('[data-citation-id="Z9"]')).toBeNull();
   });
 
-  it("numbers adjacent and repeated citations by first appearance", () => {
-    const dom = render("Druhá [^Z5][^Z1], znovu [^Z5].");
+  it("numbers by first appearance and sorts adjacent citations numerically", () => {
+    const dom = render("První [^Z1]. Společně [^Z5][^Z1], znovu [^Z5].");
     const refs = [...dom.querySelectorAll(".footnote-ref a")];
-    expect(refs.map((ref) => ref.textContent)).toEqual(["1", "2", "1"]);
-    expect(refs.map((ref) => ref.dataset.citationId)).toEqual(["Z5", "Z1", "Z5"]);
+    expect(refs.map((ref) => ref.textContent)).toEqual(["1", "1", "2", "2"]);
+    expect(refs.map((ref) => ref.dataset.citationId)).toEqual(["Z1", "Z1", "Z5", "Z5"]);
     expect(dom.querySelector(".footnote-sep")?.textContent).toBe(",");
-    expect([...dom.querySelectorAll(".footnotes li")].map((item) => item.id)).toEqual(["fn-Z5", "fn-Z1"]);
+    expect([...dom.querySelectorAll(".footnotes li")].map((item) => item.id)).toEqual(["fn-Z1", "fn-Z5"]);
   });
 
   it("removes generated footnote definitions and final source sections", () => {
