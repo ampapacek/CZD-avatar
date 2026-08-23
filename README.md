@@ -358,7 +358,7 @@ Important `.env` variables:
 - `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
 - `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
 - `LLM_PROVIDER_<ID>_API_KEY_LABEL`
-- `MODEL_CONTEXT_WINDOWS_PATH`
+- `MODEL_METADATA_PATH` (context windows and reasoning support per model; see `data/models.json`)
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`
@@ -393,11 +393,12 @@ Important `.env` variables:
 - `CONVERSATION_SUMMARY_TRIGGER_TOKENS`
 - `CONVERSATION_RECENT_MESSAGES`
 - `CONVERSATION_PROMPT_MESSAGES`
-- `MODEL_REASONING_PATH`
 - `RAW_DATA_DIR`
 - `CHUNK_CATALOG_PATH`
 - `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
 - `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
+
+`MODEL_METADATA_PATH` replaces the earlier `MODEL_CONTEXT_WINDOWS_PATH` and `MODEL_REASONING_PATH`. It is not just a rename: the two files merged into one, with `models` and `provider_defaults` sections and `context_window` / `max_context_window` / `reasoning` per entry. `data/models.json` documents the shape in its own `_comment`.
 
 ## Basic Test Run
 
