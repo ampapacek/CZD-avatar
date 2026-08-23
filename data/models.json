@@ -46,11 +46,66 @@
     "            answers with '400 Reasoning is mandatory for this endpoint and",
     "            cannot be disabled' — it broke every answer from that model.",
     "",
+    "e-infra 'coder' and 'agentic' accept the parameter and return no trace at",
+    "any level (they are served with enable_thinking off), so they declare",
+    "nothing and get no control — same as a model that does not reason.",
+    "",
     "The MLX-backed Nemotrons report no context length and we have not measured",
     "one, so they deliberately have no context_window and fall back to the AI Ufal",
     "provider default. Guessing high risks overflowing the served slot."
   ],
   "models": {
+    "mini": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["low", "medium", "high"],
+        "mandatory": true,
+        "note": "e-infra. Probed 2026-08-23: low/medium/high are honoured and the trace grows with them. 'none' is accepted but does not disable — it returns the same trace as omitting the parameter — so no off switch is offered. minimal/xhigh/max are a 400."
+      }
+    },
+    "gpt-oss-120b": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["low", "medium", "high"],
+        "mandatory": true,
+        "note": "e-infra. Same model and same behaviour as 'mini': 'none' is accepted and ignored, minimal/xhigh/max are a 400. Not to be confused with 'openai/gpt-oss-120b', which is the OpenRouter route to it and takes the nested 'reasoning' parameter."
+      }
+    },
+    "thinker": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra (deepseek). Probed 2026-08-23: 'none' really does turn it off. The other levels are all accepted but barely change the trace length, so the useful choice here is on or off."
+      }
+    },
+    "qwen3.5": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "low", "medium", "high"],
+        "note": "e-infra. Probed 2026-08-23: reasons at length unless asked not to (4k characters of trace on a one-sentence question), and 'none' turns it off. minimal/xhigh/max are a 400."
+      }
+    },
+    "glm-5.2": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra. Probed 2026-08-23: the whole vocabulary is accepted and 'none' turns it off, but trace length does not track the level in any consistent way."
+      }
+    },
+    "mistral-medium-3.5": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "high"],
+        "note": "e-infra. Probed 2026-08-23: 'reasoning_effort must be either \"none\" or \"high\"' — anything else is a 400, including the low/medium/max that the serving stack's own validator claims to accept. Off unless asked."
+      }
+    },
+    "command-a": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra. Probed 2026-08-23: returns no trace at all until asked, then the same trace for every level above 'none'. The switch is real; the levels are not."
+      }
+    },
     "LLM3.unsloth/Llama-3.3-70B-Instruct-GGUF:UD-Q6_K_XL": {
       "context_window": 16000
     },
