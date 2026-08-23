@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from app.rag.model_metadata import ReasoningSupport
 from app.rag.llm_providers import (
     available_llm_providers,
     clear_model_discovery_cache,
@@ -156,6 +157,116 @@ class LLMProviderTests(unittest.TestCase):
                 "thinker": 64000,
             },
         )
+
+    def test_openrouter_reasoning_support_is_discovered_from_its_catalogue(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "data": [
+                {
+                    "id": "openai/gpt-5.4",
+                    "supported_parameters": ["reasoning", "reasoning_effort"],
+                    "reasoning": {
+                        "mandatory": False,
+                        "supported_efforts": ["xhigh", "high", "medium", "low", "none"],
+                        "default_effort": "medium",
+                    },
+                },
+                {
+                    "id": "openai/gpt-oss-120b",
+                    "supported_parameters": ["reasoning", "reasoning_effort"],
+                    # Mandatory and still listing "none" is how OpenRouter's own
+                    # catalogue reads for this model; sending it is a 400.
+                    "reasoning": {"mandatory": True, "supported_efforts": ["high", "medium", "low", "none"]},
+                },
+                {"id": "anthropic/claude-haiku-4.5", "reasoning": {"mandatory": False}},
+                {"id": "meta-llama/llama-4-scout", "reasoning": None},
+                {"id": "openai/gpt-5-nano", "reasoning": {"mandatory": True, "supported_efforts": ["high"]}},
+            ]
+        }
+        response.raise_for_status.return_value = None
+
+        with patch("app.rag.llm_providers.httpx.get", return_value=response) as get:
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "openrouter",
+                    "LLM_PROVIDER_OPENROUTER_NAME": "OpenRouter",
+                    "LLM_PROVIDER_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                    "LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL": "openai/gpt-5.4",
+                    "LLM_PROVIDER_OPENROUTER_MODELS": (
+                        "openai/gpt-5.4,openai/gpt-oss-120b,anthropic/claude-haiku-4.5,"
+                        "meta-llama/llama-4-scout,openai/gpt-5-nano"
+                    ),
+                },
+                model_reasoning={
+                    "openai/gpt-5-nano": ReasoningSupport(
+                        param="reasoning", efforts=("minimal", "low"), mandatory=True, note="probed"
+                    )
+                },
+            )
+
+        discovered = providers[0]["model_reasoning"]
+
+        self.assertEqual(get.call_args.args[0], "https://openrouter.ai/api/v1/models")
+        # Published high-to-low, shown cheapest first.
+        self.assertEqual(
+            discovered["openai/gpt-5.4"]["efforts"], ["none", "low", "medium", "high", "xhigh"]
+        )
+        self.assertFalse(discovered["openai/gpt-5.4"]["mandatory"])
+        # Nothing is sent for a user who never touches the selector.
+        self.assertIsNone(discovered["openai/gpt-5.4"]["default"])
+        # A mandatory model keeps no off switch, whatever the catalogue says.
+        self.assertEqual(discovered["openai/gpt-oss-120b"]["efforts"], ["low", "medium", "high"])
+        # "Reasons, but not by effort level" is nothing we can express: no
+        # control, no parameter, exactly as before discovery existed.
+        self.assertNotIn("anthropic/claude-haiku-4.5", discovered)
+        self.assertNotIn("meta-llama/llama-4-scout", discovered)
+        # A hand-written declaration is a correction, so it wins.
+        self.assertEqual(discovered["openai/gpt-5-nano"]["efforts"], ["minimal", "low"])
+        self.assertEqual(discovered["openai/gpt-5-nano"]["note"], "probed")
+
+    def test_reasoning_is_not_discovered_from_providers_that_do_not_publish_it(self) -> None:
+        # e-infra's LiteLLM catalogue reports `reasoning_effort` as supported for
+        # every vLLM-served model, embeddings included, and omits it for the one
+        # model that actually reasons. Asking it would be worse than not asking.
+        models_response = Mock()
+        models_response.json.return_value = {"data": [{"id": "mini"}]}
+        models_response.raise_for_status.return_value = None
+        model_info_response = Mock()
+        model_info_response.json.return_value = {"data": []}
+        model_info_response.raise_for_status.return_value = None
+
+        with patch(
+            "app.rag.llm_providers.httpx.get", side_effect=[models_response, model_info_response]
+        ) as get:
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "einfra",
+                    "LLM_PROVIDER_EINFRA_NAME": "e-infra",
+                    "LLM_PROVIDER_EINFRA_BASE_URL": "https://llm.ai.e-infra.cz/v1",
+                    "LLM_PROVIDER_EINFRA_DEFAULT_MODEL": "mini",
+                    "LLM_PROVIDER_EINFRA_DISCOVER_MODELS": "true",
+                }
+            )
+
+        # `/models` and `/model/info`, and no third call for reasoning.
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(providers[0]["model_reasoning"], {})
+
+    def test_unreachable_catalogue_leaves_reasoning_undeclared(self) -> None:
+        with patch("app.rag.llm_providers.httpx.get", side_effect=RuntimeError("boom")):
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "openrouter",
+                    "LLM_PROVIDER_OPENROUTER_NAME": "OpenRouter",
+                    "LLM_PROVIDER_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                    "LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL": "openai/gpt-5.4",
+                    "LLM_PROVIDER_OPENROUTER_MODELS": "openai/gpt-5.4",
+                }
+            )
+
+        # No selector and no parameter, rather than a startup failure.
+        self.assertEqual(providers[0]["model_reasoning"], {})
+        self.assertEqual(providers[0]["model_presets"], ["openai/gpt-5.4"])
 
     def test_provider_api_key_can_read_private_config(self) -> None:
         providers = load_provider_configs(

@@ -52,6 +52,7 @@ from app.models import (
 from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.msearch import clear_collections_cache
 from app.rag.model_metadata import (
+    ReasoningSupport,
     load_model_metadata,
     resolve_reasoning_support,
 )
@@ -81,7 +82,7 @@ from app.rag.placeholders import (
     save_placeholder,
 )
 from app.rag.llm_providers import (
-    available_llm_providers,
+    load_provider_configs,
     provider_default_model,
     provider_api_key,
     provider_preset,
@@ -129,25 +130,34 @@ analytics = AnalyticsWriter(
     settings.analytics_instance_id,
 )
 model_metadata = load_model_metadata(settings.model_metadata_path)
-provider_presets = available_llm_providers(
-    model_context_windows=model_metadata.context_windows,
-    provider_context_window_defaults=model_metadata.provider_context_windows,
-)
+provider_presets: list[dict[str, object]] = []
 default_provider = ""
 default_provider_preset: dict[str, object] = {}
 all_llm_models: list[str] = []
 default_model = ""
+# `data/models.json` plus whatever the providers' own catalogues added. Keyed by
+# model name across every provider, the same way the declared map always was: in
+# practice the names are provider-qualified (`openai/gpt-oss-120b` on OpenRouter
+# against `gpt-oss-120b` on e-infra), so they do not collide.
+model_reasoning: dict[str, ReasoningSupport] = {}
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
-    global model_metadata
+    global model_metadata, model_reasoning
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
     model_metadata = load_model_metadata(settings.model_metadata_path)
-    provider_presets = available_llm_providers(
+    provider_configs = load_provider_configs(
         force_model_refresh=force_model_refresh,
         model_context_windows=model_metadata.context_windows,
         provider_context_window_defaults=model_metadata.provider_context_windows,
+        model_reasoning=model_metadata.reasoning,
     )
+    provider_presets = [provider.to_dict() for provider in provider_configs]
+    model_reasoning = {
+        model: support
+        for provider in provider_configs
+        for model, support in (provider.model_reasoning or {}).items()
+    }
     default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
     default_provider_preset = provider_preset(default_provider, provider_presets)
     provider_model_presets = _dedupe_preserve_order(
@@ -169,7 +179,7 @@ def _reasoning_payload(model: str | None, provider_id: str | None, effort: str |
     support = resolve_reasoning_support(
         model,
         provider_label=label,
-        model_reasoning=model_metadata.reasoning,
+        model_reasoning=model_reasoning,
         provider_reasoning_defaults=model_metadata.provider_reasoning,
     )
     if support is None:
@@ -188,7 +198,7 @@ def _llm_settings_payload() -> dict[str, object]:
         "all_model_presets": all_llm_models,
         "model_context_windows": model_metadata.context_windows,
         "provider_context_window_defaults": model_metadata.provider_context_windows,
-        "model_reasoning": {name: support.as_dict() for name, support in model_metadata.reasoning.items()},
+        "model_reasoning": {name: support.as_dict() for name, support in model_reasoning.items()},
         "provider_reasoning_defaults": {
             name: support.as_dict() for name, support in model_metadata.provider_reasoning.items()
         },

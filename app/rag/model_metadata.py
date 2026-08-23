@@ -14,9 +14,11 @@ class ReasoningSupport:
     """What a model does about reasoning, declared as data rather than in code.
 
     Providers disagree on both the request parameter and the effort vocabulary,
-    and none of it is discoverable, so `data/models.json` states it per model
-    (or per provider as a fallback). A model that declares nothing gets nothing
-    sent, which is the old behaviour.
+    and most publish none of it, so `data/models.json` states it per model (or
+    per provider as a fallback). Where a provider's catalogue does publish it,
+    `llm_providers` builds the same object from that instead — the file stays
+    the override. A model that declares nothing gets nothing sent, which is the
+    old behaviour.
 
     `efforts` may be empty. That is the "reasons, but we cannot steer it" case:
     the model returns a trace whatever we ask, but the effort parameter does not

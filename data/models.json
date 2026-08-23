@@ -24,32 +24,33 @@
     "             them, because a switch that cannot work is worse than no switch.",
     "  note       for humans only; never parsed, never sent.",
     "",
-    "Probed 2026-08-22 against ai.ufal and OpenRouter — see the notes below.",
-    "The short version: OpenRouter honours the parameter; the ai.ufal Open WebUI",
-    "gateway silently drops it on every endpoint, so every ai.ufal model runs at",
-    "its own built-in default and declares no efforts.",
+    "Not every model has to appear here. OpenRouter publishes reasoning support",
+    "in its own catalogue and we read it at startup, so its models need an entry",
+    "only to override what the catalogue says. ai.ufal and e-infra publish",
+    "nothing usable, so theirs are probed by hand and written down below.",
+    "",
+    "Probed 2026-08-22 and 2026-08-23 against all three providers. The short",
+    "version:",
+    "  ai.ufal   the Open WebUI gateway accepts every parameter form with a 200",
+    "            and ignores all of them — even reasoning_effort:'bogus' — so",
+    "            every model runs at its own built-in default and declares no",
+    "            efforts. Nothing to steer and nothing that can break.",
+    "  e-infra   honours reasoning_effort, and the vocabulary differs per model:",
+    "            an unaccepted value is a 400, so each entry below lists what its",
+    "            model actually took. What the LiteLLM catalogue reports is not",
+    "            usable — supported_openai_params carries 'reasoning_effort' for",
+    "            every vLLM-served model including the embedding ones, and omits",
+    "            it for 'thinker', which does reason.",
+    "  OpenRouter honours the parameter and publishes accurate metadata.",
+    "            openai/gpt-oss-120b once declared 'none' here, which OpenRouter",
+    "            answers with '400 Reasoning is mandatory for this endpoint and",
+    "            cannot be disabled' — it broke every answer from that model.",
     "",
     "The MLX-backed Nemotrons report no context length and we have not measured",
     "one, so they deliberately have no context_window and fall back to the AI Ufal",
     "provider default. Guessing high risks overflowing the served slot."
   ],
   "models": {
-    "openai/gpt-oss-120b": {
-      "reasoning": {
-        "param": "reasoning",
-        "efforts": ["low", "medium", "high"],
-        "mandatory": true,
-        "note": "OpenRouter. Probed 2026-08-22: the model self-reports the level we ask for and the trace length tracks it. 'none' is a 400 — 'Reasoning is mandatory for this endpoint and cannot be disabled' — and shipping it here broke every answer from this model until 2026-08-23."
-      }
-    },
-    "openai/gpt-5-nano": {
-      "reasoning": {
-        "param": "reasoning",
-        "efforts": ["minimal", "low", "medium", "high"],
-        "mandatory": true,
-        "note": "OpenRouter. Cannot be turned off."
-      }
-    },
     "LLM3.unsloth/Llama-3.3-70B-Instruct-GGUF:UD-Q6_K_XL": {
       "context_window": 16000
     },

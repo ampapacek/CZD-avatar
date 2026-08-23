@@ -2463,9 +2463,10 @@ function updateContextWindowForSelectedModel({ force = false, persist = false } 
   refreshReasoningEffortOptions();
 }
 
-// Reasoning support is server-declared data (data/models.json), not
-// something the client knows how to guess. A model that declares nothing gets
-// no control at all and no reasoning parameter is sent — the old behaviour.
+// Reasoning support is server-declared data — `data/models.json` plus whatever
+// the provider's own catalogue publishes — not something the client knows how
+// to guess. A model that declares nothing gets no control at all and no
+// reasoning parameter is sent, which is the old behaviour.
 const REASONING_DEFAULT_VALUE = "";
 
 function selectedModelReasoning(modelName = selectedModelValue(), provider = selectedProviderConfig()) {
@@ -2487,6 +2488,8 @@ const REASONING_EFFORT_LABELS = {
   low: "nízké",
   medium: "střední",
   high: "vysoké",
+  xhigh: "velmi vysoké",
+  max: "maximální",
 };
 
 function refreshReasoningEffortOptions() {

@@ -1,8 +1,9 @@
 """`data/models.json` — one entry per model, context window plus reasoning.
 
-The file is the only place model facts are declared, so these tests pin what a
-malformed or partial entry does: a bad field is dropped, the rest of the entry
-survives, and a broken file is never fatal.
+Model facts come from here and, where a provider publishes them, from its own
+catalogue (see `test_llm_providers`). This file is the override, so these tests
+pin what a malformed or partial entry does: a bad field is dropped, the rest of
+the entry survives, and a broken file is never fatal.
 """
 
 import json
