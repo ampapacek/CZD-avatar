@@ -1316,6 +1316,8 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         event_fields = {
             **fields,
             "retrieval_query_was_rewritten": response.retrieval_query_was_rewritten,
+            "retrieval_query_rewrite_attempted": response.retrieval_query_rewrite_attempted,
+            "retrieval_query_rewrite_skip_reason": response.retrieval_query_rewrite_skip_reason,
             "upstream_model": response.upstream_model,
         }
         analytics.event(
@@ -1378,7 +1380,51 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            budget_config = PromptBudgetConfig.from_settings(
+                settings,
+                context_window_tokens=request.context_window_tokens,
+                output_token_budget_short=request.output_token_budget_short,
+                output_token_budget_medium=request.output_token_budget_medium,
+                output_token_budget_long=request.output_token_budget_long,
+                min_prompt_chunks=request.min_prompt_chunks,
+                token_budget_safety_margin=request.token_budget_safety_margin,
+                conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
+            )
+            preflight_question = (
+                request.retrieval_query
+                if request.use_retrieval_query_for_answer and request.retrieval_query is not None
+                else request.question
+            )
+            if not request.use_retrieval_query_for_answer or request.retrieval_query is not None:
+                pipeline.preflight_chat_prompt(
+                    question=preflight_question,
+                    length=length,
+                    model=resolved_model,
+                    budget_config=budget_config,
+                    placeholder_defs=placeholder_defs,
+                    selections=selections,
+                    system_prompt=request.system_prompt,
+                    user_prompt_template=request.user_prompt_template,
+                )
             if request.retrieval_query is None:
+                rewrite_attempted = pipeline.should_rewrite_query_for_retrieval(
+                    request.question,
+                    conversation_history=request.conversation_history,
+                    enabled=request.rewrite_query_for_retrieval,
+                    model=resolved_model,
+                )
+                rewrite_skip_reason = (
+                    None
+                    if rewrite_attempted
+                    else pipeline.query_rewrite_skip_reason(
+                        request.question,
+                        conversation_history=request.conversation_history,
+                        enabled=request.rewrite_query_for_retrieval,
+                        model=resolved_model,
+                    )
+                )
+                if rewrite_attempted:
+                    yield _sse_event("status", {"phase": "query_rewrite"})
                 with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="query_rewrite"):
                     retrieval_query = pipeline.rewrite_query_for_retrieval(
                         request.question,
@@ -1389,7 +1435,10 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                         api_key=resolved_api_key,
                         base_url=resolved_base_url,
                     )
+                yield _sse_event("status", {"phase": "retrieval"})
             else:
+                rewrite_attempted = False
+                rewrite_skip_reason = None
                 retrieval_query = _clean_transformed_query(request.retrieval_query)
                 if not retrieval_query:
                     raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
@@ -1431,6 +1480,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                         "retrieval_query": retrieval_query,
                         "answer_question": answer_question,
                         "retrieval_query_was_rewritten": retrieval_query != request.question,
+                        "retrieval_query_rewrite_attempted": rewrite_attempted,
+                        "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                         "retrieved_chunks": baseline_payload,
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
                     },
@@ -1454,16 +1505,6 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     retrieved, rerank_seconds = event[1], event[2]
             rerank_ms = ms(rerank_seconds) if candidates.rerank_active else None
             prompt_started = time.perf_counter()
-            budget_config = PromptBudgetConfig.from_settings(
-                settings,
-                context_window_tokens=request.context_window_tokens,
-                output_token_budget_short=request.output_token_budget_short,
-                output_token_budget_medium=request.output_token_budget_medium,
-                output_token_budget_long=request.output_token_budget_long,
-                min_prompt_chunks=request.min_prompt_chunks,
-                token_budget_safety_margin=request.token_budget_safety_margin,
-                conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
-            )
             with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="conversation_summary"):
                 budget, conversation = pipeline.build_chat_prompt(
                     question=answer_question,
@@ -1490,6 +1531,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "retrieval_query": retrieval_query,
                     "answer_question": answer_question,
                     "retrieval_query_was_rewritten": retrieval_query != request.question,
+                    "retrieval_query_rewrite_attempted": rewrite_attempted,
+                    "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                     "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
@@ -1551,6 +1594,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "retrieval_query": retrieval_query,
                 "answer_question": answer_question,
                 "retrieval_query_was_rewritten": retrieval_query != request.question,
+                "retrieval_query_rewrite_attempted": rewrite_attempted,
+                "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                 "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                 "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
@@ -1580,6 +1625,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 **fields,
                 "upstream_model": upstream_model,
                 "retrieval_query_was_rewritten": retrieval_query != request.question,
+                "retrieval_query_rewrite_attempted": rewrite_attempted,
+                "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
             }
             analytics.event(
                 "turn",

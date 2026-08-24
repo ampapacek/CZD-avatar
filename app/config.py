@@ -82,6 +82,14 @@ class Settings(BaseSettings):
         ge=2,
         alias="CONVERSATION_PROMPT_MESSAGES",
     )
+    # Query rewriting is useful for short follow-ups such as "And what happened
+    # next?". A long message already carries substantial search context, while
+    # sending it through another LLM call adds latency and duplicates the input.
+    conversation_query_rewrite_max_tokens: int = Field(
+        default=1024,
+        ge=1,
+        alias="CONVERSATION_QUERY_REWRITE_MAX_TOKENS",
+    )
 
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")

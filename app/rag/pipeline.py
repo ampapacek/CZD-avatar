@@ -24,6 +24,7 @@ from app.rag.retrieval import HybridRetriever
 from app.rag.token_budget import (
     PromptBudgetConfig,
     conversation_history_tokens,
+    estimate_text_tokens,
     prepare_prompt_budget,
 )
 from app.rag.vector_store import QdrantVectorStore
@@ -498,6 +499,28 @@ class RAGPipeline:
             token_budget_safety_margin=token_budget_safety_margin,
             conversation_summary_trigger_tokens=conversation_summary_trigger_tokens,
         )
+        if not use_retrieval_query_for_answer:
+            self.preflight_chat_prompt(
+                question=question,
+                length=length,
+                model=resolved_model,
+                budget_config=budget_config,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
+                system_prompt=system_prompt,
+                user_prompt_template=user_prompt_template,
+            )
+        elif retrieval_query_override is not None:
+            self.preflight_chat_prompt(
+                question=retrieval_query_override,
+                length=length,
+                model=resolved_model,
+                budget_config=budget_config,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
+                system_prompt=system_prompt,
+                user_prompt_template=user_prompt_template,
+            )
         conversation = self._resolve_conversation_context(
             conversation_history or [],
             conversation_summary=conversation_summary,
@@ -507,6 +530,22 @@ class RAGPipeline:
             base_url=llm_base_url,
         )
         if retrieval_query_override is None:
+            rewrite_attempted = self.should_rewrite_query_for_retrieval(
+                question,
+                conversation_history=conversation_history or [],
+                enabled=rewrite_query_for_retrieval,
+                model=resolved_model,
+            )
+            rewrite_skip_reason = (
+                None
+                if rewrite_attempted
+                else self.query_rewrite_skip_reason(
+                    question,
+                    conversation_history=conversation_history or [],
+                    enabled=rewrite_query_for_retrieval,
+                    model=resolved_model,
+                )
+            )
             retrieval_query = self.rewrite_query_for_retrieval(
                 question,
                 conversation_history=conversation_history or [],
@@ -517,6 +556,8 @@ class RAGPipeline:
                 base_url=llm_base_url,
             )
         else:
+            rewrite_attempted = False
+            rewrite_skip_reason = None
             retrieval_query = _clean_retrieval_query(retrieval_query_override)
             if not retrieval_query:
                 raise ValueError("Retrieval query must not be empty.")
@@ -588,6 +629,8 @@ class RAGPipeline:
             retrieval_query=retrieval_query,
             answer_question=answer_question,
             retrieval_query_was_rewritten=retrieval_query != question,
+            retrieval_query_rewrite_attempted=rewrite_attempted,
+            retrieval_query_rewrite_skip_reason=rewrite_skip_reason,
             sources=[_source_from_chunk(chunk) for chunk in budget.used_chunks],
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
             used_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
@@ -651,6 +694,39 @@ class RAGPipeline:
         budget.conversation_summary_used = bool(conversation.summary)
         return budget, conversation
 
+    def preflight_chat_prompt(
+        self,
+        *,
+        question: str,
+        length: str,
+        model: str,
+        budget_config: PromptBudgetConfig,
+        placeholder_defs: dict[str, Any] | None = None,
+        selections: dict[str, str] | None = None,
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
+    ) -> None:
+        """Reject a current prompt that cannot fit before doing any remote work.
+
+        Conversation history is intentionally excluded here. It may still fit
+        after the normal rolling-summary compaction. The final budget check in
+        ``build_chat_prompt`` validates that complete, possibly compacted prompt.
+        """
+
+        prepare_prompt_budget(
+            question=question,
+            retrieved_chunks=[],
+            length=length,
+            model=model,
+            config=budget_config,
+            placeholder_defs=placeholder_defs,
+            selections=selections,
+            conversation_history=[],
+            conversation_summary=None,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+        )
+
     def rewrite_query_for_retrieval(
         self,
         question: str,
@@ -663,7 +739,12 @@ class RAGPipeline:
         base_url: str | None,
     ) -> str:
         clean_question = question.strip()
-        if not enabled or not clean_question or not conversation_history:
+        if not self.should_rewrite_query_for_retrieval(
+            clean_question,
+            conversation_history=conversation_history,
+            enabled=enabled,
+            model=model,
+        ):
             return clean_question
 
         context_parts: list[str] = []
@@ -713,6 +794,50 @@ class RAGPipeline:
         if not rewritten:
             return clean_question
         return rewritten
+
+    def should_rewrite_query_for_retrieval(
+        self,
+        question: str,
+        *,
+        conversation_history: list[dict[str, str]] | None,
+        enabled: bool,
+        model: str | None,
+    ) -> bool:
+        """Return whether a conversation message needs the extra LLM rewrite.
+
+        First turns are already standalone. Very long later turns are treated as
+        self-contained too: rewriting them duplicates a large input and can be
+        slower than the answer call itself. Retrieval still runs with the
+        original text when this returns false.
+        """
+
+        return self.query_rewrite_skip_reason(
+            question,
+            conversation_history=conversation_history,
+            enabled=enabled,
+            model=model,
+        ) is None
+
+    def query_rewrite_skip_reason(
+        self,
+        question: str,
+        *,
+        conversation_history: list[dict[str, str]] | None,
+        enabled: bool,
+        model: str | None,
+    ) -> str | None:
+        """Explain why the optional conversation query rewrite will not run."""
+
+        clean_question = question.strip()
+        if not enabled:
+            return "disabled"
+        if not clean_question:
+            return "empty_question"
+        if not conversation_history:
+            return "no_conversation_history"
+        if estimate_text_tokens(clean_question, model) >= self.settings.conversation_query_rewrite_max_tokens:
+            return "question_too_long"
+        return None
 
     def close(self) -> None:
         if self._vector_store is not None:

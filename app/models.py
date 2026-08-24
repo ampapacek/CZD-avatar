@@ -298,6 +298,10 @@ class ChatResponse(BaseModel):
     retrieval_query: str | None = None
     answer_question: str | None = None
     retrieval_query_was_rewritten: bool = False
+    retrieval_query_rewrite_attempted: bool = False
+    retrieval_query_rewrite_skip_reason: Literal[
+        "disabled", "empty_question", "no_conversation_history", "question_too_long"
+    ] | None = None
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]
     used_chunks: list[RetrievedChunk] = Field(default_factory=list)
