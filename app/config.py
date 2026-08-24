@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="", alias="LLM_PROVIDER")
     admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
     llm_models_cache_ttl_seconds: int = Field(default=3600, alias="LLM_MODELS_CACHE_TTL_SECONDS")
+    llm_timeout_seconds: float = Field(default=120.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")

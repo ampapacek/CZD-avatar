@@ -93,7 +93,7 @@ class LLMClient:
 class OpenAICompatibleLLM(LLMClient):
     """OpenAI-compatible chat completions client."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 60.0) -> None:
+    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120.0) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")

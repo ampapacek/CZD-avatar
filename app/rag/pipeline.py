@@ -137,6 +137,7 @@ class RAGPipeline:
                 api_key=provider_api_key(provider_id, provider_presets),
                 model=str(provider_config.get("default_model") or ""),
                 base_url=str(provider_config.get("base_url") or ""),
+                timeout=self.settings.llm_timeout_seconds,
             )
         return self._llm
 
