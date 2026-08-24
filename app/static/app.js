@@ -165,6 +165,12 @@ const conversationForm = document.querySelector("#conversationForm");
 const conversationQuestion = document.querySelector("#conversationQuestion");
 const conversationSubmitButton = document.querySelector("#conversationSubmitButton");
 const conversationCancelButton = document.querySelector("#conversationCancelButton");
+const conversationRequestStatus = document.querySelector("#conversationRequestStatus");
+const conversationStorageStatus = document.querySelector("#conversationStorageStatus");
+const conversationStorageStatusText = document.querySelector("#conversationStorageStatusText");
+const legacyHistoryStorageActions = document.querySelector("#legacyHistoryStorageActions");
+const exportLegacyHistoryButton = document.querySelector("#exportLegacyHistoryButton");
+const deleteLegacyHistoryButton = document.querySelector("#deleteLegacyHistoryButton");
 const newConversationButton = document.querySelector("#newConversationButton");
 const deleteConversationButton = document.querySelector("#deleteConversationButton");
 const closeConversationButton = document.querySelector("#closeConversationButton");
@@ -187,8 +193,10 @@ const themeToggle = document.querySelector("#themeToggle");
 const themeToggleLabel = document.querySelector("#themeToggleLabel");
 // Bumped for Task 14c: history entries now store a generic placeholder
 // `selections` map instead of the old `style`/`length`/`custom_instructions`
-// fields. Stale entries in the old key are simply dropped (no migration).
+// fields. The old key is not loaded into the current view; conversation mode
+// offers an explicit export-before-delete action when it still occupies space.
 const HISTORY_STORAGE_KEY = "czdemos4ai-history-v2";
+const LEGACY_HISTORY_STORAGE_KEY = "czdemos4ai-history";
 // Display name attached to items this browser shares to /shared-history.
 const AUTHOR_NAME_STORAGE_KEY = "czdemos4ai-author-name";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
@@ -1593,6 +1601,8 @@ conversationRewriteQuery?.addEventListener("change", () => {
   });
   renderConversationWorkspace();
 });
+exportLegacyHistoryButton?.addEventListener("click", exportLegacyHistory);
+deleteLegacyHistoryButton?.addEventListener("click", deleteLegacyHistory);
 document.addEventListener("click", pulseSourceCardFromCitation);
 document.addEventListener("click", toggleCitationHighlightFromSource);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
@@ -1609,7 +1619,7 @@ deleteHistoryItemButton.addEventListener("click", () => {
     return;
   }
   const remainingHistory = getHistoryEntries().filter((entry) => entry.id !== selectedHistoryId);
-  saveEntryListWithQuotaPruning(
+  saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     remainingHistory,
     compactStoredHistoryEntry,
@@ -2634,7 +2644,9 @@ async function streamRetrieveWithHandlers(payload, handlers = {}, { signal, turn
       const rawEvent = buffer.slice(0, separatorIndex);
       buffer = buffer.slice(separatorIndex + 2);
       const event = parseSseEvent(rawEvent);
-      if (event.event === "preliminary_sources") {
+      if (event.event === "status") {
+        handlers.onStatus?.(event.data);
+      } else if (event.event === "preliminary_sources") {
         handlers.onPreliminarySources?.(event.data);
       } else if (event.event === "rerank_progress") {
         handlers.onRerankProgress?.(event.data);
@@ -2644,7 +2656,7 @@ async function streamRetrieveWithHandlers(payload, handlers = {}, { signal, turn
         donePayload = event.data;
         handlers.onDone?.(donePayload);
       } else if (event.event === "error") {
-        throw new Error(formatErrorDetail(event.data.detail || "Streaming retrieve failed"));
+        throw requestError(event.data.detail, "Streaming retrieve failed");
       }
       separatorIndex = buffer.indexOf("\n\n");
     }
@@ -2697,7 +2709,9 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
       const rawEvent = buffer.slice(0, separatorIndex);
       buffer = buffer.slice(separatorIndex + 2);
       const event = parseSseEvent(rawEvent);
-      if (event.event === "preliminary_sources") {
+      if (event.event === "status") {
+        handlers.onStatus?.(event.data);
+      } else if (event.event === "preliminary_sources") {
         handlers.onPreliminarySources?.(event.data);
       } else if (event.event === "rerank_progress") {
         handlers.onRerankProgress?.(event.data);
@@ -2711,7 +2725,7 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
         donePayload = event.data;
         handlers.onDone?.(donePayload);
       } else if (event.event === "error") {
-        throw new Error(formatErrorDetail(event.data.detail || "Streaming failed"));
+        throw requestError(event.data.detail, "Streaming failed");
       }
       separatorIndex = buffer.indexOf("\n\n");
     }
@@ -4714,13 +4728,13 @@ function nullableNumber(value) {
 }
 
 function formatErrorDetail(detail) {
-  if (!detail || typeof detail === "string") {
-    return detail || "Request failed";
-  }
-  if (typeof detail === "object" && detail.message) {
-    return String(detail.message);
-  }
-  return JSON.stringify(detail);
+  return Avatar.formatRequestErrorDetail(detail);
+}
+
+function requestError(detail, fallback) {
+  const error = new Error(formatErrorDetail(detail || fallback));
+  error.detail = detail;
+  return error;
 }
 
 function nullableInteger(value) {
@@ -4758,6 +4772,57 @@ function trySetLocalStorageJson(key, value) {
   }
 }
 
+let conversationStorageFailure = "";
+const storageSaveSucceeded = new Map();
+
+function refreshConversationStorageStatus() {
+  if (!conversationStorageStatus || !conversationStorageStatusText) {
+    return;
+  }
+  let legacyHistory = "";
+  try {
+    legacyHistory = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  } catch {
+    // Storage access itself may be disabled. The write failure below remains visible.
+  }
+  const messages = [];
+  if (conversationStorageFailure) {
+    messages.push(conversationStorageFailure);
+  }
+  if (legacyHistory) {
+    const sizeMiB = Avatar.approximateLocalStorageMiB(legacyHistory).toFixed(1);
+    messages.push(
+      `Stará, už nezobrazovaná historie zabírá přibližně ${sizeMiB} MiB. `
+      + "Před smazáním ji můžete exportovat.",
+    );
+  }
+  conversationStorageStatus.hidden = messages.length === 0;
+  conversationStorageStatusText.textContent = messages.join(" ");
+  if (legacyHistoryStorageActions) {
+    legacyHistoryStorageActions.hidden = !legacyHistory;
+  }
+}
+
+function reportStorageSaveFailure(key, label) {
+  const message = `Změny se nepodařilo uložit: úložiště prohlížeče je plné. Žádná starší položka nebyla smazána.`;
+  console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full. Existing entries were preserved.`);
+  if (key === CONVERSATION_STORAGE_KEY) {
+    conversationStorageFailure = message;
+    refreshConversationStorageStatus();
+  } else if (statusEl) {
+    statusEl.className = "status error";
+    statusEl.textContent = message;
+  }
+}
+
+function clearStorageSaveFailure(key) {
+  if (key !== CONVERSATION_STORAGE_KEY || !conversationStorageFailure) {
+    return;
+  }
+  conversationStorageFailure = "";
+  refreshConversationStorageStatus();
+}
+
 function compactStoredChunk(chunk) {
   if (!chunk || typeof chunk !== "object") {
     return chunk;
@@ -4790,44 +4855,23 @@ function compactStoredHistoryEntry(entry) {
   };
 }
 
-function compactStoredConversationMessage(message) {
-  if (message?.role !== "assistant") {
-    return message;
-  }
-  return {
-    ...message,
-    retrieved_chunks: (message.retrieved_chunks || []).map(compactStoredChunk),
-    omitted_chunks: [],
-  };
-}
-
 function compactStoredConversation(entry) {
-  return {
-    ...entry,
-    messages: (entry.messages || []).map(compactStoredConversationMessage),
-  };
+  return Avatar.compactConversationForStorage(entry, {
+    chunkTextLimit: COMPACT_STORED_CHUNK_TEXT_LIMIT,
+  });
 }
 
-function saveEntryListWithQuotaPruning(key, entries, compactEntry, label) {
-  let candidate = entries;
-  while (candidate.length) {
-    if (trySetLocalStorageJson(key, candidate)) {
-      return candidate;
-    }
-    candidate = candidate.slice(0, -1);
+function saveEntryListSafely(key, entries, compactEntry, label) {
+  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry);
+  if (result.saved) {
+    storageSaveSucceeded.set(key, true);
+    clearStorageSaveFailure(key);
+    return result.entries;
   }
 
-  candidate = entries.map(compactEntry);
-  while (candidate.length) {
-    if (trySetLocalStorageJson(key, candidate)) {
-      console.warn(`[rag-avatar] ${label} was compacted to fit browser storage.`);
-      return candidate;
-    }
-    candidate = candidate.slice(0, -1);
-  }
-
-  console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full.`);
-  return [];
+  storageSaveSucceeded.set(key, false);
+  reportStorageSaveFailure(key, label);
+  return result.entries;
 }
 
 function updateCustomModelVisibility(unlocked) {
@@ -5185,62 +5229,60 @@ function tokenBudgetRow(label, value, { kind = "" } = {}) {
   return `<tr${className}><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(formatTokenCount(value))}</td></tr>`;
 }
 
-function renderTokenBudgetDetails(tokenBudget) {
-  if (!tokenBudget) {
+function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", foldedMessages = 0, className = "" } = {}) {
+  const view = Avatar.tokenBudgetView(tokenBudget, { conversationSummary, foldedMessages });
+  if (!view) {
     return "";
   }
-  const contextWindow = tokenBudget.context_window_tokens ?? null;
-  const reservedOutput = tokenBudget.reserved_output_tokens ?? null;
-  const usableInput = tokenBudget.usable_input_tokens ?? null;
-  const totalInput = tokenBudget.estimated_total_input_tokens ?? null;
-  // The safety margin the server applies on top of the output reserve. Recovered
-  // as the residual for entries stored before the server started reporting it,
-  // so old history renders a column that adds up too.
-  const safetyMargin =
-    tokenBudget.safety_margin_tokens ??
-    (contextWindow !== null && reservedOutput !== null && usableInput !== null
-      ? Math.max(0, contextWindow - reservedOutput - usableInput)
-      : null);
-  const safetyMarginPercent =
-    typeof tokenBudget.safety_margin_ratio === "number" && tokenBudget.safety_margin_ratio > 0
-      ? Math.round(tokenBudget.safety_margin_ratio * 100)
-      : null;
   const safetyMarginLabel =
-    safetyMarginPercent !== null
-      ? `− bezpečnostní rezerva ${safetyMarginPercent} %`
+    view.safetyMarginPercent !== null
+      ? `− bezpečnostní rezerva ${view.safetyMarginPercent} %`
       : "− bezpečnostní rezerva";
-  const share =
-    usableInput && totalInput ? Math.round((totalInput / usableInput) * 100) : null;
   const headline =
-    totalInput !== null && usableInput !== null
-      ? `Tokenový rozpočet · ${formatTokenCount(totalInput)} z ${formatTokenCount(usableInput)} tokenů vstupu${share !== null ? ` (${share} %)` : ""}`
+    view.totalInput !== null && view.usableInput !== null
+      ? `Tokenový rozpočet · ${formatTokenCount(view.totalInput)} z ${formatTokenCount(view.usableInput)} tokenů vstupu${view.inputUsagePercent !== null ? ` (${view.inputUsagePercent} %)` : ""}`
       : "Tokenový rozpočet";
 
   const chunkCounts = [
-    tokenBudget.used_chunk_count ? `${tokenBudget.used_chunk_count} v promptu` : "",
-    tokenBudget.trimmed_chunk_count ? `${tokenBudget.trimmed_chunk_count} zkráceno` : "",
-    tokenBudget.omitted_chunk_count ? `${tokenBudget.omitted_chunk_count} vynecháno` : "",
+    view.usedChunks ? `${view.usedChunks} v promptu` : "",
+    view.trimmedChunks ? `${view.trimmedChunks} zkráceno` : "",
+    view.omittedChunks ? `${view.omittedChunks} vynecháno` : "",
   ].filter(Boolean);
+  const detailsClass = ["budget-details", className].filter(Boolean).join(" ");
+  const historyRow = view.historyTokens
+    ? tokenBudgetRow("↳ z toho historie konverzace", view.historyTokens, { kind: "subset" })
+    : "";
+  const foldedNote = view.foldedMessages
+    ? `<p class="budget-note-line">Ve shrnutí je ${escapeHtml(view.foldedMessages)} starších zpráv.</p>`
+    : "";
+  const summaryBlock = view.conversationSummary
+    ? `<div class="context-summary-block"><h4>Komprimovaný kontext konverzace</h4><p>${escapeHtml(view.conversationSummary)}</p></div>`
+    : "";
 
   return `
-    <details class="budget-details">
+    <details class="${escapeHtml(detailsClass)}">
       <summary>${escapeHtml(headline)}</summary>
       <table class="budget-table">
         <tbody>
-          ${tokenBudgetRow("Kontextové okno", contextWindow)}
-          ${tokenBudgetRow("− rezerva na odpověď", reservedOutput)}
-          ${safetyMargin ? tokenBudgetRow(safetyMarginLabel, safetyMargin) : ""}
-          ${tokenBudgetRow("= k dispozici pro vstup", usableInput, { kind: "subtotal" })}
+          ${tokenBudgetRow("Kontextové okno", view.contextWindow)}
+          ${tokenBudgetRow("− rezerva na odpověď", view.reservedOutput)}
+          ${view.safetyMargin ? tokenBudgetRow(safetyMarginLabel, view.safetyMargin) : ""}
+          ${tokenBudgetRow("= k dispozici pro vstup", view.usableInput, { kind: "subtotal" })}
         </tbody>
         <tbody>
-          ${tokenBudgetRow("Prompt bez zdrojů", tokenBudget.estimated_non_source_tokens)}
-          ${tokenBudgetRow("Historie konverzace", tokenBudget.estimated_conversation_history_tokens)}
-          ${tokenBudgetRow("Nalezené zdroje", tokenBudget.estimated_source_tokens)}
-          ${tokenBudgetRow("= vstup celkem", totalInput, { kind: "subtotal" })}
+          ${tokenBudgetRow("Prompt bez zdrojů celkem", view.nonSourceTokens)}
+          ${historyRow}
+          ${tokenBudgetRow("Zdroje odeslané modelu", view.sourceTokens)}
+          ${tokenBudgetRow("= vstup celkem", view.totalInput, { kind: "subtotal" })}
+        </tbody>
+        <tbody>
+          ${tokenBudgetRow("Nalezené zdroje před úpravou", view.retrievedSourceTokens)}
         </tbody>
       </table>
       ${chunkCounts.length ? `<p class="budget-note-line">Zdroje: ${escapeHtml(chunkCounts.join(" · "))}.</p>` : ""}
-      ${tokenBudget.conversation_summary_used ? `<p class="budget-note-line">Historie konverzace je poslána jako shrnutí.</p>` : ""}
+      ${view.summaryUsed ? `<p class="budget-note-line">Historie konverzace je poslána jako shrnutí.</p>` : ""}
+      ${foldedNote}
+      ${summaryBlock}
     </details>
   `;
 }
@@ -5595,7 +5637,7 @@ function getConversationEntries() {
 }
 
 function setConversationEntries(entries) {
-  return saveEntryListWithQuotaPruning(
+  return saveEntryListSafely(
     CONVERSATION_STORAGE_KEY,
     entries,
     compactStoredConversation,
@@ -5654,6 +5696,7 @@ function updateConversation(updatedConversation) {
   if (!savedConversations.some((entry) => entry.id === selectedConversationId)) {
     selectedConversationId = savedConversations[0]?.id ?? null;
   }
+  return storageSaveSucceeded.get(CONVERSATION_STORAGE_KEY) === true;
 }
 
 function deleteSelectedConversation() {
@@ -5900,9 +5943,50 @@ function openConversationWorkspace() {
   mainSettingsBackup = captureSettingsSnapshot();
   conversationSettingsActive = true;
   activePlaceholderContainer = convPlaceholderControls;
+  const storedConversations = getConversationEntries();
+  if (storedConversations.length) {
+    // Apply the current compact representation to existing conversations too,
+    // rather than waiting for each one to receive another message.
+    setConversationEntries(storedConversations);
+  }
   renderConversationWorkspace();
+  refreshConversationStorageStatus();
   applyConversationSettings(ensureSelectedConversation());
   conversationDialog.showModal();
+}
+
+function exportLegacyHistory() {
+  const raw = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  if (!raw) {
+    refreshConversationStorageStatus();
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `czdemos4ai-history-legacy-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function deleteLegacyHistory() {
+  const raw = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  if (!raw) {
+    refreshConversationStorageStatus();
+    return;
+  }
+  const confirmed = window.confirm(
+    "Smazat starou místní historii? Tato data už aplikace nezobrazuje. "
+    + "Pokud je chcete zachovat, nejdříve použijte Exportovat starou historii.",
+  );
+  if (!confirmed) {
+    return;
+  }
+  localStorage.removeItem(LEGACY_HISTORY_STORAGE_KEY);
+  conversationStorageFailure = "";
+  refreshConversationStorageStatus();
 }
 
 // Restore the main page's own settings after the conversation modal closes.
@@ -6024,13 +6108,17 @@ function renderConversationRetrievalInfo(message) {
   }
   const originalQuestion = conversationOriginalQuestion(message);
   const retrievalQuery = conversationRetrievalQuery(message);
-  if (!originalQuestion && !retrievalQuery) {
+  const rewriteView = Avatar.conversationQueryRewriteView(message);
+  if ((!originalQuestion && !retrievalQuery) || (!rewriteView.showQueries && !rewriteView.skippedMessage)) {
     conversationRetrievalInfo.hidden = true;
     conversationRetrievalInfo.innerHTML = "";
     return;
   }
-  const rewritten = message.retrieval_query_was_rewritten === true;
   conversationRetrievalInfo.hidden = false;
+  if (!rewriteView.showQueries) {
+    conversationRetrievalInfo.innerHTML = `<p>${escapeHtml(rewriteView.skippedMessage)}</p>`;
+    return;
+  }
   conversationRetrievalInfo.innerHTML = `
     <div class="conversation-retrieval-info-row">
       <span>Původní dotaz</span>
@@ -6040,7 +6128,8 @@ function renderConversationRetrievalInfo(message) {
       <span>Dotaz pro vyhledávání</span>
       <strong>${escapeHtml(retrievalQuery || originalQuestion)}</strong>
     </div>
-    ${rewritten ? `<p>Dotaz byl upraven pro lepší vyhledání zdrojů.</p>` : ""}
+    ${rewriteView.rewritten ? `<p>Dotaz byl upraven pro lepší vyhledání zdrojů.</p>` : ""}
+    ${rewriteView.unchangedMessage ? `<p>${escapeHtml(rewriteView.unchangedMessage)}</p>` : ""}
   `;
 }
 
@@ -6057,6 +6146,14 @@ function retrievalInfoFromEvent(data = {}, fallbackQuestion = "", previous = nul
     original_question: originalQuestion,
     retrieval_query: retrievalQuery,
     retrieval_query_was_rewritten: rewritten,
+    retrieval_query_rewrite_attempted:
+      data.retrieval_query_rewrite_attempted === true
+        ? true
+        : data.retrieval_query_rewrite_attempted === false
+          ? false
+          : previous?.retrieval_query_rewrite_attempted === true,
+    retrieval_query_rewrite_skip_reason:
+      data.retrieval_query_rewrite_skip_reason ?? previous?.retrieval_query_rewrite_skip_reason ?? null,
   };
 }
 
@@ -6136,56 +6233,18 @@ function renderConversationContextStatus(message) {
   if (trimmedChunks > 0) {
     visibleParts.push(`${trimmedChunks} zkráceno`);
   }
-  const totalInputTokens =
-    budget?.estimated_total_input_tokens ??
-    (budget ? Number(budget.estimated_non_source_tokens ?? 0) + Number(budget.estimated_source_tokens ?? 0) : null);
-  const usedWindowTokens =
-    budget && totalInputTokens !== null
-      ? totalInputTokens + Number(budget.reserved_output_tokens ?? 0)
-      : null;
-  const usagePercent =
-    budget?.context_window_tokens && usedWindowTokens !== null
-      ? Math.max(0, Math.min(100, Math.round((usedWindowTokens / Number(budget.context_window_tokens)) * 100)))
-      : null;
+  const budgetView = Avatar.tokenBudgetView(budget, { foldedMessages, conversationSummary: summary });
+  const totalInputTokens = budgetView?.totalInput ?? null;
+  const usagePercent = budgetView?.windowUsagePercent ?? null;
   if (totalInputTokens !== null) {
     visibleParts.unshift(`${totalInputTokens} tokenů vstup`);
   }
 
-  const detailRows = budget
-    ? [
-        ["Context window", budget.context_window_tokens],
-        ["Celkem vstup", totalInputTokens],
-        ["Použitelný vstup po rezervě", budget.usable_input_tokens],
-        ["Prompt bez zdrojů", budget.estimated_non_source_tokens],
-        ["Historie konverzace", budget.estimated_conversation_history_tokens ?? 0],
-        ["Zdroje poslané modelu", budget.estimated_source_tokens],
-        ["Rezerva pro odpověď", budget.reserved_output_tokens],
-        ["Využití okna včetně rezervy", usagePercent === null ? null : `${usagePercent}%`],
-        ["Použité chunky", usedChunks],
-        ["Vynechané chunky", omittedChunks],
-        ["Zkrácené chunky", trimmedChunks],
-        ["Komprese konverzace", budget.conversation_summary_used || summary ? "ano" : "ne"],
-        ["Zprávy složené do shrnutí", foldedMessages],
-      ]
-    : [["Komprese konverzace", "ano"]];
-  const detailTable = detailRows
-    .map(
-      ([label, value]) => `
-        <div class="context-budget-row">
-          <span>${escapeHtml(label)}</span>
-          <strong>${escapeHtml(value ?? "?")}</strong>
-        </div>
-      `,
-    )
-    .join("");
-  const summaryBlock = summary
-    ? `
-      <div class="context-summary-block">
-        <h4>Komprimovaný kontext konverzace</h4>
-        <p>${escapeHtml(summary)}</p>
-      </div>
-    `
-    : "";
+  const budgetDetails = renderTokenBudgetDetails(budget, {
+    conversationSummary: summary,
+    foldedMessages,
+    className: "conversation-context-details",
+  });
 
   return `
     <div class="conversation-context-status">
@@ -6197,11 +6256,7 @@ function renderConversationContextStatus(message) {
         }
         <strong>${visibleParts.map((part) => escapeHtml(part)).join(" · ")}</strong>
       </div>
-      <details class="budget-details conversation-context-details">
-        <summary>Detail kontextového okna</summary>
-        <div class="context-budget-grid">${detailTable}</div>
-        ${summaryBlock}
-      </details>
+      ${budgetDetails}
     </div>
   `;
 }
@@ -6217,16 +6272,30 @@ async function submitConversationTurn() {
   const controller = new AbortController();
   const turnId = newAnalyticsId();
   activeConversationController = controller;
+  let requestFailed = false;
+  if (conversationRequestStatus) {
+    conversationRequestStatus.textContent = "";
+    conversationRequestStatus.classList.remove("error");
+  }
   conversationSubmitButton.disabled = true;
   if (conversationCancelButton) {
     conversationCancelButton.hidden = false;
     conversationCancelButton.disabled = false;
   }
-  const conversation = ensureSelectedConversation();
+  const storedConversation = ensureSelectedConversation();
+  const cleanedMessages = Avatar.removeLegacyTokenBudgetRejectedTurns(storedConversation.messages);
+  const conversation =
+    cleanedMessages.length === storedConversation.messages.length
+      ? storedConversation
+      : { ...storedConversation, messages: cleanedMessages, updatedAt: new Date().toISOString() };
+  if (conversation !== storedConversation) {
+    updateConversation(conversation);
+  }
   const rewriteQueryForRetrieval = conversationRewriteEnabled(conversation);
   const userMessage = {
     role: "user",
     content: prompt,
+    request_turn_id: turnId,
     createdAt: new Date().toISOString(),
   };
   const workingConversation = {
@@ -6236,7 +6305,17 @@ async function submitConversationTurn() {
     rewrite_query_for_retrieval: rewriteQueryForRetrieval,
     messages: [...conversation.messages, userMessage],
   };
-  updateConversation(workingConversation);
+  const turnSaved = updateConversation(workingConversation);
+  if (!turnSaved) {
+    renderConversationWorkspace();
+    refreshConversationStorageStatus();
+    conversationSubmitButton.disabled = false;
+    if (conversationCancelButton) {
+      conversationCancelButton.hidden = true;
+    }
+    activeConversationController = null;
+    return;
+  }
   renderConversationWorkspace();
   conversationQuestion.value = "";
 
@@ -6374,10 +6453,21 @@ async function submitConversationTurn() {
       renderConversationWorkspace();
     };
     await chatRequest(payload, {
+      onStatus(data) {
+        if (conversationRequestStatus) {
+          conversationRequestStatus.textContent = Avatar.requestStatusMessage(data.phase);
+        }
+      },
       onPreliminarySources(data) {
+        if (conversationRequestStatus) {
+          conversationRequestStatus.textContent = "";
+        }
         handleConversationSources(data);
       },
       onSources(data) {
+        if (conversationRequestStatus) {
+          conversationRequestStatus.textContent = "";
+        }
         handleConversationSources(data);
       },
       onReasoning(delta) {
@@ -6442,28 +6532,47 @@ async function submitConversationTurn() {
     if (error.name === "AbortError") {
       return;
     }
+    requestFailed = true;
     const failedConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
-    updateConversation({
-      ...failedConversation,
-      updatedAt: new Date().toISOString(),
-      rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-      messages: [
-        ...failedConversation.messages,
-        {
-          role: "assistant",
-          question: prompt,
-          ...latestRetrievalInfo,
-          content: `Nepodařilo se dokončit odpověď: ${error.message}`,
-          settings: sanitizedPayload,
-          sources: [],
-          retrieved_chunks: [],
-          model_used: payload.model,
-          response_time_seconds: null,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    });
+    const tokenBudgetRejected = Avatar.isTokenBudgetErrorDetail(error.detail);
+    if (tokenBudgetRejected) {
+      updateConversation({
+        ...failedConversation,
+        title: conversation.messages.length ? failedConversation.title : conversation.title,
+        updatedAt: new Date().toISOString(),
+        rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+        messages: Avatar.rollbackRejectedTurn(failedConversation.messages, turnId),
+      });
+      if (!conversationQuestion.value.trim()) {
+        conversationQuestion.value = prompt;
+      }
+    } else {
+      updateConversation({
+        ...failedConversation,
+        updatedAt: new Date().toISOString(),
+        rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+        messages: [
+          ...failedConversation.messages,
+          {
+            role: "assistant",
+            question: prompt,
+            ...latestRetrievalInfo,
+            content: `Nepodařilo se dokončit odpověď: ${error.message}`,
+            settings: sanitizedPayload,
+            sources: [],
+            retrieved_chunks: [],
+            model_used: payload.model,
+            response_time_seconds: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      });
+    }
     renderConversationWorkspace();
+    if (conversationRequestStatus) {
+      conversationRequestStatus.textContent = error.message;
+      conversationRequestStatus.classList.add("error");
+    }
   } finally {
     if (activeConversationController === controller) {
       activeConversationController = null;
@@ -6472,6 +6581,10 @@ async function submitConversationTurn() {
     // stored with the message — leave it set and the panel stays wedged open
     // for the life of the conversation.
     clearStreamingReasoningFlag();
+    if (conversationRequestStatus && !requestFailed) {
+      conversationRequestStatus.textContent = "";
+      conversationRequestStatus.classList.remove("error");
+    }
     conversationSubmitButton.disabled = false;
     if (conversationCancelButton) {
       conversationCancelButton.hidden = true;
@@ -6526,7 +6639,7 @@ function saveHistoryEntry(entry) {
     createdAt: new Date().toISOString(),
   });
   const trimmed = history.slice(0, MAX_STORED_HISTORY_ENTRIES);
-  const savedHistory = saveEntryListWithQuotaPruning(
+  const savedHistory = saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     trimmed,
     compactStoredHistoryEntry,
@@ -6746,7 +6859,7 @@ function mutateLocalHistoryEntry(id, mutate) {
     return;
   }
   mutate(entry);
-  saveEntryListWithQuotaPruning(
+  saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     history,
     compactStoredHistoryEntry,
@@ -6778,7 +6891,7 @@ function clearLocalSharedMarker(sharedId) {
     }
   }
   if (changed) {
-    saveEntryListWithQuotaPruning(
+    saveEntryListSafely(
       HISTORY_STORAGE_KEY,
       history,
       compactStoredHistoryEntry,

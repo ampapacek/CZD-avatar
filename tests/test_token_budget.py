@@ -70,6 +70,10 @@ class TokenBudgetTests(unittest.TestCase):
             budget.metadata()["estimated_total_input_tokens"],
             budget.metadata()["estimated_non_source_tokens"] + budget.metadata()["estimated_source_tokens"],
         )
+        self.assertEqual(
+            budget.metadata()["estimated_retrieved_source_tokens"],
+            budget.metadata()["estimated_source_tokens"],
+        )
 
     def test_reports_conversation_history_tokens_separately(self) -> None:
         config = PromptBudgetConfig(
@@ -184,6 +188,10 @@ class TokenBudgetTests(unittest.TestCase):
 
         self.assertIn("z1", {item["chunk_id"] for item in budget.used_chunks})
         self.assertIn("z3", {item["chunk_id"] for item in budget.omitted_chunks})
+        self.assertGreater(
+            budget.metadata()["estimated_retrieved_source_tokens"],
+            budget.metadata()["estimated_source_tokens"],
+        )
         self.assertIn("Kvůli limitu kontextu nebylo modelu posláno", budget.warnings[0])
 
     def test_trims_top_chunks_to_keep_minimum_when_possible(self) -> None:

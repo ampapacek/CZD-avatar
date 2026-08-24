@@ -126,6 +126,7 @@ class PromptBudgetResult:
     usable_input_tokens: int = 0
     reserved_output_tokens: int = 0
     estimated_non_source_tokens: int = 0
+    estimated_retrieved_source_tokens: int = 0
     estimated_source_tokens: int = 0
     estimated_conversation_history_tokens: int = 0
     estimated_total_input_tokens: int = 0
@@ -152,6 +153,7 @@ class PromptBudgetResult:
             "safety_margin_tokens": self.safety_margin_tokens,
             "safety_margin_ratio": self.safety_margin_ratio,
             "estimated_non_source_tokens": self.estimated_non_source_tokens,
+            "estimated_retrieved_source_tokens": self.estimated_retrieved_source_tokens,
             "estimated_source_tokens": self.estimated_source_tokens,
             "estimated_conversation_history_tokens": self.estimated_conversation_history_tokens,
             "estimated_total_input_tokens": self.estimated_total_input_tokens,
@@ -234,6 +236,19 @@ def prepare_prompt_budget(
         )
 
     source_budget = max(0, usable_input - non_source_tokens)
+    all_source_messages = build_messages(
+        question,
+        retrieved_chunks,
+        placeholder_defs,
+        selections,
+        conversation_history=conversation_history,
+        conversation_summary=conversation_summary,
+        history_limit=history_limit,
+        system_prompt=system_prompt,
+        user_prompt_template=user_prompt_template,
+        context_text=format_context(retrieved_chunks),
+    )
+    retrieved_source_tokens = max(0, estimate_messages_tokens(all_source_messages, model) - non_source_tokens)
     used_chunks, omitted_chunks, warnings = _fit_chunks(
         question=question,
         chunks=retrieved_chunks,
@@ -273,6 +288,7 @@ def prepare_prompt_budget(
         usable_input_tokens=usable_input,
         reserved_output_tokens=reserved_output,
         estimated_non_source_tokens=non_source_tokens,
+        estimated_retrieved_source_tokens=retrieved_source_tokens,
         estimated_source_tokens=source_tokens,
         estimated_conversation_history_tokens=history_tokens,
         estimated_total_input_tokens=total_input_tokens,

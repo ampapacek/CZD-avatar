@@ -275,6 +275,10 @@ class TokenBudgetMetadata(BaseModel):
     safety_margin_tokens: int = 0
     safety_margin_ratio: float = 0.0
     estimated_non_source_tokens: int
+    # All retrieved chunks at their original length, before prompt-budget
+    # trimming and omission. Informational only; it is not part of the sent
+    # input total.
+    estimated_retrieved_source_tokens: int = 0
     estimated_source_tokens: int
     estimated_conversation_history_tokens: int = 0
     estimated_total_input_tokens: int = 0

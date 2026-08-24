@@ -773,6 +773,13 @@
         <div class="conversation-dialog-body">
           <aside id="conversationList" class="history-list conversation-list-panel"></aside>
           <section class="conversation-main">
+            <div id="conversationStorageStatus" class="conversation-storage-status" role="status" aria-live="polite" hidden>
+              <span id="conversationStorageStatusText"></span>
+              <div id="legacyHistoryStorageActions" class="conversation-storage-actions" hidden>
+                <button id="exportLegacyHistoryButton" class="secondary" type="button">Exportovat starou historii</button>
+                <button id="deleteLegacyHistoryButton" class="secondary danger-lite" type="button">Smazat starou historii</button>
+              </div>
+            </div>
             <details id="conversationSettings" class="conversation-settings">
               <summary>Nastavení konverzace</summary>
               <div class="conversation-settings-body">
@@ -816,6 +823,7 @@
               </label>
               <div class="conversation-composer-actions">
                 <span class="conversation-note">Použije se nastavení této konverzace (viz „Nastavení konverzace“ nahoře).</span>
+                <span id="conversationRequestStatus" class="conversation-request-status" role="status" aria-live="polite"></span>
                 <button id="conversationSubmitButton" class="primary" type="submit">Odeslat</button>
                 <button id="conversationCancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající generování odpovědi.">Zrušit</button>
               </div>
