@@ -26,11 +26,12 @@ export function compactConversationForStorage(entry, { chunkTextLimit = 1200 } =
   return {
     ...entry,
     messages: messages.map((message, index) => {
+      const { conversation_summary: _discardedSummary, ...storedMessage } = message || {};
       if (message?.role !== "assistant") {
-        return message;
+        return storedMessage;
       }
       return {
-        ...message,
+        ...storedMessage,
         settings: storedAssistantSettings(message.settings),
         retrieved_chunks:
           index === latestAssistantIndex

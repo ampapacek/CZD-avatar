@@ -300,6 +300,7 @@ class RetrievalQueryRewriteTests(unittest.TestCase):
                 return_value=RetrievalCandidates([], [], False, 0.0, 0),
             ),
             patch.object(main.pipeline, "apply_rerank_iter", return_value=iter([("result", [], 0.0)])),
+            patch.object(main.pipeline, "conversation_compaction_needed", return_value=True),
             patch(
                 "app.rag.llm.httpx.Client",
                 return_value=httpx.Client(transport=httpx.MockTransport(stream_handler)),
@@ -320,6 +321,7 @@ class RetrievalQueryRewriteTests(unittest.TestCase):
         self.assertLess(events.index("event: status"), events.index("event: sources"))
         self.assertIn('"phase": "query_rewrite"', response.text)
         self.assertIn('"phase": "retrieval"', response.text)
+        self.assertIn('"phase": "conversation_compaction"', response.text)
         self.assertIn('"retrieval_query_rewrite_attempted": true', response.text)
 
     def test_stream_rejects_oversized_prompt_before_rewrite_or_retrieval(self) -> None:

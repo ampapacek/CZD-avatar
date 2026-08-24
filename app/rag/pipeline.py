@@ -26,6 +26,7 @@ from app.rag.token_budget import (
     conversation_history_tokens,
     estimate_text_tokens,
     prepare_prompt_budget,
+    truncate_text_to_token_limit,
 )
 from app.rag.vector_store import QdrantVectorStore
 
@@ -525,6 +526,7 @@ class RAGPipeline:
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=resolved_model,
+            length=length,
             budget_config=budget_config,
             api_key=llm_api_key,
             base_url=llm_base_url,
@@ -672,6 +674,7 @@ class RAGPipeline:
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=model,
+            length=length,
             budget_config=resolved_config,
             api_key=llm_api_key,
             base_url=llm_base_url,
@@ -851,42 +854,36 @@ class RAGPipeline:
         *,
         conversation_summary: str | None,
         model: str,
+        length: str,
         budget_config: PromptBudgetConfig,
         api_key: str | None,
         base_url: str | None,
     ) -> ConversationContext:
         """Decide what of the conversation goes into this turn's prompt.
 
-        The client uploads only the messages that have not been folded into the
-        summary yet, so `history` is the live tail. While that tail is under the
-        trigger, nothing happens: the existing summary and the whole tail are
-        used as they are, and no summarisation call is made.
-
-        Once the tail crosses the trigger, everything except the last
-        `conversation_recent_messages` is folded into the summary and reported
-        back as `folded_message_count`. The client drops exactly that many
-        messages from what it uploads next time, so the running context actually
-        shrinks instead of the summary being rebuilt from a transcript that only
-        ever grows.
+        The live tail is compacted only when it crosses the adaptive token
+        trigger or the configured message-count trigger. Prompt packing pressure
+        alone never invokes the summariser. After compaction, the immediately
+        preceding complete turn is retained, followed by as many additional
+        recent complete turns as fit the token-aware target and six-message cap.
         """
 
         clean_summary = (conversation_summary or "").strip() or None
-        history_tokens = conversation_history_tokens(history, model)
-        if history_tokens < budget_config.conversation_summary_trigger_tokens:
-            return ConversationContext(history=history, summary=clean_summary)
-
-        keep = budget_config.conversation_recent_messages
-        to_fold = history[:-keep] if keep else list(history)
+        clean_history, to_fold, retained = self._conversation_compaction_plan(
+            history,
+            model=model,
+            length=length,
+            budget_config=budget_config,
+        )
         if not to_fold:
-            # The tail is over the trigger but is nothing but recent messages;
-            # folding would throw away context the model still needs verbatim.
-            return ConversationContext(history=history, summary=clean_summary)
+            return ConversationContext(history=clean_history, summary=clean_summary)
 
         try:
             summary = self._summarize_conversation(
                 to_fold,
                 previous_summary=clean_summary,
                 model=model,
+                target_tokens=budget_config.conversation_summary_target_tokens(length),
                 api_key=api_key,
                 base_url=base_url,
             )
@@ -895,7 +892,7 @@ class RAGPipeline:
             # tail as it is rather than losing the turn.
             if clean_summary:
                 return ConversationContext(
-                    history=history,
+                    history=clean_history,
                     summary=clean_summary,
                     warning=(
                         "Conversation compression failed; the previous compressed summary "
@@ -903,16 +900,73 @@ class RAGPipeline:
                     ),
                 )
             return ConversationContext(
-                history=history,
+                history=clean_history,
                 summary=None,
                 warning=f"Conversation compression failed; raw recent history was used instead: {exc}",
             )
 
         return ConversationContext(
-            history=history[-keep:],
+            history=retained,
             summary=summary,
             folded_message_count=len(to_fold),
         )
+
+    def conversation_compaction_needed(
+        self,
+        history: list[dict[str, str]],
+        *,
+        model: str,
+        length: str,
+        budget_config: PromptBudgetConfig,
+    ) -> bool:
+        """Whether resolving this live tail will make a summarisation call."""
+
+        _, to_fold, _ = self._conversation_compaction_plan(
+            history,
+            model=model,
+            length=length,
+            budget_config=budget_config,
+        )
+        return bool(to_fold)
+
+    def _conversation_compaction_plan(
+        self,
+        history: list[dict[str, str]],
+        *,
+        model: str,
+        length: str,
+        budget_config: PromptBudgetConfig,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
+        clean_history = [
+            {"role": turn.get("role", ""), "content": turn.get("content") or ""}
+            for turn in history
+            if turn.get("role") in {"user", "assistant"} and (turn.get("content") or "").strip()
+        ]
+        history_tokens = conversation_history_tokens(clean_history, model)
+        trigger_tokens = budget_config.effective_conversation_trigger_tokens(length)
+        if (
+            history_tokens <= trigger_tokens
+            and len(clean_history) <= budget_config.conversation_summary_trigger_messages
+        ):
+            return clean_history, [], clean_history
+
+        if len(clean_history) <= 2:
+            # The latest complete turn is deliberately verbatim even when it is
+            # unusually large; there is no older context that can be folded.
+            return clean_history, [], clean_history
+
+        max_keep = min(budget_config.conversation_recent_messages, 6, len(clean_history))
+        target_tokens = min(trigger_tokens // 4, max(1, history_tokens // 2))
+        keep_count = 2 if len(clean_history) >= 2 else 1
+        while keep_count + 2 <= max_keep:
+            candidate = clean_history[-(keep_count + 2) :]
+            if conversation_history_tokens(candidate, model) > target_tokens:
+                break
+            keep_count += 2
+
+        retained = clean_history[-keep_count:]
+        to_fold = clean_history[:-keep_count]
+        return clean_history, to_fold, retained
 
     def _summarize_conversation(
         self,
@@ -920,6 +974,7 @@ class RAGPipeline:
         *,
         previous_summary: str | None,
         model: str,
+        target_tokens: int,
         api_key: str | None,
         base_url: str | None,
     ) -> str:
@@ -945,12 +1000,15 @@ class RAGPipeline:
             {
                 "role": "system",
                 "content": (
-                    "Compress the conversation for a RAG assistant. You are given the summary so far "
-                    "(may be empty) and the new messages to fold into it. Return one merged summary that "
-                    "replaces the previous one; keep everything from the previous summary that is still "
-                    "relevant. Preserve user preferences, unresolved references, named entities, "
-                    "constraints, and commitments from previous answers. Do not invent facts. Write a "
-                    "concise Czech summary unless the conversation is clearly in another language."
+                    "Compress the conversation for a RAG assistant. Rewrite the previous summary and the "
+                    "new messages into one coherent replacement summary. Do not append a new section to "
+                    "the previous summary. Remove repetition and outdated details, consolidate overlapping "
+                    "information, and keep everything from the previous summary that is still relevant. "
+                    "Preserve user preferences, unresolved references, named entities, constraints, and "
+                    "commitments from previous answers. Do not invent facts. Write a concise Czech summary "
+                    "unless the conversation is clearly in another language. Put the newest and most "
+                    "important information first so it survives the hard output limit. "
+                    f"Keep the merged summary below approximately {target_tokens} tokens."
                 ),
             },
             {
@@ -962,7 +1020,7 @@ class RAGPipeline:
         manager = bind_context(context, purpose="conversation_summary") if context else nullcontext()
         with manager:
             generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
-        return generation.answer.strip()
+        return truncate_text_to_token_limit(generation.answer, target_tokens, model)
 
 
 def _retrieved_chunk_from_record(record: dict[str, Any]) -> RetrievedChunk:

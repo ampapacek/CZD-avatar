@@ -24,11 +24,13 @@ describe("conversation storage", () => {
     const conversation = compactConversationForStorage(
       {
         id: 1,
+        conversation_summary: "canonical summary",
         messages: [
           { role: "user", content: "first" },
           {
             role: "assistant",
             content: "first answer",
+            conversation_summary: "obsolete first snapshot",
             settings: { question: "first", model: "m" },
             retrieved_chunks: [{ chunk_id: "old", text: "old excerpt" }],
             omitted_chunks: [{ chunk_id: "omitted" }],
@@ -37,6 +39,7 @@ describe("conversation storage", () => {
           {
             role: "assistant",
             content: "second answer",
+            conversation_summary: "obsolete second snapshot",
             settings: { conversation_history: ["duplicate"], model: "m" },
             retrieved_chunks: [{ chunk_id: "new", text: "123456789" }],
           },
@@ -48,6 +51,9 @@ describe("conversation storage", () => {
     expect(conversation.messages[1].retrieved_chunks).toEqual([]);
     expect(conversation.messages[1].omitted_chunks).toEqual([]);
     expect(conversation.messages[1].settings).toEqual({ model: "m" });
+    expect(conversation.conversation_summary).toBe("canonical summary");
+    expect(conversation.messages[1]).not.toHaveProperty("conversation_summary");
+    expect(conversation.messages[3]).not.toHaveProperty("conversation_summary");
     expect(conversation.messages[3].retrieved_chunks[0].text).toBe("12345…");
   });
 

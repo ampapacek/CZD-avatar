@@ -392,6 +392,8 @@ def get_public_settings(request: Request) -> dict[str, object]:
             "min_prompt_chunks": settings.min_prompt_chunks,
             "token_budget_safety_margin": settings.token_budget_safety_margin,
             "conversation_summary_trigger_tokens": settings.conversation_summary_trigger_tokens,
+            "conversation_summary_trigger_messages": settings.conversation_summary_trigger_messages,
+            "conversation_recent_messages": settings.conversation_recent_messages,
         },
         "msearch_defaults": {
             "collection": settings.msearch_collection,
@@ -1505,6 +1507,13 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     retrieved, rerank_seconds = event[1], event[2]
             rerank_ms = ms(rerank_seconds) if candidates.rerank_active else None
             prompt_started = time.perf_counter()
+            if pipeline.conversation_compaction_needed(
+                request.conversation_history,
+                model=resolved_model,
+                length=length,
+                budget_config=budget_config,
+            ):
+                yield _sse_event("status", {"phase": "conversation_compaction"})
             with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="conversation_summary"):
                 budget, conversation = pipeline.build_chat_prompt(
                     question=answer_question,

@@ -23,6 +23,11 @@ describe("token budget presentation", () => {
         estimated_source_tokens: 2000,
         safety_margin_tokens: 4000,
         safety_margin_ratio: 0.1,
+        conversation_history_message_count: 8,
+        conversation_history_used_message_count: 6,
+        conversation_history_omitted_message_count: 2,
+        effective_conversation_trigger_tokens: 8000,
+        conversation_summary_trigger_messages: 16,
       },
       { foldedMessages: 6, conversationSummary: "Earlier turns" },
     );
@@ -31,6 +36,11 @@ describe("token budget presentation", () => {
     expect(view.nonSourceTokens).toBe(8000);
     expect(view.retrievedSourceTokens).toBe(3500);
     expect(view.historyTokens).toBe(3000);
+    expect(view.historyMessages).toBe(8);
+    expect(view.usedHistoryMessages).toBe(6);
+    expect(view.omittedHistoryMessages).toBe(2);
+    expect(view.effectiveCompactionTrigger).toBe(8000);
+    expect(view.compactionMessageTrigger).toBe(16);
     expect(view.inputUsagePercent).toBe(29);
     expect(view.summaryUsed).toBe(true);
     expect(view.foldedMessages).toBe(6);
@@ -76,6 +86,7 @@ describe("token budget presentation", () => {
   it("maps the streamed preparation phase to visible Czech copy", () => {
     expect(requestStatusMessage("query_rewrite")).toBe("Připravuji vyhledávací dotaz…");
     expect(requestStatusMessage("retrieval")).toBe("Vyhledávám zdroje…");
+    expect(requestStatusMessage("conversation_compaction")).toBe("Komprimuji starší část konverzace…");
     expect(requestStatusMessage("unknown")).toBe("");
   });
 

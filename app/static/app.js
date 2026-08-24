@@ -2386,7 +2386,7 @@ function populateTokenBudgetFields(settings = appSettings) {
   minPromptChunks.value = stored.min_prompt_chunks ?? defaults.min_prompt_chunks ?? 3;
   tokenBudgetSafetyMargin.value = stored.token_budget_safety_margin ?? defaults.token_budget_safety_margin ?? 0.1;
   conversationSummaryTriggerTokens.value =
-    stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 3000;
+    stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 8000;
   updateModelContextWindowNote();
 }
 
@@ -5255,6 +5255,12 @@ function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", folde
   const foldedNote = view.foldedMessages
     ? `<p class="budget-note-line">Ve shrnutí je ${escapeHtml(view.foldedMessages)} starších zpráv.</p>`
     : "";
+  const historyCounts = view.historyMessages
+    ? `<p class="budget-note-line">Historie: ${escapeHtml(view.usedHistoryMessages)} z ${escapeHtml(view.historyMessages)} zpráv v promptu${view.omittedHistoryMessages ? ` · ${escapeHtml(view.omittedHistoryMessages)} vynecháno` : ""}.</p>`
+    : "";
+  const compactionThreshold = view.effectiveCompactionTrigger !== null
+    ? `<p class="budget-note-line">Efektivní kompresní práh: ${escapeHtml(formatTokenCount(view.effectiveCompactionTrigger))} tokenů nebo více než ${escapeHtml(view.compactionMessageTrigger)} zpráv.</p>`
+    : "";
   const summaryBlock = view.conversationSummary
     ? `<div class="context-summary-block"><h4>Komprimovaný kontext konverzace</h4><p>${escapeHtml(view.conversationSummary)}</p></div>`
     : "";
@@ -5281,6 +5287,8 @@ function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", folde
       </table>
       ${chunkCounts.length ? `<p class="budget-note-line">Zdroje: ${escapeHtml(chunkCounts.join(" · "))}.</p>` : ""}
       ${view.summaryUsed ? `<p class="budget-note-line">Historie konverzace je poslána jako shrnutí.</p>` : ""}
+      ${historyCounts}
+      ${compactionThreshold}
       ${foldedNote}
       ${summaryBlock}
     </details>
@@ -6049,8 +6057,14 @@ function renderConversationDetail(conversation) {
   if (!messages.length) {
     conversationMessages.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
+    const latestAssistantIndex = messages.lastIndexOf(latestAssistant);
     conversationMessages.innerHTML = messages
-      .map((message, index) => renderConversationMessage(message, index))
+      .map((message, index) =>
+        renderConversationMessage(
+          message,
+          index,
+          index === latestAssistantIndex ? conversation.conversation_summary || "" : "",
+        ))
       .join("");
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
@@ -6157,7 +6171,7 @@ function retrievalInfoFromEvent(data = {}, fallbackQuestion = "", previous = nul
   };
 }
 
-function renderConversationMessage(message, index = 0) {
+function renderConversationMessage(message, index = 0, conversationSummary = "") {
   const roleLabel = message.role === "assistant" ? "Avatar" : "Ty";
   const messageClass = message.role === "assistant" ? "assistant" : "user";
   const body =
@@ -6177,7 +6191,8 @@ function renderConversationMessage(message, index = 0) {
           .map((warning) => `<p>${escapeHtml(warning)}</p>`)
           .join("")}</div>`
       : "";
-  const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
+  const contextStatus =
+    message.role === "assistant" ? renderConversationContextStatus(message, conversationSummary) : "";
   const reasoningBlock =
     message.role === "assistant" && (message.reasoning || "").trim()
       ? `<details class="reasoning-panel"${message.reasoning_streaming ? " open" : ""}>
@@ -6206,9 +6221,9 @@ function renderConversationMessage(message, index = 0) {
   `;
 }
 
-function renderConversationContextStatus(message) {
+function renderConversationContextStatus(message, conversationSummary = "") {
   const budget = message.token_budget;
-  const summary = message.conversation_summary || "";
+  const summary = conversationSummary || "";
   if (!budget && !summary) {
     return "";
   }
@@ -6227,7 +6242,7 @@ function renderConversationContextStatus(message) {
   const compressionText = foldedMessages
     ? `${foldedMessages} starších zpráv ve shrnutí`
     : budget?.conversation_summary_used || summary
-      ? "komprese zapnutá"
+      ? "použito shrnutí starší konverzace"
       : "bez komprese";
   const visibleParts = [sourceText, compressionText];
   if (trimmedChunks > 0) {
@@ -6349,7 +6364,6 @@ async function submitConversationTurn() {
         omitted_chunks: [],
         token_budget: null,
         chunk_budget_warnings: [],
-        conversation_summary: liveConversation.conversation_summary || null,
         model_used: payload.model,
         upstream_model: null,
         response_time_seconds: null,
@@ -6437,7 +6451,6 @@ async function submitConversationTurn() {
           omitted_chunks: [],
           token_budget: null,
           chunk_budget_warnings: [],
-          conversation_summary: liveConversation.conversation_summary || null,
           model_used: payload.model,
           upstream_model: null,
           response_time_seconds: null,
@@ -6496,7 +6509,6 @@ async function submitConversationTurn() {
           omitted_chunks: data.omitted_chunks || [],
           token_budget: data.token_budget || null,
           chunk_budget_warnings: data.chunk_budget_warnings || [],
-          conversation_summary: data.conversation_summary || null,
           reasoning: data.reasoning || assistantReasoning,
           reasoning_streaming: false,
           conversation_compacted_through: compactedThrough + (Number(data.conversation_folded_message_count) || 0),

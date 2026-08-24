@@ -10,6 +10,11 @@ export function tokenBudgetView(tokenBudget, { foldedMessages = 0, conversationS
   const retrievedSourceTokens = nullableNumber(tokenBudget.estimated_retrieved_source_tokens);
   const sourceTokens = nullableNumber(tokenBudget.estimated_source_tokens);
   const historyTokens = nullableNumber(tokenBudget.estimated_conversation_history_tokens);
+  const historyMessages = Number(tokenBudget.conversation_history_message_count || 0);
+  const usedHistoryMessages = Number(tokenBudget.conversation_history_used_message_count || 0);
+  const omittedHistoryMessages = Number(tokenBudget.conversation_history_omitted_message_count || 0);
+  const effectiveCompactionTrigger = nullableNumber(tokenBudget.effective_conversation_trigger_tokens);
+  const compactionMessageTrigger = Number(tokenBudget.conversation_summary_trigger_messages || 16);
   const totalInput =
     nullableNumber(tokenBudget.estimated_total_input_tokens) ??
     (nonSourceTokens !== null && sourceTokens !== null ? nonSourceTokens + sourceTokens : null);
@@ -34,6 +39,11 @@ export function tokenBudgetView(tokenBudget, { foldedMessages = 0, conversationS
     retrievedSourceTokens,
     sourceTokens,
     historyTokens,
+    historyMessages,
+    usedHistoryMessages,
+    omittedHistoryMessages,
+    effectiveCompactionTrigger,
+    compactionMessageTrigger,
     totalInput,
     safetyMargin,
     safetyMarginPercent:
@@ -76,6 +86,9 @@ export function requestStatusMessage(phase) {
   }
   if (phase === "retrieval") {
     return "Vyhledávám zdroje…";
+  }
+  if (phase === "conversation_compaction") {
+    return "Komprimuji starší část konverzace…";
   }
   return "";
 }

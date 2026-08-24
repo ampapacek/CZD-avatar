@@ -59,28 +59,25 @@ class Settings(BaseSettings):
     output_token_budget_long: int = Field(default=1024, alias="OUTPUT_TOKEN_BUDGET_LONG")
     min_prompt_chunks: int = Field(default=3, alias="MIN_PROMPT_CHUNKS")
     token_budget_safety_margin: float = Field(default=0.10, alias="TOKEN_BUDGET_SAFETY_MARGIN")
-    # Compaction fires when the history the client uploads crosses this many
-    # tokens. It then folds everything except the last
-    # `conversation_recent_messages` into the rolling summary.
+    # Upper bound for the adaptive compaction threshold. The effective trigger
+    # is the smaller of this value and 250 + 25% of the usable input budget.
     conversation_summary_trigger_tokens: int = Field(
-        default=3000,
+        default=8000,
         alias="CONVERSATION_SUMMARY_TRIGGER_TOKENS",
     )
-    # Messages (one role entry each, not user/assistant pairs) kept verbatim
-    # after a compaction. Everything older is folded into the summary and the
-    # client stops uploading it.
+    # Maximum individual messages kept verbatim after compaction. Complete
+    # user/assistant turns are preferred, so the default preserves three turns.
     conversation_recent_messages: int = Field(
         default=6,
         ge=2,
         alias="CONVERSATION_RECENT_MESSAGES",
     )
-    # Hard cap on history messages placed in the prompt, applied whether or not
-    # a summary exists. The summary is a separate message and is never counted
-    # against this.
-    conversation_prompt_messages: int = Field(
-        default=8,
+    # A token-light conversation is compacted after this many uploaded
+    # messages even if it has not reached the adaptive token threshold.
+    conversation_summary_trigger_messages: int = Field(
+        default=16,
         ge=2,
-        alias="CONVERSATION_PROMPT_MESSAGES",
+        alias="CONVERSATION_SUMMARY_TRIGGER_MESSAGES",
     )
     # Query rewriting is useful for short follow-ups such as "And what happened
     # next?". A long message already carries substantial search context, while

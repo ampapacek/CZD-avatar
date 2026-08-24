@@ -281,6 +281,11 @@ class TokenBudgetMetadata(BaseModel):
     estimated_retrieved_source_tokens: int = 0
     estimated_source_tokens: int
     estimated_conversation_history_tokens: int = 0
+    conversation_history_message_count: int = 0
+    conversation_history_used_message_count: int = 0
+    conversation_history_omitted_message_count: int = 0
+    effective_conversation_trigger_tokens: int = 0
+    conversation_summary_trigger_messages: int = 16
     estimated_total_input_tokens: int = 0
     used_chunk_count: int
     omitted_chunk_count: int

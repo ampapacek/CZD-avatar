@@ -104,6 +104,81 @@ class TokenBudgetTests(unittest.TestCase):
             metadata["estimated_total_input_tokens"],
             metadata["estimated_conversation_history_tokens"],
         )
+        self.assertEqual(metadata["conversation_history_message_count"], 2)
+        self.assertEqual(metadata["conversation_history_used_message_count"], 2)
+        self.assertEqual(metadata["conversation_history_omitted_message_count"], 0)
+
+    def test_prompt_packing_defers_the_last_chunk_behind_older_history(self) -> None:
+        chunks = [chunk(f"z{index}", (f"chunk {index} " * 300), 1 - index / 10) for index in range(1, 5)]
+        history = [
+            {
+                "role": "user" if index % 2 == 0 else "assistant",
+                "content": f"history {index} " * 100,
+            }
+            for index in range(6)
+        ]
+        config = PromptBudgetConfig(
+            context_window_tokens=5000,
+            output_token_budget_short=128,
+            output_token_budget_medium=128,
+            output_token_budget_long=128,
+            min_prompt_chunks=2,
+            token_budget_safety_margin=0.0,
+            conversation_summary_trigger_tokens=8000,
+        )
+
+        budget = prepare_prompt_budget(
+            question="Navazující otázka",
+            retrieved_chunks=chunks,
+            length="short",
+            model="unknown-model",
+            config=config,
+            conversation_history=history,
+            conversation_summary="Dřívější shrnutí",
+            system_prompt="S",
+            user_prompt_template="{question}\n{retrieved_snippets}",
+        )
+
+        self.assertEqual([item["chunk_id"] for item in budget.used_chunks], ["z1", "z2", "z3"])
+        self.assertEqual(budget.metadata()["conversation_history_used_message_count"], 6)
+        self.assertEqual(budget.metadata()["conversation_history_omitted_message_count"], 0)
+        self.assertEqual([item["chunk_id"] for item in budget.omitted_chunks], ["z4"])
+
+    def test_minimum_chunks_and_last_turn_outrank_older_history(self) -> None:
+        chunks = [chunk(f"z{index}", (f"chunk {index} " * 300), 1 - index / 10) for index in range(1, 5)]
+        history = [
+            {
+                "role": "user" if index % 2 == 0 else "assistant",
+                "content": f"history {index} " * 100,
+            }
+            for index in range(6)
+        ]
+        config = PromptBudgetConfig(
+            context_window_tokens=1200,
+            output_token_budget_short=128,
+            output_token_budget_medium=128,
+            output_token_budget_long=128,
+            min_prompt_chunks=2,
+            token_budget_safety_margin=0.0,
+            conversation_summary_trigger_tokens=8000,
+        )
+
+        budget = prepare_prompt_budget(
+            question="Navazující otázka",
+            retrieved_chunks=chunks,
+            length="short",
+            model="unknown-model",
+            config=config,
+            conversation_history=history,
+            conversation_summary="Dřívější shrnutí",
+            system_prompt="S",
+            user_prompt_template="{question}\n{retrieved_snippets}",
+        )
+
+        self.assertEqual([item["chunk_id"] for item in budget.used_chunks], ["z1", "z2"])
+        self.assertEqual(budget.metadata()["conversation_history_used_message_count"], 2)
+        self.assertEqual(budget.metadata()["conversation_history_omitted_message_count"], 4)
+        self.assertTrue(all(item["metadata"].get("budget_status") == "trimmed" for item in budget.used_chunks))
 
     def test_safety_margin_completes_the_subtraction(self) -> None:
         # The UI renders context window − output reserve − safety margin =

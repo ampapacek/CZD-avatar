@@ -11,9 +11,9 @@ from typing import Any
 # from request data; ``{current_date}`` is the server-local date.
 SYSTEM_PLACEHOLDERS = frozenset({"question", "retrieved_snippets", "current_date"})
 
-# Fallback cap on history messages in the prompt for callers without settings;
-# the configured value is `Settings.conversation_prompt_messages`.
-DEFAULT_CONVERSATION_PROMPT_MESSAGES = 8
+# Fallback for direct callers. The budget-aware conversation path supplies its
+# selected history explicitly and is not constrained by this value.
+DEFAULT_CONVERSATION_PROMPT_MESSAGES = 16
 
 
 @dataclass(frozen=True)
