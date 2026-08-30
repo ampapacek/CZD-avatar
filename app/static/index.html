@@ -114,8 +114,6 @@
               <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
             </div>
           </div>
-          <div id="placeholderControls" class="placeholder-controls"></div>
-
           <details class="advanced model-settings">
             <summary>Model</summary>
             <div class="model-grid">
@@ -149,6 +147,7 @@
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
             <div class="advanced-grid">
+              <div id="placeholderControls" class="placeholder-controls advanced-placeholder-controls"></div>
               <div class="retrieval-sliders">
                 <label class="field">
                   <span>Dokumentů: <output id="topKValue">10</output></span>

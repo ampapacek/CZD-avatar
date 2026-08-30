@@ -579,6 +579,10 @@ select:focus {
   display: none;
 }
 
+.advanced-placeholder-controls {
+  grid-column: 1 / -1;
+}
+
 .context-window-main-field {
   align-self: start;
 }
