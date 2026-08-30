@@ -31,7 +31,9 @@ class ReasoningSupport:
     """
 
     # Request field: "reasoning" sends {"reasoning": {"effort": ...}},
-    # "reasoning_effort" sends {"reasoning_effort": ...}.
+    # "reasoning_effort" sends {"reasoning_effort": ...}, and the explicit
+    # dotted form below targets llama.cpp's chat-template arguments through an
+    # OpenAI-compatible gateway.
     param: str = "reasoning_effort"
     # Literal values the provider accepts, in the order to show them. Empty
     # means the effort cannot be steered.
@@ -81,6 +83,8 @@ class ReasoningSupport:
             return {}
         if self.param == "reasoning":
             return {"reasoning": {"effort": chosen}}
+        if self.param == "chat_template_kwargs.reasoning_effort":
+            return {"chat_template_kwargs": {"reasoning_effort": chosen}}
         return {self.param: chosen}
 
     def as_dict(self) -> dict[str, object]:
@@ -106,7 +110,11 @@ class ModelMetadata:
     provider_reasoning: dict[str, ReasoningSupport] = field(default_factory=dict)
 
 
-VALID_REASONING_PARAMS = ("reasoning", "reasoning_effort")
+VALID_REASONING_PARAMS = (
+    "reasoning",
+    "reasoning_effort",
+    "chat_template_kwargs.reasoning_effort",
+)
 
 # Effort values that mean "do not reason". Providers spell it differently, and a
 # model that reasons unconditionally accepts none of them.

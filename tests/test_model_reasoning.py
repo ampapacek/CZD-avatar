@@ -53,6 +53,16 @@ class ReasoningPayloadTests(unittest.TestCase):
         support = ReasoningSupport(param="reasoning_effort", efforts=("low", "high"))
         self.assertEqual(support.payload("high"), {"reasoning_effort": "high"})
 
+    def test_chat_template_reasoning_effort_is_nested_for_llamacpp(self) -> None:
+        support = ReasoningSupport(
+            param="chat_template_kwargs.reasoning_effort",
+            efforts=("low", "medium", "high"),
+        )
+        self.assertEqual(
+            support.payload("high"),
+            {"chat_template_kwargs": {"reasoning_effort": "high"}},
+        )
+
     def test_no_choice_falls_back_to_the_declared_default(self) -> None:
         support = ReasoningSupport(param="reasoning", efforts=("none", "low"), default="none")
         self.assertEqual(support.payload(None), {"reasoning": {"effort": "none"}})
@@ -70,6 +80,7 @@ class ReasoningPayloadTests(unittest.TestCase):
         payload = _chat_payload(model="m", messages=[{"role": "user", "content": "x"}])
         self.assertNotIn("reasoning", payload)
         self.assertNotIn("reasoning_effort", payload)
+        self.assertNotIn("chat_template_kwargs", payload)
 
     def test_chat_payload_merges_the_declared_fragment(self) -> None:
         payload = _chat_payload(

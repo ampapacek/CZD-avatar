@@ -20,7 +20,9 @@
     "",
     "reasoning — omitted means the model does not reason and nothing is sent.",
     "  param      'reasoning' sends {reasoning: {effort: X}}, 'reasoning_effort'",
-    "             sends {reasoning_effort: X}.",
+    "             sends {reasoning_effort: X}, and",
+    "             'chat_template_kwargs.reasoning_effort' sends",
+    "             {chat_template_kwargs: {reasoning_effort: X}}.",
     "  efforts    literal values the provider accepts, in the order the UI shows",
     "             them. An EMPTY or missing list means the effort cannot be",
     "             steered: no control is offered and no parameter is sent.",
@@ -44,12 +46,13 @@
     "only to override what the catalogue says. ai.ufal and e-infra publish",
     "nothing usable, so theirs are probed by hand and written down below.",
     "",
-    "Probed 2026-08-22 and 2026-08-23 against all three providers. The short",
+    "Probed 2026-08-22, 2026-08-23, and 2026-08-30 against all three providers.",
+    "The short",
     "version:",
-    "  ai.ufal   the Open WebUI gateway accepts every parameter form with a 200",
-    "            and ignores all of them — even reasoning_effort:'bogus' — so",
-    "            every model runs at its own built-in default and declares no",
-    "            efforts. Nothing to steer and nothing that can break.",
+    "  ai.ufal   the Open WebUI gateway drops top-level reasoning_effort and",
+    "            nested reasoning.effort. Its llama.cpp/GGUF GPT-OSS route does",
+    "            honour chat_template_kwargs.reasoning_effort; other AI Ufal",
+    "            models still declare no controls unless separately verified.",
     "  e-infra   honours reasoning_effort, and the vocabulary differs per model:",
     "            an unaccepted value is a 400, so each entry below lists what its",
     "            model actually took. What the LiteLLM catalogue reports is not",
@@ -127,8 +130,10 @@
     "LLM3.unsloth/gpt-oss-120b-GGUF:UD-Q8_K_XL": {
       "context_window": 65500,
       "reasoning": {
+        "param": "chat_template_kwargs.reasoning_effort",
+        "efforts": ["low", "medium", "high"],
         "mandatory": true,
-        "note": "ai.ufal. Reasons always, returns reasoning_content. reasoning_effort is dropped by the gateway (the model self-reports 'Reasoning: medium' whatever we send, on /api, /api/v1 and /openai), so no control is offered. Upstream it would accept low/medium/high and cannot be turned off."
+        "note": "ai.ufal. Probed 2026-08-30: the gateway drops top-level reasoning_effort and nested reasoning.effort, but its llama.cpp/GGUF route honours chat_template_kwargs.reasoning_effort. At temperature 0 on one controlled prompt, low/medium/high produced 393/735/2712 reasoning words and 694/1212/3873 completion tokens. The model reasons at all levels; 'none' did not disable it, so no off switch is offered."
       }
     },
     "LLM7.unsloth/gemma-4-12b-it-GGUF:UD-Q8_K_XL": {

@@ -212,6 +212,16 @@ class ShippedMetadataTests(unittest.TestCase):
                     f"{name} is mandatory but offers a way to turn reasoning off",
                 )
 
+    def test_aiufal_gpt_oss_uses_the_verified_chat_template_control(self) -> None:
+        metadata = load_model_metadata(Path("data/models.json"))
+        support = metadata.reasoning["LLM3.unsloth/gpt-oss-120b-GGUF:UD-Q8_K_XL"]
+        self.assertEqual(support.param, "chat_template_kwargs.reasoning_effort")
+        self.assertEqual(support.efforts, ("low", "medium", "high"))
+        self.assertEqual(
+            support.payload(None),
+            {"chat_template_kwargs": {"reasoning_effort": "low"}},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
