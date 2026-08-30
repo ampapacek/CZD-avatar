@@ -2,61 +2,257 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_context_window_map(payload: object, path: Path, label: str) -> dict[str, int]:
+@dataclass(frozen=True, slots=True)
+class ReasoningSupport:
+    """What a model does about reasoning, declared as data rather than in code.
+
+    Providers disagree on both the request parameter and the effort vocabulary,
+    and most publish none of it, so `data/models.json` states it per model (or
+    per provider as a fallback). Where a provider's catalogue does publish it,
+    `llm_providers` builds the same object from that instead — the file stays
+    the override. A model that declares nothing gets nothing sent, which is the
+    old behaviour.
+
+    `efforts` may be empty. That is the "reasons, but we cannot steer it" case:
+    the model returns a trace whatever we ask, but the effort parameter does not
+    reach it — so no control is offered and no parameter is sent, while the
+    trace is still shown.
+
+    `default` may be left unset: `effective_default` then derives one from
+    `mandatory`, so neither the file nor a provider catalogue has to state the
+    obvious for every model.
+    """
+
+    # Request field: "reasoning" sends {"reasoning": {"effort": ...}},
+    # "reasoning_effort" sends {"reasoning_effort": ...}.
+    param: str = "reasoning_effort"
+    # Literal values the provider accepts, in the order to show them. Empty
+    # means the effort cannot be steered.
+    efforts: tuple[str, ...] = ()
+    # Sent when the user has not chosen. Leave it None to derive one from
+    # `mandatory`; see `effective_default`.
+    default: str | None = None
+    # True when the model reasons whether or not it is asked to.
+    mandatory: bool = False
+    # Free text for humans; never sent anywhere, never parsed.
+    note: str = ""
+
+    @property
+    def controllable(self) -> bool:
+        return bool(self.efforts)
+
+    @property
+    def effective_default(self) -> str | None:
+        """What to send when the user has not picked an effort.
+
+        A declared `default` wins. Otherwise the rule is: a model that reasons
+        whether or not it is asked gets the cheapest level it accepts, and a
+        model that can be left alone is left alone.
+
+        The asymmetry is the point. Lowering a mandatory model's effort only
+        changes *how much* it thinks — it was going to think regardless, and the
+        trace it writes is output nobody asked for and everybody pays for.
+        Sending a level to an optional model would change *whether* it thinks,
+        which is a different answer than the user got yesterday, so those keep
+        sending nothing. It also keeps us off the levels a model does not take:
+        `mistral-medium-3.5` accepts only `none`/`high` and 400s on `low`.
+        """
+        if self.default:
+            return self.default
+        if not self.mandatory:
+            return None
+        # Off-efforts are stripped from a mandatory model at parse time, but a
+        # hand-built object could still carry one, and defaulting a model to a
+        # switch it cannot honour is exactly the bug this rule exists to avoid.
+        steerable = sort_efforts(tuple(e for e in self.efforts if e not in OFF_EFFORTS))
+        return steerable[0] if steerable else None
+
+    def payload(self, effort: str | None) -> dict[str, object]:
+        """The request fragment for one effort, or {} when nothing should be sent."""
+        chosen = (effort or self.effective_default or "").strip()
+        if not chosen or chosen not in self.efforts:
+            return {}
+        if self.param == "reasoning":
+            return {"reasoning": {"effort": chosen}}
+        return {self.param: chosen}
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "param": self.param,
+            "efforts": list(self.efforts),
+            "default": self.effective_default,
+            "mandatory": self.mandatory,
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ModelMetadata:
+    """Everything `data/models.json` knows, per model and per provider."""
+
+    context_windows: dict[str, int] = field(default_factory=dict)
+    provider_context_windows: dict[str, int] = field(default_factory=dict)
+    # Per provider: the largest window a discovered `context_length` may set.
+    # Absent means the provider's own default doubles as the ceiling.
+    provider_context_window_ceilings: dict[str, int] = field(default_factory=dict)
+    reasoning: dict[str, ReasoningSupport] = field(default_factory=dict)
+    provider_reasoning: dict[str, ReasoningSupport] = field(default_factory=dict)
+
+
+VALID_REASONING_PARAMS = ("reasoning", "reasoning_effort")
+
+# Effort values that mean "do not reason". Providers spell it differently, and a
+# model that reasons unconditionally accepts none of them.
+OFF_EFFORTS = ("none", "off")
+
+# Cheapest first. Providers publish their effort lists in whatever order they
+# like (OpenRouter counts down from "high") and the UI shows them as given, so a
+# discovered vocabulary is sorted into this one and "the cheapest level this
+# model takes" is read off it. Anything unrecognised keeps its published
+# position at the end rather than being dropped or guessed at.
+EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def sort_efforts(efforts: tuple[str, ...]) -> tuple[str, ...]:
+    known = [effort for effort in EFFORT_ORDER if effort in efforts]
+    unknown = [effort for effort in efforts if effort not in EFFORT_ORDER]
+    return tuple(known + unknown)
+
+
+MIN_CONTEXT_WINDOW_TOKENS = 1024
+
+
+def _parse_context_window(value: object, path: Path, name: str) -> int | None:
+    try:
+        tokens = int(value)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid context window for %r in %s.", name, path)
+        return None
+    if tokens < MIN_CONTEXT_WINDOW_TOKENS:
+        logger.warning("Ignoring too-small context window for %r in %s.", name, path)
+        return None
+    return tokens
+
+
+def _parse_reasoning(payload: object, path: Path, name: str) -> ReasoningSupport | None:
     if not isinstance(payload, dict):
-        logger.warning("Ignoring %s from %s: expected a JSON object.", label, path)
-        return {}
+        logger.warning("Ignoring reasoning for %r in %s: expected a JSON object.", name, path)
+        return None
+
+    param = str(payload.get("param") or "reasoning_effort").strip()
+    if param not in VALID_REASONING_PARAMS:
+        logger.warning("Ignoring reasoning for %r in %s: unknown param %r.", name, path, param)
+        return None
+
+    raw_efforts = payload.get("efforts") or []
+    if not isinstance(raw_efforts, list):
+        logger.warning("Ignoring reasoning for %r in %s: 'efforts' must be a list.", name, path)
+        return None
+    efforts = tuple(str(effort).strip() for effort in raw_efforts if str(effort).strip())
+
+    mandatory = bool(payload.get("mandatory"))
+    if not efforts and not mandatory:
+        # Says neither "you can steer it" nor "it happens anyway" — nothing to act on.
+        logger.warning("Ignoring reasoning for %r in %s: no efforts and not mandatory.", name, path)
+        return None
+
+    if mandatory:
+        # "Mandatory" and an off switch contradict each other, and we shipped the
+        # contradiction: `openai/gpt-oss-120b` listed "none", which OpenRouter
+        # answers with `400 Reasoning is mandatory for this endpoint and cannot
+        # be disabled` — so *every* answer from that model failed. Drop the
+        # switch rather than offer one that cannot work. A model that really can
+        # be turned off must not claim to be mandatory.
+        steerable = tuple(effort for effort in efforts if effort not in OFF_EFFORTS)
+        if steerable != efforts:
+            logger.warning(
+                "Dropping the off switch from mandatory reasoning for %r in %s: %s cannot be disabled.",
+                name,
+                path,
+                ", ".join(effort for effort in efforts if effort in OFF_EFFORTS),
+            )
+        efforts = steerable
+
+    raw_default = payload.get("default")
+    default = str(raw_default).strip() if raw_default is not None else None
+    if default and default not in efforts:
+        logger.warning("Ignoring default effort %r for %r in %s: not among 'efforts'.", default, name, path)
+        default = None
+
+    return ReasoningSupport(
+        param=param,
+        efforts=efforts,
+        default=default,
+        mandatory=mandatory,
+        note=str(payload.get("note") or "").strip(),
+    )
+
+
+def _parse_entries(
+    payload: object,
+    path: Path,
+    label: str,
+) -> tuple[dict[str, int], dict[str, int], dict[str, ReasoningSupport]]:
+    if not isinstance(payload, dict):
+        logger.warning("Ignoring %s metadata from %s: expected a JSON object.", label, path)
+        return {}, {}, {}
 
     windows: dict[str, int] = {}
-    for raw_name, raw_tokens in payload.items():
+    ceilings: dict[str, int] = {}
+    reasoning: dict[str, ReasoningSupport] = {}
+    for raw_name, entry in payload.items():
         name = str(raw_name).strip()
         if not name:
             continue
-        try:
-            tokens = int(raw_tokens)
-        except (TypeError, ValueError):
-            logger.warning("Ignoring invalid context window for %s %r in %s.", label, name, path)
+        if not isinstance(entry, dict):
+            logger.warning("Ignoring %s %r in %s: expected a JSON object.", label, name, path)
             continue
-        if tokens < 1024:
-            logger.warning("Ignoring too-small context window for %s %r in %s.", label, name, path)
-            continue
-        windows[name] = tokens
-    return windows
+        if "context_window" in entry:
+            tokens = _parse_context_window(entry["context_window"], path, name)
+            if tokens is not None:
+                windows[name] = tokens
+        if "max_context_window" in entry:
+            tokens = _parse_context_window(entry["max_context_window"], path, name)
+            if tokens is not None:
+                ceilings[name] = tokens
+        if "reasoning" in entry:
+            support = _parse_reasoning(entry["reasoning"], path, name)
+            if support is not None:
+                reasoning[name] = support
+    return windows, ceilings, reasoning
 
 
-def load_model_context_metadata(path: Path) -> tuple[dict[str, int], dict[str, int]]:
-    """Load known model and provider-default context-window sizes."""
+def load_model_metadata(path: Path) -> ModelMetadata:
+    """Load `data/models.json`. A missing or broken file is not fatal."""
     if not path.exists():
-        return {}, {}
+        return ModelMetadata()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Could not load model context windows from %s: %s", path, exc)
-        return {}, {}
+        logger.warning("Could not load model metadata from %s: %s", path, exc)
+        return ModelMetadata()
     if not isinstance(payload, dict):
-        logger.warning("Ignoring model context windows from %s: expected a JSON object.", path)
-        return {}, {}
+        logger.warning("Ignoring model metadata from %s: expected a JSON object.", path)
+        return ModelMetadata()
 
-    if "models" in payload or "provider_defaults" in payload:
-        return (
-            _parse_context_window_map(payload.get("models", {}), path, "model"),
-            _parse_context_window_map(payload.get("provider_defaults", {}), path, "provider"),
-        )
-    return _parse_context_window_map(payload, path, "model"), {}
-
-
-def load_model_context_windows(path: Path) -> dict[str, int]:
-    return load_model_context_metadata(path)[0]
-
-
-def load_provider_context_window_defaults(path: Path) -> dict[str, int]:
-    return load_model_context_metadata(path)[1]
+    model_windows, _model_ceilings, model_reasoning = _parse_entries(payload.get("models", {}), path, "model")
+    provider_windows, provider_ceilings, provider_reasoning = _parse_entries(
+        payload.get("provider_defaults", {}), path, "provider"
+    )
+    return ModelMetadata(
+        context_windows=model_windows,
+        provider_context_windows=provider_windows,
+        provider_context_window_ceilings=provider_ceilings,
+        reasoning=model_reasoning,
+        provider_reasoning=provider_reasoning,
+    )
 
 
 def filter_model_context_windows(
@@ -65,3 +261,20 @@ def filter_model_context_windows(
 ) -> dict[str, int]:
     known_windows = model_context_windows or {}
     return {model: known_windows[model] for model in model_names if model in known_windows}
+
+
+def resolve_reasoning_support(
+    model: str | None,
+    *,
+    provider_label: str | None = None,
+    model_reasoning: dict[str, ReasoningSupport] | None = None,
+    provider_reasoning_defaults: dict[str, ReasoningSupport] | None = None,
+) -> ReasoningSupport | None:
+    """Most specific declaration wins: the model's own, then its provider's."""
+    name = (model or "").strip()
+    if name and (model_reasoning or {}).get(name):
+        return model_reasoning[name]
+    label = (provider_label or "").strip()
+    if label and (provider_reasoning_defaults or {}).get(label):
+        return provider_reasoning_defaults[label]
+    return None

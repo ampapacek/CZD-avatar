@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="", alias="LLM_PROVIDER")
     admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
     llm_models_cache_ttl_seconds: int = Field(default=3600, alias="LLM_MODELS_CACHE_TTL_SECONDS")
+    llm_timeout_seconds: float = Field(default=120.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")
@@ -58,16 +59,44 @@ class Settings(BaseSettings):
     output_token_budget_long: int = Field(default=1024, alias="OUTPUT_TOKEN_BUDGET_LONG")
     min_prompt_chunks: int = Field(default=3, alias="MIN_PROMPT_CHUNKS")
     token_budget_safety_margin: float = Field(default=0.10, alias="TOKEN_BUDGET_SAFETY_MARGIN")
+    # Upper bound for the adaptive compaction threshold. The effective trigger
+    # is the smaller of this value and 250 + 25% of the usable input budget.
     conversation_summary_trigger_tokens: int = Field(
-        default=3000,
+        default=8000,
         alias="CONVERSATION_SUMMARY_TRIGGER_TOKENS",
+    )
+    # Maximum individual messages kept verbatim after compaction. Complete
+    # user/assistant turns are preferred, so the default preserves three turns.
+    conversation_recent_messages: int = Field(
+        default=6,
+        ge=2,
+        alias="CONVERSATION_RECENT_MESSAGES",
+    )
+    # A token-light conversation is compacted after this many uploaded
+    # messages even if it has not reached the adaptive token threshold.
+    conversation_summary_trigger_messages: int = Field(
+        default=16,
+        ge=2,
+        alias="CONVERSATION_SUMMARY_TRIGGER_MESSAGES",
+    )
+    # Query rewriting is useful for short follow-ups such as "And what happened
+    # next?". A long message already carries substantial search context, while
+    # sending it through another LLM call adds latency and duplicates the input.
+    conversation_query_rewrite_max_tokens: int = Field(
+        default=1024,
+        ge=1,
+        alias="CONVERSATION_QUERY_REWRITE_MAX_TOKENS",
     )
 
     raw_data_dir: Path = Field(default=Path("data/raw"), alias="RAW_DATA_DIR")
     chunk_catalog_path: Path = Field(default=Path("data/processed/chunks.jsonl"), alias="CHUNK_CATALOG_PATH")
-    model_context_windows_path: Path = Field(
-        default=Path("data/model_context_windows.json"),
-        alias="MODEL_CONTEXT_WINDOWS_PATH",
+    # One file describing every known model: context window, reasoning support,
+    # and whatever else we learn later. Declared as data because providers
+    # disagree and none of it is discoverable; a missing file simply means no
+    # known context windows and no reasoning controls.
+    model_metadata_path: Path = Field(
+        default=Path("data/models.json"),
+        alias="MODEL_METADATA_PATH",
     )
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")

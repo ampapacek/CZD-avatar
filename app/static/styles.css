@@ -1363,14 +1363,45 @@ button:hover {
   background: color-mix(in srgb, var(--surface) 86%, transparent);
 }
 
+.conversation-message-list {
+  display: contents;
+}
+
 .conversation-message {
   display: grid;
   gap: 8px;
+  min-width: 0;
   max-width: 92%;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-3);
+  overflow-wrap: anywhere;
+}
+
+.conversation-storage-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--line));
+  border-radius: 8px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--surface-3) 82%, var(--warn) 18%);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.conversation-storage-status[hidden] {
+  display: none;
+}
+
+.conversation-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .conversation-message.user {
@@ -1395,6 +1426,18 @@ button:hover {
   line-height: 1.6;
 }
 
+.conversation-message-body {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.conversation-message-body pre,
+.conversation-message-body table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .conversation-message-meta {
   color: var(--muted);
   font-size: 12px;
@@ -1402,6 +1445,49 @@ button:hover {
 
 .conversation-budget-note {
   margin: 0;
+}
+
+.conversation-request-status {
+  justify-self: start;
+  max-width: 92%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.conversation-request-status:empty {
+  display: none;
+}
+
+.conversation-request-status.error {
+  color: var(--warn);
+}
+
+.conversation-request-status.error::before {
+  background: var(--warn);
+  animation: none;
+}
+
+.conversation-request-status:not(:empty)::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.budget-row-subset th {
+  padding-left: 24px;
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .conversation-context-status {
@@ -1497,6 +1583,7 @@ button:hover {
 
 .conversation-composer-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
@@ -1522,6 +1609,13 @@ button:hover {
   min-width: 0;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+}
+
+.conversation-rewrite-controls {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 14px;
 }
 
 .conversation-sources-panel h3 {
@@ -1600,7 +1694,7 @@ button:hover {
 .conversation-retrieval-info {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 0;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1892,9 +1986,12 @@ button:hover {
   border-top: 1px solid var(--line);
 }
 
-.footnotes h4 {
-  margin: 0 0 0.75rem;
+.footnotes summary {
+  cursor: pointer;
+  margin-bottom: 0.75rem;
   font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .footnotes ol {
@@ -1951,6 +2048,51 @@ button:hover {
   color: var(--text);
 }
 
+/* Reasoning traces: deliberately quiet. They are shown so they are not lost,
+   not because they are part of the answer. */
+.reasoning-panel {
+  margin: 10px 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--surface-3);
+}
+
+.reasoning-panel summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--muted, var(--text));
+}
+
+.reasoning-text {
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--muted, var(--text));
+}
+
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.copy-status {
+  font-size: 0.8rem;
+  color: var(--muted, var(--text));
+}
+
+.copy-status-error {
+  color: var(--warn);
+}
+
 .msearch-rescore-note {
   margin: 0;
   font-size: 0.8rem;
@@ -1999,12 +2141,25 @@ button:hover {
     transform 0.18s ease;
 }
 
+/* A card the answer cites is clickable: it highlights its own markers in the
+   answer. The green below says something stronger — "this one, unlike those" —
+   so it is painted only where cited and uncited cards sit side by side, and the
+   click affordance rides on the pointer plus a hover border instead. */
+.source.cited-source {
+  cursor: pointer;
+}
+
+/* Stronger than the cited-card border below, so hovering intensifies it rather
+   than dimming it. `active-source` keeps its own full-accent ring. */
+.source.cited-source:hover:not(.active-source) {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+
 .source.used-source {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--surface-3) 72%, var(--accent) 28%);
   box-shadow: 0 10px 24px rgba(15, 104, 95, 0.12);
   transform: translateY(-1px);
-  cursor: pointer;
 }
 
 .source.used-source strong {
@@ -2126,6 +2281,32 @@ body[data-theme="dark"] .source-highlight {
   overflow-wrap: anywhere;
 }
 
+/* Sources panel: order notice / toggles.
+   The panel is a grid, so these controls are grid children like the cards. The
+   order control is the first child, the uncited disclosure the last. */
+.sources-order-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted, var(--text));
+}
+
+.sources-order-note-warning {
+  color: var(--warn);
+  font-weight: 650;
+}
+
+.sources-order-toggle,
+.sources-uncited-toggle {
+  justify-self: start;
+}
+
+.budget-note-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted, var(--text));
+}
+
 .budget-note,
 .budget-details {
   border: 1px solid color-mix(in srgb, var(--warn) 36%, var(--line));
@@ -2140,6 +2321,42 @@ body[data-theme="dark"] .source-highlight {
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.budget-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-table th,
+.budget-table td {
+  padding: 2px 0;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.budget-table th {
+  text-align: left;
+}
+
+.budget-table td {
+  text-align: right;
+}
+
+/* Separates each block's running total from the lines it sums. */
+.budget-table .budget-row-subtotal th,
+.budget-table .budget-row-subtotal td {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  font-weight: 700;
+}
+
+.budget-table tbody + tbody th,
+.budget-table tbody + tbody td {
+  padding-top: 10px;
 }
 
 .budget-details summary {

@@ -6,7 +6,7 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=citation-highlight-1" />
+    <link rel="stylesheet" href="static/styles.css?v=conversation-progress-1" />
   </head>
   <body>
     <main class="shell">
@@ -131,6 +131,10 @@
                 <span>Context window</span>
                 <input id="mainContextWindowTokens" type="number" min="1024" step="1" />
               </label>
+              <label class="field" id="reasoningEffortField" hidden>
+                <span>Uvažování (reasoning)</span>
+                <select id="reasoningEffort"></select>
+              </label>
               <label class="field" id="customModelField" hidden>
                 <span>Jiný model</span>
                 <input id="customModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
@@ -208,6 +212,15 @@
             <span id="rerankProgressLabel" class="rerank-progress-label"></span>
           </div>
           <p id="answerQuestionInfo" class="query-used-info" hidden>Odpověď generována na dotaz: <strong id="answerQuestionText"></strong></p>
+          <details id="reasoningPanel" class="reasoning-panel" hidden>
+            <summary>Uvažování modelu</summary>
+            <pre id="reasoningText" class="reasoning-text"></pre>
+          </details>
+          <div id="answerActions" class="answer-actions" hidden>
+            <button type="button" id="copyAnswerButton" class="ghost-button" data-copy-scope="main">Kopírovat odpověď</button>
+            <button type="button" id="copyAnswerWithSourcesButton" class="ghost-button" data-copy-scope="main" data-copy-sources="1">Kopírovat se zdroji</button>
+            <span id="copyAnswerStatus" class="copy-status" role="status" aria-live="polite"></span>
+          </div>
           <article id="answer" class="answer"></article>
         </section>
       </section>
@@ -475,11 +488,11 @@
                 <input id="tokenBudgetSafetyMargin" type="number" min="0" max="0.5" step="0.01" />
               </label>
               <label class="field">
-                <span>Kompresní práh konverzace</span>
+                <span>Maximální kompresní práh konverzace</span>
                 <input id="conversationSummaryTriggerTokens" type="number" min="256" step="256" />
               </label>
             </div>
-            <p class="field-note">Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
+            <p class="field-note">Skutečný kompresní práh je nižší z nastaveného maxima a hodnoty 250 + 25 % dostupného vstupu. Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
           </section>
 
           <section class="settings-section">
@@ -760,6 +773,13 @@
         <div class="conversation-dialog-body">
           <aside id="conversationList" class="history-list conversation-list-panel"></aside>
           <section class="conversation-main">
+            <div id="conversationStorageStatus" class="conversation-storage-status" role="status" aria-live="polite" hidden>
+              <span id="conversationStorageStatusText"></span>
+              <div id="legacyHistoryStorageActions" class="conversation-storage-actions" hidden>
+                <button id="exportLegacyHistoryButton" class="secondary" type="button">Exportovat starou historii</button>
+                <button id="deleteLegacyHistoryButton" class="secondary danger-lite" type="button">Smazat starou historii</button>
+              </div>
+            </div>
             <details id="conversationSettings" class="conversation-settings">
               <summary>Nastavení konverzace</summary>
               <div class="conversation-settings-body">
@@ -795,7 +815,10 @@
               </div>
             </details>
             <div id="conversationMeta" class="conversation-meta"></div>
-            <div id="conversationMessages" class="conversation-messages"></div>
+            <div id="conversationMessages" class="conversation-messages">
+              <div id="conversationMessageList" class="conversation-message-list"></div>
+              <div id="conversationRequestStatus" class="conversation-request-status" role="status" aria-live="polite"></div>
+            </div>
             <form id="conversationForm" class="conversation-composer">
               <label class="field">
                 <span>Pokračování dotazu</span>
@@ -809,8 +832,7 @@
             </form>
           </section>
           <aside class="conversation-sources-panel">
-            <div class="conversation-sources-header">
-              <h3>Zdroje poslední odpovědi</h3>
+            <div class="conversation-rewrite-controls">
               <label class="conversation-rewrite-toggle">
                 <input id="conversationRewriteQuery" type="checkbox" checked />
                 <span class="conversation-rewrite-copy">
@@ -818,15 +840,18 @@
                   <small>Nejdříve model přeformuluje otázku pro lepší vyhledání relevantních dokumentů.</small>
                 </span>
               </label>
+              <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
             </div>
-            <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
+            <div class="conversation-sources-header">
+              <h3>Zdroje poslední odpovědi</h3>
+            </div>
             <div id="conversationSources" class="sources conversation-sources"></div>
           </aside>
         </div>
       </div>
     </dialog>
 
-  <script src="static/markdown-renderer.bundle.js?v=markdown-it-1"></script>
-  <script src="static/app.js?v=markdown-it-1"></script>
+  <script src="static/avatar.bundle.js?v=conversation-progress-1"></script>
+  <script src="static/app.js?v=conversation-progress-1"></script>
 </body>
 </html>

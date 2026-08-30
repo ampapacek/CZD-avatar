@@ -1,6 +1,7 @@
 import createDOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 
+import { extractOrderedCitationIds } from "./sources-panel.js";
 import {
   buildCitationMap,
   createCitationPlugin,
@@ -29,9 +30,9 @@ markdownIt.renderer.rules.table_close = () => "</table></div>\n";
 const purifier = createDOMPurify(globalThis.window);
 const SANITIZE_OPTIONS = {
   ALLOWED_TAGS: [
-    "a", "blockquote", "br", "code", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "a", "blockquote", "br", "code", "details", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
     "hr", "li", "ol", "p", "pre", "s", "section", "span", "strong", "sup", "table", "tbody",
-    "td", "th", "thead", "tr", "ul",
+    "summary", "td", "th", "thead", "tr", "ul",
   ],
   ALLOWED_ATTR: ["class", "data-citation-id", "href", "id", "rel", "start", "target", "title"],
   ALLOW_DATA_ATTR: false,
@@ -51,11 +52,5 @@ export function renderMarkdown(markdown, sources = []) {
 }
 
 export function extractCitationIds(text) {
-  const matches = String(text || "").match(/\[\^([A-Z]{1,3}\d+)\]|\[([A-Z]{1,3}\d+)\]/g) || [];
-  const citationIds = new Set();
-  for (const match of matches) {
-    const citationId = match.replace(/[\[\]^]/g, "");
-    if (citationId) citationIds.add(citationId);
-  }
-  return citationIds;
+  return new Set(extractOrderedCitationIds(text));
 }

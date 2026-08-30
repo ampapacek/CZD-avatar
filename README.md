@@ -302,7 +302,7 @@ The web UI lets you tune retrieval while testing:
 - mSearch collection, mode, and optional confidence floor
 - retrieve-only mode, which shows chunks without calling the LLM
 - LLM model preset or custom model id
-- context-window size, with known model defaults from `data/model_context_windows.json`
+- context-window size, with known model defaults from `data/models.json`
 - optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
 - editable prompts (see [Prompts And Placeholders](#prompts-and-placeholders))
 
@@ -358,7 +358,7 @@ Important `.env` variables:
 - `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
 - `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
 - `LLM_PROVIDER_<ID>_API_KEY_LABEL`
-- `MODEL_CONTEXT_WINDOWS_PATH`
+- `MODEL_METADATA_PATH` (context windows and reasoning support per model; see `data/models.json`)
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
 - `QDRANT_COLLECTION`
@@ -391,10 +391,14 @@ Important `.env` variables:
 - `MIN_PROMPT_CHUNKS`
 - `TOKEN_BUDGET_SAFETY_MARGIN`
 - `CONVERSATION_SUMMARY_TRIGGER_TOKENS`
+- `CONVERSATION_SUMMARY_TRIGGER_MESSAGES`
+- `CONVERSATION_RECENT_MESSAGES`
 - `RAW_DATA_DIR`
 - `CHUNK_CATALOG_PATH`
 - `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
 - `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
+
+`MODEL_METADATA_PATH` replaces the earlier `MODEL_CONTEXT_WINDOWS_PATH` and `MODEL_REASONING_PATH`. It is not just a rename: the two files merged into one, with `models` and `provider_defaults` sections and `context_window` / `max_context_window` / `reasoning` per entry. `data/models.json` documents the shape in its own `_comment`.
 
 ## Basic Test Run
 

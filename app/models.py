@@ -65,6 +65,9 @@ class ChatRequest(BaseModel):
     min_prompt_chunks: int | None = Field(default=None, ge=0, le=20)
     token_budget_safety_margin: float | None = Field(default=None, ge=0.0, le=0.5)
     conversation_summary_trigger_tokens: int | None = Field(default=None, ge=256)
+    # One of the effort values the selected model declares in
+    # data/models.json; anything else is ignored server-side.
+    reasoning_effort: str | None = Field(default=None, max_length=32)
     top_k: int | None = Field(default=None, ge=0, le=50)
     retrieval_backend: RetrievalBackend | None = None
     llm_provider: str | None = None
@@ -267,9 +270,22 @@ class TokenBudgetMetadata(BaseModel):
     context_window_tokens: int
     usable_input_tokens: int
     reserved_output_tokens: int
+    # Residual of context window − output reserve − usable input, so the
+    # subtraction rendered in the UI adds up.
+    safety_margin_tokens: int = 0
+    safety_margin_ratio: float = 0.0
     estimated_non_source_tokens: int
+    # All retrieved chunks at their original length, before prompt-budget
+    # trimming and omission. Informational only; it is not part of the sent
+    # input total.
+    estimated_retrieved_source_tokens: int = 0
     estimated_source_tokens: int
     estimated_conversation_history_tokens: int = 0
+    conversation_history_message_count: int = 0
+    conversation_history_used_message_count: int = 0
+    conversation_history_omitted_message_count: int = 0
+    effective_conversation_trigger_tokens: int = 0
+    conversation_summary_trigger_messages: int = 16
     estimated_total_input_tokens: int = 0
     used_chunk_count: int
     omitted_chunk_count: int
@@ -291,6 +307,10 @@ class ChatResponse(BaseModel):
     retrieval_query: str | None = None
     answer_question: str | None = None
     retrieval_query_was_rewritten: bool = False
+    retrieval_query_rewrite_attempted: bool = False
+    retrieval_query_rewrite_skip_reason: Literal[
+        "disabled", "empty_question", "no_conversation_history", "question_too_long"
+    ] | None = None
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]
     used_chunks: list[RetrievedChunk] = Field(default_factory=list)
@@ -299,6 +319,12 @@ class ChatResponse(BaseModel):
     token_budget: TokenBudgetMetadata | None = None
     chunk_budget_warnings: list[str] = Field(default_factory=list)
     conversation_summary: str | None = None
+    # How many of the uploaded history messages this turn folded into the
+    # summary. The client drops that many so the next upload is smaller.
+    conversation_folded_message_count: int = 0
+    # Reasoning traces the model returned, if any. Shown collapsed rather than
+    # discarded — some models cannot be told to stop reasoning.
+    reasoning: str = ""
     model: str
     upstream_model: str | None = None
     response_time_seconds: float

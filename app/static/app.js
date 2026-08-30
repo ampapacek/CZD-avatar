@@ -16,6 +16,10 @@ const refreshModelsButton = document.querySelector("#refreshModelsButton");
 const modelRefreshStatus = document.querySelector("#modelRefreshStatus");
 const mainContextWindowTokens = document.querySelector("#mainContextWindowTokens");
 const modelContextWindowNote = document.querySelector("#modelContextWindowNote");
+const reasoningEffortField = document.querySelector("#reasoningEffortField");
+const reasoningEffort = document.querySelector("#reasoningEffort");
+const reasoningPanel = document.querySelector("#reasoningPanel");
+const reasoningText = document.querySelector("#reasoningText");
 const contextWindowTokens = document.querySelector("#contextWindowTokens");
 const outputBudgetShort = document.querySelector("#outputBudgetShort");
 const outputBudgetMedium = document.querySelector("#outputBudgetMedium");
@@ -128,6 +132,8 @@ const answerEl = document.querySelector("#answer");
 const answerQuestionInfo = document.querySelector("#answerQuestionInfo");
 const answerQuestionText = document.querySelector("#answerQuestionText");
 const sourcesEl = document.querySelector("#sources");
+const answerActions = document.querySelector("#answerActions");
+const copyAnswerStatus = document.querySelector("#copyAnswerStatus");
 const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
 const retrievalQueryText = document.querySelector("#retrievalQueryText");
 const baselineSourcesEl = document.querySelector("#baselineSources");
@@ -152,6 +158,7 @@ const conversationDialog = document.querySelector("#conversationDialog");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
+const conversationMessageList = document.querySelector("#conversationMessageList");
 const conversationSources = document.querySelector("#conversationSources");
 const conversationRetrievalInfo = document.querySelector("#conversationRetrievalInfo");
 const conversationRewriteQuery = document.querySelector("#conversationRewriteQuery");
@@ -159,6 +166,12 @@ const conversationForm = document.querySelector("#conversationForm");
 const conversationQuestion = document.querySelector("#conversationQuestion");
 const conversationSubmitButton = document.querySelector("#conversationSubmitButton");
 const conversationCancelButton = document.querySelector("#conversationCancelButton");
+const conversationRequestStatus = document.querySelector("#conversationRequestStatus");
+const conversationStorageStatus = document.querySelector("#conversationStorageStatus");
+const conversationStorageStatusText = document.querySelector("#conversationStorageStatusText");
+const legacyHistoryStorageActions = document.querySelector("#legacyHistoryStorageActions");
+const exportLegacyHistoryButton = document.querySelector("#exportLegacyHistoryButton");
+const deleteLegacyHistoryButton = document.querySelector("#deleteLegacyHistoryButton");
 const newConversationButton = document.querySelector("#newConversationButton");
 const deleteConversationButton = document.querySelector("#deleteConversationButton");
 const closeConversationButton = document.querySelector("#closeConversationButton");
@@ -181,8 +194,10 @@ const themeToggle = document.querySelector("#themeToggle");
 const themeToggleLabel = document.querySelector("#themeToggleLabel");
 // Bumped for Task 14c: history entries now store a generic placeholder
 // `selections` map instead of the old `style`/`length`/`custom_instructions`
-// fields. Stale entries in the old key are simply dropped (no migration).
+// fields. The old key is not loaded into the current view; conversation mode
+// offers an explicit export-before-delete action when it still occupies space.
 const HISTORY_STORAGE_KEY = "czdemos4ai-history-v2";
+const LEGACY_HISTORY_STORAGE_KEY = "czdemos4ai-history";
 // Display name attached to items this browser shares to /shared-history.
 const AUTHOR_NAME_STORAGE_KEY = "czdemos4ai-author-name";
 const CONVERSATION_STORAGE_KEY = "czdemos4ai-conversations";
@@ -265,6 +280,16 @@ let currentRetrievedChunks = [];
 let currentRetrievalQuery = "";
 let currentAnswerQuestion = "";
 let currentOmittedChunks = [];
+let currentReasoning = "";
+// Sources-panel view state (order + uncited visibility). One object per panel,
+// passed into renderSourceCards rather than read from it, so the main panel,
+// conversation mode and history cannot desync.
+let mainSourcesView = Avatar.createSourcesView();
+// null means "not decided yet" — the panel derives the settled view from the
+// stored answer on first render, and keeps whatever the user toggles after that.
+let conversationSourcesView = null;
+// The baseline column is a rank-vs-rank comparison, so it never flips.
+const STATIC_SOURCES_VIEW = Avatar.createSourcesView({ canFlip: false, complete: true });
 let currentBaselineChunks = [];
 let baselineVisible = false;
 // Whether the last query asked mSearch to rescore server-side; drives the small
@@ -1024,6 +1049,10 @@ async function runQuery(retrieveOnlyMode) {
   currentBudgetWarnings = [];
   currentTokenBudget = null;
   currentConversationSummary = "";
+  currentReasoning = "";
+  renderReasoning("");
+  // `Pouze vyhledat zdroje` produces no answer, so there is nothing to reorder by.
+  mainSourcesView = Avatar.createSourcesView({ canFlip: !retrieveOnlyMode });
   activeCitation = null;
   renderAnswer("");
   sourcesEl.innerHTML = "";
@@ -1070,7 +1099,7 @@ async function runQuery(retrieveOnlyMode) {
       currentRetrievalQuery = data.retrieval_query || currentRetrievalQuery;
       currentBaselineChunks = data.baseline_chunks || [];
       currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
-      renderSources(currentAnswerSources, currentRetrievedChunks, "");
+      completeMainSources(currentAnswerSources, currentRetrievedChunks, "");
       saveHistoryEntry({
         question: question.value,
         mode: "retrieve",
@@ -1122,7 +1151,14 @@ async function runQuery(retrieveOnlyMode) {
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
           statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
         },
+        onReasoning(delta) {
+          currentReasoning += delta;
+          renderReasoning(currentReasoning, { streaming: true });
+        },
         onToken(token) {
+          if (!streamedAnswerText) {
+            collapseReasoning();
+          }
           streamedAnswerText += token;
           renderAnswer(streamedAnswerText);
         },
@@ -1138,6 +1174,8 @@ async function runQuery(retrieveOnlyMode) {
           currentBudgetWarnings = doneData.chunk_budget_warnings || currentBudgetWarnings;
           currentTokenBudget = doneData.token_budget || currentTokenBudget;
           currentConversationSummary = doneData.conversation_summary || currentConversationSummary;
+          currentReasoning = doneData.reasoning || currentReasoning;
+          renderReasoning(currentReasoning);
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
         },
       }, { signal: controller.signal, turnId });
@@ -1152,7 +1190,9 @@ async function runQuery(retrieveOnlyMode) {
       currentBudgetWarnings = data.chunk_budget_warnings || currentBudgetWarnings;
       currentTokenBudget = data.token_budget || currentTokenBudget;
       currentConversationSummary = data.conversation_summary || currentConversationSummary;
-      renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+      currentReasoning = data.reasoning || currentReasoning;
+      renderReasoning(currentReasoning);
+      completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
       saveHistoryEntry({
         question: question.value,
         mode: "chat",
@@ -1165,6 +1205,7 @@ async function runQuery(retrieveOnlyMode) {
         token_budget: data.token_budget || null,
         chunk_budget_warnings: data.chunk_budget_warnings || [],
         conversation_summary: data.conversation_summary || null,
+        reasoning: data.reasoning || "",
         sources: data.sources || [],
         model_used: data.model || model.value,
         upstream_model: data.upstream_model || null,
@@ -1561,6 +1602,8 @@ conversationRewriteQuery?.addEventListener("change", () => {
   });
   renderConversationWorkspace();
 });
+exportLegacyHistoryButton?.addEventListener("click", exportLegacyHistory);
+deleteLegacyHistoryButton?.addEventListener("click", deleteLegacyHistory);
 document.addEventListener("click", pulseSourceCardFromCitation);
 document.addEventListener("click", toggleCitationHighlightFromSource);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
@@ -1577,7 +1620,7 @@ deleteHistoryItemButton.addEventListener("click", () => {
     return;
   }
   const remainingHistory = getHistoryEntries().filter((entry) => entry.id !== selectedHistoryId);
-  saveEntryListWithQuotaPruning(
+  saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     remainingHistory,
     compactStoredHistoryEntry,
@@ -1820,6 +1863,7 @@ function buildRequestPayload(overrides = {}) {
     llm_provider: llmProvider.value,
     llm_base_url: nullableString(selectedProviderBaseUrl()),
     llm_api_key: nullableString(selectedProviderApiKey()),
+    reasoning_effort: nullableString(reasoningEffort?.value),
     admin_password: llmModelsUnlocked ? nullableString(llmUnlockPassword.value) : null,
     top_k: Number(topK.value),
     retrieval_backend: "msearch",
@@ -2293,6 +2337,14 @@ function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
       data.provider_context_window_defaults && typeof data.provider_context_window_defaults === "object"
         ? data.provider_context_window_defaults
         : appSettings.provider_context_window_defaults,
+    model_reasoning:
+      data.model_reasoning && typeof data.model_reasoning === "object"
+        ? data.model_reasoning
+        : appSettings.model_reasoning,
+    provider_reasoning_defaults:
+      data.provider_reasoning_defaults && typeof data.provider_reasoning_defaults === "object"
+        ? data.provider_reasoning_defaults
+        : appSettings.provider_reasoning_defaults,
     llm_policy: data.llm_policy && typeof data.llm_policy === "object" ? data.llm_policy : appSettings.llm_policy,
   };
   const providers = getLlmProviders(appSettings);
@@ -2335,7 +2387,7 @@ function populateTokenBudgetFields(settings = appSettings) {
   minPromptChunks.value = stored.min_prompt_chunks ?? defaults.min_prompt_chunks ?? 3;
   tokenBudgetSafetyMargin.value = stored.token_budget_safety_margin ?? defaults.token_budget_safety_margin ?? 0.1;
   conversationSummaryTriggerTokens.value =
-    stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 3000;
+    stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 8000;
   updateModelContextWindowNote();
 }
 
@@ -2418,6 +2470,7 @@ function syncContextWindowTokenInputs(sourceInput) {
 function updateContextWindowForSelectedModel({ force = false, persist = false } = {}) {
   if (!force && contextWindowManuallyEdited) {
     updateModelContextWindowNote();
+    refreshReasoningEffortOptions();
     return;
   }
   setContextWindowTokensValue(selectedModelContextWindow() ?? defaultContextWindowTokens());
@@ -2425,6 +2478,86 @@ function updateContextWindowForSelectedModel({ force = false, persist = false } 
     persistTokenBudgetSettings();
   }
   updateModelContextWindowNote();
+  refreshReasoningEffortOptions();
+}
+
+// Reasoning support is server-declared data — `data/models.json` plus whatever
+// the provider's own catalogue publishes — not something the client knows how
+// to guess. A model that declares nothing gets no control at all and no
+// reasoning parameter is sent, which is the old behaviour.
+const REASONING_DEFAULT_VALUE = "";
+
+function selectedModelReasoning(modelName = selectedModelValue(), provider = selectedProviderConfig()) {
+  const byModel = appSettings.model_reasoning && typeof appSettings.model_reasoning === "object"
+    ? appSettings.model_reasoning
+    : {};
+  const byProvider =
+    appSettings.provider_reasoning_defaults && typeof appSettings.provider_reasoning_defaults === "object"
+      ? appSettings.provider_reasoning_defaults
+      : {};
+  const modelKey = String(modelName || "").trim();
+  const support = byModel[modelKey] || byProvider[String(provider?.label || "").trim()] || null;
+  return support && Array.isArray(support.efforts) && support.efforts.length ? support : null;
+}
+
+const REASONING_EFFORT_LABELS = {
+  none: "vypnuto",
+  minimal: "minimální",
+  low: "nízké",
+  medium: "střední",
+  high: "vysoké",
+  xhigh: "velmi vysoké",
+  max: "maximální",
+};
+
+function refreshReasoningEffortOptions() {
+  if (!reasoningEffortField || !reasoningEffort) {
+    return;
+  }
+  const support = selectedModelReasoning();
+  if (!support) {
+    reasoningEffortField.hidden = true;
+    reasoningEffort.innerHTML = "";
+    return;
+  }
+  const previous = reasoningEffort.value;
+  const defaultLabel = support.default
+    ? `Výchozí (${REASONING_EFFORT_LABELS[support.default] || support.default})`
+    : "Výchozí";
+  const options = [`<option value="${REASONING_DEFAULT_VALUE}">${escapeHtml(defaultLabel)}</option>`].concat(
+    support.efforts.map(
+      (effort) => `<option value="${escapeHtml(effort)}">${escapeHtml(REASONING_EFFORT_LABELS[effort] || effort)}</option>`,
+    ),
+  );
+  reasoningEffort.innerHTML = options.join("");
+  reasoningEffort.value = support.efforts.includes(previous) ? previous : REASONING_DEFAULT_VALUE;
+  reasoningEffortField.hidden = false;
+}
+
+// Some models reason whether or not they are asked to. Showing the trace beats
+// discarding it silently, but it is not part of the answer, so it stays folded.
+//
+// While it streams it is the exception: a reasoning model writes its whole
+// trace before its first answer token, so for those seconds the trace is the
+// only thing happening and the panel is worth having open. `collapseReasoning`
+// folds it again as soon as the answer starts.
+function renderReasoning(text, { streaming = false } = {}) {
+  if (!reasoningPanel || !reasoningText) {
+    return;
+  }
+  const trimmed = String(text || "").trim();
+  reasoningPanel.hidden = !trimmed;
+  reasoningText.textContent = trimmed;
+  if (streaming && trimmed) {
+    reasoningPanel.open = true;
+    reasoningText.scrollTop = reasoningText.scrollHeight;
+  }
+}
+
+function collapseReasoning() {
+  if (reasoningPanel) {
+    reasoningPanel.open = false;
+  }
 }
 
 function updateModelContextWindowNote() {
@@ -2512,7 +2645,9 @@ async function streamRetrieveWithHandlers(payload, handlers = {}, { signal, turn
       const rawEvent = buffer.slice(0, separatorIndex);
       buffer = buffer.slice(separatorIndex + 2);
       const event = parseSseEvent(rawEvent);
-      if (event.event === "preliminary_sources") {
+      if (event.event === "status") {
+        handlers.onStatus?.(event.data);
+      } else if (event.event === "preliminary_sources") {
         handlers.onPreliminarySources?.(event.data);
       } else if (event.event === "rerank_progress") {
         handlers.onRerankProgress?.(event.data);
@@ -2522,7 +2657,7 @@ async function streamRetrieveWithHandlers(payload, handlers = {}, { signal, turn
         donePayload = event.data;
         handlers.onDone?.(donePayload);
       } else if (event.event === "error") {
-        throw new Error(formatErrorDetail(event.data.detail || "Streaming retrieve failed"));
+        throw requestError(event.data.detail, "Streaming retrieve failed");
       }
       separatorIndex = buffer.indexOf("\n\n");
     }
@@ -2564,6 +2699,17 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
   let donePayload = null;
+  let firstOutputPainted = false;
+
+  const yieldAfterFirstOutput = async () => {
+    if (firstOutputPainted) {
+      return;
+    }
+    firstOutputPainted = true;
+    // If the gateway flushes several SSE events together, let the browser paint
+    // the first reasoning/answer update before the final event is processed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
 
   while (true) {
     const { value, done } = await reader.read();
@@ -2575,19 +2721,25 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
       const rawEvent = buffer.slice(0, separatorIndex);
       buffer = buffer.slice(separatorIndex + 2);
       const event = parseSseEvent(rawEvent);
-      if (event.event === "preliminary_sources") {
+      if (event.event === "status") {
+        handlers.onStatus?.(event.data);
+      } else if (event.event === "preliminary_sources") {
         handlers.onPreliminarySources?.(event.data);
       } else if (event.event === "rerank_progress") {
         handlers.onRerankProgress?.(event.data);
       } else if (event.event === "sources") {
         handlers.onSources?.(event.data);
+      } else if (event.event === "reasoning") {
+        handlers.onReasoning?.(event.data.text || "", event.data);
+        await yieldAfterFirstOutput();
       } else if (event.event === "token") {
         handlers.onToken?.(event.data.text || "", event.data);
+        await yieldAfterFirstOutput();
       } else if (event.event === "done") {
         donePayload = event.data;
         handlers.onDone?.(donePayload);
       } else if (event.event === "error") {
-        throw new Error(formatErrorDetail(event.data.detail || "Streaming failed"));
+        throw requestError(event.data.detail, "Streaming failed");
       }
       separatorIndex = buffer.indexOf("\n\n");
     }
@@ -4590,13 +4742,13 @@ function nullableNumber(value) {
 }
 
 function formatErrorDetail(detail) {
-  if (!detail || typeof detail === "string") {
-    return detail || "Request failed";
-  }
-  if (typeof detail === "object" && detail.message) {
-    return String(detail.message);
-  }
-  return JSON.stringify(detail);
+  return Avatar.formatRequestErrorDetail(detail);
+}
+
+function requestError(detail, fallback) {
+  const error = new Error(formatErrorDetail(detail || fallback));
+  error.detail = detail;
+  return error;
 }
 
 function nullableInteger(value) {
@@ -4634,6 +4786,57 @@ function trySetLocalStorageJson(key, value) {
   }
 }
 
+let conversationStorageFailure = "";
+const storageSaveSucceeded = new Map();
+
+function refreshConversationStorageStatus() {
+  if (!conversationStorageStatus || !conversationStorageStatusText) {
+    return;
+  }
+  let legacyHistory = "";
+  try {
+    legacyHistory = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  } catch {
+    // Storage access itself may be disabled. The write failure below remains visible.
+  }
+  const messages = [];
+  if (conversationStorageFailure) {
+    messages.push(conversationStorageFailure);
+  }
+  if (legacyHistory) {
+    const sizeMiB = Avatar.approximateLocalStorageMiB(legacyHistory).toFixed(1);
+    messages.push(
+      `Stará, už nezobrazovaná historie zabírá přibližně ${sizeMiB} MiB. `
+      + "Před smazáním ji můžete exportovat.",
+    );
+  }
+  conversationStorageStatus.hidden = messages.length === 0;
+  conversationStorageStatusText.textContent = messages.join(" ");
+  if (legacyHistoryStorageActions) {
+    legacyHistoryStorageActions.hidden = !legacyHistory;
+  }
+}
+
+function reportStorageSaveFailure(key, label) {
+  const message = `Změny se nepodařilo uložit: úložiště prohlížeče je plné. Žádná starší položka nebyla smazána.`;
+  console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full. Existing entries were preserved.`);
+  if (key === CONVERSATION_STORAGE_KEY) {
+    conversationStorageFailure = message;
+    refreshConversationStorageStatus();
+  } else if (statusEl) {
+    statusEl.className = "status error";
+    statusEl.textContent = message;
+  }
+}
+
+function clearStorageSaveFailure(key) {
+  if (key !== CONVERSATION_STORAGE_KEY || !conversationStorageFailure) {
+    return;
+  }
+  conversationStorageFailure = "";
+  refreshConversationStorageStatus();
+}
+
 function compactStoredChunk(chunk) {
   if (!chunk || typeof chunk !== "object") {
     return chunk;
@@ -4666,44 +4869,23 @@ function compactStoredHistoryEntry(entry) {
   };
 }
 
-function compactStoredConversationMessage(message) {
-  if (message?.role !== "assistant") {
-    return message;
-  }
-  return {
-    ...message,
-    retrieved_chunks: (message.retrieved_chunks || []).map(compactStoredChunk),
-    omitted_chunks: [],
-  };
-}
-
 function compactStoredConversation(entry) {
-  return {
-    ...entry,
-    messages: (entry.messages || []).map(compactStoredConversationMessage),
-  };
+  return Avatar.compactConversationForStorage(entry, {
+    chunkTextLimit: COMPACT_STORED_CHUNK_TEXT_LIMIT,
+  });
 }
 
-function saveEntryListWithQuotaPruning(key, entries, compactEntry, label) {
-  let candidate = entries;
-  while (candidate.length) {
-    if (trySetLocalStorageJson(key, candidate)) {
-      return candidate;
-    }
-    candidate = candidate.slice(0, -1);
+function saveEntryListSafely(key, entries, compactEntry, label) {
+  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry);
+  if (result.saved) {
+    storageSaveSucceeded.set(key, true);
+    clearStorageSaveFailure(key);
+    return result.entries;
   }
 
-  candidate = entries.map(compactEntry);
-  while (candidate.length) {
-    if (trySetLocalStorageJson(key, candidate)) {
-      console.warn(`[rag-avatar] ${label} was compacted to fit browser storage.`);
-      return candidate;
-    }
-    candidate = candidate.slice(0, -1);
-  }
-
-  console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full.`);
-  return [];
+  storageSaveSucceeded.set(key, false);
+  reportStorageSaveFailure(key, label);
+  return result.entries;
 }
 
 function updateCustomModelVisibility(unlocked) {
@@ -4757,18 +4939,47 @@ function renderQueryUsedInfo() {
   }
 }
 
+// Chunks the token budget dropped are shown as ordinary cards inside the
+// uncited group, badged, rather than buried in a separate details block: "the
+// model did not cite it" and "the model never saw it" are different facts.
+function withOmittedChunks(sources, chunks, omittedChunks) {
+  const omitted = omittedChunks || [];
+  return {
+    sources: (sources || []).concat(chunksToSources(omitted)),
+    chunks: (chunks || []).concat(omitted),
+    omittedCitationIds: omitted.map((chunk) => chunk.citation_id).filter(Boolean),
+  };
+}
+
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
   renderQueryUsedInfo();
+  const combined = withOmittedChunks(sources, chunks, currentOmittedChunks);
+  const layout = Avatar.layoutSources(combined.sources, mainSourcesView, {
+    orderedCitationIds: Avatar.extractOrderedCitationIds(answerText),
+    omittedCitationIds: combined.omittedCitationIds,
+  });
   renderSourceCards(
     sourcesEl,
-    sources,
-    chunks,
+    combined.sources,
+    combined.chunks,
     currentRetrievalQuery || question.value,
-    AvatarMarkdown.extractCitationIds(answerText),
+    layout,
     "main-source",
+    (patch) => {
+      mainSourcesView = { ...mainSourcesView, ...patch };
+      renderSources(sources, chunks, answerText);
+    },
   );
   renderBudgetNotes(sourcesEl, currentBudgetWarnings, currentOmittedChunks, currentTokenBudget, currentConversationSummary);
   renderBaselineComparison();
+}
+
+// Settle the main panel once a stream finishes cleanly: flip to citation order
+// and collapse the uncited group. Never called for an aborted or errored stream,
+// where the citation set is incomplete.
+function completeMainSources(sources, chunks, answerText) {
+  mainSourcesView = Avatar.completedSourcesView(mainSourcesView, Avatar.extractOrderedCitationIds(answerText));
+  renderSources(sources, chunks, answerText);
 }
 
 function renderBaselineComparison() {
@@ -4794,7 +5005,7 @@ function renderBaselineComparison() {
       baselineSources,
       currentBaselineChunks,
       currentRetrievalQuery || question.value,
-      new Set(),
+      Avatar.layoutSources(baselineSources, STATIC_SOURCES_VIEW),
       "baseline-source",
     );
   } else {
@@ -4802,20 +5013,140 @@ function renderBaselineComparison() {
   }
 }
 
+conversationMessages?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='conversation']");
+  if (!button) {
+    return;
+  }
+  const index = Number(button.closest(".conversation-message")?.dataset.messageIndex);
+  const message = ensureSelectedConversation()?.messages?.[index];
+  if (!message) {
+    return;
+  }
+  copyAnswerText(message.content || "", message.sources || [], {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: button.parentElement?.querySelector(".copy-status"),
+  });
+});
+
+historyDetail?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='history']");
+  if (!button || !historyDetailEntry) {
+    return;
+  }
+  const entry = historyDetailEntry;
+  const sources =
+    entry.sources && entry.sources.length ? entry.sources : chunksToSources(entry.retrieved_chunks || []);
+  copyAnswerText(entry.answer || "", sources, {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: button.parentElement?.querySelector(".copy-status"),
+  });
+});
+
+answerActions?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-copy-scope='main']");
+  if (!button) {
+    return;
+  }
+  copyAnswerText(streamedAnswerText, currentAnswerSources, {
+    includeSources: button.dataset.copySources === "1",
+    statusEl: copyAnswerStatus,
+  });
+});
+
 toggleBaselineBtn.addEventListener("click", () => {
   baselineVisible = !baselineVisible;
   renderBaselineComparison();
 });
 
+// Copy support. The clipboard gets the answer as displayed — citation markers
+// renumbered to the superscripts the reader saw, model-invented source lists
+// gone — optionally followed by a numbered key of the cited sources.
+let copyStatusTimer = null;
+
+function showCopyStatus(statusEl, message, isError = false) {
+  if (!statusEl) {
+    return;
+  }
+  statusEl.textContent = message;
+  statusEl.classList.toggle("copy-status-error", isError);
+  window.clearTimeout(copyStatusTimer);
+  copyStatusTimer = window.setTimeout(() => {
+    statusEl.textContent = "";
+    statusEl.classList.remove("copy-status-error");
+  }, 2500);
+}
+
+async function copyAnswerText(answerText, sources, { includeSources, statusEl }) {
+  const text = Avatar.answerForCopy(answerText, sources, { includeSources });
+  if (!text) {
+    showCopyStatus(statusEl, "Není co kopírovat.", true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showCopyStatus(statusEl, includeSources ? "Zkopírováno se zdroji." : "Zkopírováno.");
+  } catch (error) {
+    showCopyStatus(statusEl, `Kopírování selhalo: ${error.message}`, true);
+  }
+}
+
+// The main panel's buttons appear only once there is an answer to copy.
+function updateAnswerActions() {
+  if (answerActions) {
+    answerActions.hidden = !streamedAnswerText.trim();
+  }
+}
+
 function renderAnswer(text) {
   renderQueryUsedInfo();
-  answerEl.innerHTML = AvatarMarkdown.renderMarkdown(text, currentAnswerSources, "main-source");
-  updateUsedSourceHighlights(sourcesEl, AvatarMarkdown.extractCitationIds(text));
+  updateAnswerActions();
+  answerEl.innerHTML = Avatar.renderMarkdown(text, currentAnswerSources, "main-source");
+  updateUsedSourceHighlights(sourcesEl, Avatar.extractCitationIds(text));
 }
 
 const CITE_TOGGLE_TITLE = "Zvýraznit místa v odpovědi, kde je zdroj citován";
+const SOURCES_PROVISIONAL_ORDER_NOTE =
+  "Zdroje jsou zatím řazené podle relevance vyhledávání; po dokončení odpovědi se seřadí podle citací.";
 
-function renderSourceCards(container, sources, chunks, highlightQuery, usedCitationIds = new Set(), idPrefix = "source") {
+// Top slot of the panel: the provisional-order notice while the answer streams,
+// then either the order toggle or — when nothing was cited — the reason why the
+// panel did not reorder.
+function sourcesOrderControlHtml(layout) {
+  if (layout.showNotice) {
+    return `<p class="sources-order-note">${escapeHtml(SOURCES_PROVISIONAL_ORDER_NOTE)}</p>`;
+  }
+  if (layout.showNoCitationsNotice) {
+    return `<p class="sources-order-note sources-order-note-warning">Odpověď necituje žádný zdroj.</p>`;
+  }
+  if (!layout.showOrderToggle) {
+    return "";
+  }
+  const label =
+    layout.order === Avatar.CITATION_ORDER ? "Seřadit podle relevance" : "Seřadit podle citací";
+  return `<button type="button" class="ghost-button sources-order-toggle">${escapeHtml(label)}</button>`;
+}
+
+// Bottom slot: the uncited group's disclosure. Only meaningful in citation order.
+function sourcesUncitedControlHtml(layout) {
+  if (!layout.showUncitedToggle) {
+    return "";
+  }
+  const label = layout.hiddenCount
+    ? `Zobrazit necitované zdroje (${layout.uncitedCount})`
+    : "Skrýt necitované";
+  return `<button type="button" class="ghost-button sources-uncited-toggle">${escapeHtml(label)}</button>`;
+}
+
+/**
+ * Render one sources panel.
+ *
+ * `layout` comes from `Avatar.layoutSources` and carries the whole view
+ * decision (order, which cards are visible, whether citation numbers show).
+ * `onViewChange` receives a patch for the caller's own view state; panels that
+ * have no controls (the baseline column, history) simply omit it.
+ */
+function renderSourceCards(container, sources, chunks, highlightQuery, layout, idPrefix = "source", onViewChange = null) {
   if (!sources.length) {
     container.textContent = "Žádné zdroje nebyly vráceny.";
     applyCitationHighlights();
@@ -4823,8 +5154,9 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
   }
   const highlightTerms = extractHighlightTerms(highlightQuery);
   const chunkById = new Map((chunks || []).map((chunk) => [chunk.chunk_id, chunk]));
-  container.innerHTML = sources
-    .map((source) => {
+  const cards = layout.visible
+    .map((entry) => {
+      const source = entry.source;
       const chunk = chunkById.get(source.chunk_id);
       const title = escapeHtml(source.title || "Neznámý dokument");
       const path = escapeHtml(source.source_path_display || trimSourcePath(source.source_path || ""));
@@ -4838,20 +5170,32 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       const excerpt = highlightText(excerptText, highlightTerms);
       const fullChunk = highlightText(fullText, highlightTerms);
       const canExpand = fullText.length > 420;
-      const score = typeof source.score === "number" ? source.score.toFixed(2) : "";
-      const dense = typeof chunk?.dense_score === "number" ? ` · emb ${chunk.dense_score.toFixed(2)}` : "";
-      const bm25 = typeof chunk?.bm25_score === "number" ? ` · BM25 ${chunk.bm25_score.toFixed(2)}` : "";
-      const citationId = source.citation_id || "";
-      const isUsed = usedCitationIds.has(citationId);
-      const usedClass = isUsed ? " used-source" : "";
+      const citationId = entry.citationId;
+      // The retrieval id sits with the other diagnostics rather than in the
+      // title, where it competed with the citation number the answer shows.
+      const scoreLine = [citationId, ...Avatar.sourceScoreParts(source, chunk)].filter(Boolean).join(" · ");
+      const isUsed = entry.cited;
+      // `cited-source` is the fact (click target, cite toggle); `used-source` is
+      // the green, painted only where it tells the cited from the uncited.
+      const citedClass = isUsed ? " cited-source" : "";
+      const usedClass = isUsed && layout.highlightCited ? " used-source" : "";
       const budgetStatus = chunk?.metadata?.budget_status || "";
       const trimmedBadge = budgetStatus === "trimmed" ? `<span class="source-badge">zkráceno pro prompt</span>` : "";
+      // The model never saw this chunk, which is a stronger statement than "did
+      // not cite it" — worth its own badge rather than blending into the group.
+      const omittedBadge = entry.omitted ? `<span class="source-badge">vynecháno z promptu</span>` : "";
       const originalText = chunk?.metadata?.original_text || "";
+      const label = escapeHtml(Avatar.sourceCardLabel(entry, layout.showCitationNumbers));
+      // No citation number means no button: it would be an empty disabled
+      // control. The whole card stays clickable through `cited-source`.
+      const citeButton = label
+        ? `<button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>${label}</button> `
+        : "";
       return `
-        <article class="source${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
-          <strong><button type="button" class="source-cite-btn" aria-pressed="false" title="${CITE_TOGGLE_TITLE}"${isUsed ? "" : " disabled"}>[${escapeHtml(citationId)}]</button> ${title} ${trimmedBadge}</strong>
+        <article class="source${citedClass}${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
+          <strong>${citeButton}${title} ${trimmedBadge}${omittedBadge}</strong>
           <p>${path}${page}${url}${metaUrl}</p>
-          <p class="score">score ${score}${dense}${bm25}</p>
+          <p class="score">${escapeHtml(scoreLine)}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
           ${
             canExpand
@@ -4873,7 +5217,96 @@ function renderSourceCards(container, sources, chunks, highlightQuery, usedCitat
       `;
     })
     .join("");
+  container.innerHTML = sourcesOrderControlHtml(layout) + cards + sourcesUncitedControlHtml(layout);
+  if (onViewChange) {
+    container.querySelector(".sources-order-toggle")?.addEventListener("click", () => {
+      onViewChange({
+        order: layout.order === Avatar.CITATION_ORDER ? Avatar.RETRIEVED_ORDER : Avatar.CITATION_ORDER,
+      });
+    });
+    container.querySelector(".sources-uncited-toggle")?.addEventListener("click", () => {
+      onViewChange({ showUncited: layout.hiddenCount > 0 });
+    });
+  }
   applyCitationHighlights();
+}
+
+// The token budget as a subtraction the reader can follow: the context window
+// is what the model has, the output reserve comes off the top, and the rest is
+// what the prompt is allowed to fill. The old one-line version listed the same
+// four numbers in an order that implied no relationship between them.
+function tokenBudgetRow(label, value, { kind = "" } = {}) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const className = kind ? ` class="budget-row-${kind}"` : "";
+  return `<tr${className}><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(formatTokenCount(value))}</td></tr>`;
+}
+
+function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", foldedMessages = 0, className = "" } = {}) {
+  const view = Avatar.tokenBudgetView(tokenBudget, { conversationSummary, foldedMessages });
+  if (!view) {
+    return "";
+  }
+  const safetyMarginLabel =
+    view.safetyMarginPercent !== null
+      ? `− bezpečnostní rezerva ${view.safetyMarginPercent} %`
+      : "− bezpečnostní rezerva";
+  const headline =
+    view.totalInput !== null && view.usableInput !== null
+      ? `Tokenový rozpočet · ${formatTokenCount(view.totalInput)} z ${formatTokenCount(view.usableInput)} tokenů vstupu${view.inputUsagePercent !== null ? ` (${view.inputUsagePercent} %)` : ""}`
+      : "Tokenový rozpočet";
+
+  const chunkCounts = [
+    view.usedChunks ? `${view.usedChunks} v promptu` : "",
+    view.trimmedChunks ? `${view.trimmedChunks} zkráceno` : "",
+    view.omittedChunks ? `${view.omittedChunks} vynecháno` : "",
+  ].filter(Boolean);
+  const detailsClass = ["budget-details", className].filter(Boolean).join(" ");
+  const historyRow = view.historyTokens
+    ? tokenBudgetRow("↳ z toho historie konverzace", view.historyTokens, { kind: "subset" })
+    : "";
+  const foldedNote = view.foldedMessages
+    ? `<p class="budget-note-line">Ve shrnutí je ${escapeHtml(view.foldedMessages)} starších zpráv.</p>`
+    : "";
+  const historyCounts = view.historyMessages
+    ? `<p class="budget-note-line">Historie: ${escapeHtml(view.usedHistoryMessages)} z ${escapeHtml(view.historyMessages)} zpráv v promptu${view.omittedHistoryMessages ? ` · ${escapeHtml(view.omittedHistoryMessages)} vynecháno` : ""}.</p>`
+    : "";
+  const compactionThreshold = view.effectiveCompactionTrigger !== null
+    ? `<p class="budget-note-line">Efektivní kompresní práh: ${escapeHtml(formatTokenCount(view.effectiveCompactionTrigger))} tokenů nebo více než ${escapeHtml(view.compactionMessageTrigger)} zpráv.</p>`
+    : "";
+  const summaryBlock = view.conversationSummary
+    ? `<div class="context-summary-block"><h4>Komprimovaný kontext konverzace</h4><p>${escapeHtml(view.conversationSummary)}</p></div>`
+    : "";
+
+  return `
+    <details class="${escapeHtml(detailsClass)}">
+      <summary>${escapeHtml(headline)}</summary>
+      <table class="budget-table">
+        <tbody>
+          ${tokenBudgetRow("Kontextové okno", view.contextWindow)}
+          ${tokenBudgetRow("− rezerva na odpověď", view.reservedOutput)}
+          ${view.safetyMargin ? tokenBudgetRow(safetyMarginLabel, view.safetyMargin) : ""}
+          ${tokenBudgetRow("= k dispozici pro vstup", view.usableInput, { kind: "subtotal" })}
+        </tbody>
+        <tbody>
+          ${tokenBudgetRow("Prompt bez zdrojů celkem", view.nonSourceTokens)}
+          ${historyRow}
+          ${tokenBudgetRow("Zdroje odeslané modelu", view.sourceTokens)}
+          ${tokenBudgetRow("= vstup celkem", view.totalInput, { kind: "subtotal" })}
+        </tbody>
+        <tbody>
+          ${tokenBudgetRow("Nalezené zdroje před úpravou", view.retrievedSourceTokens)}
+        </tbody>
+      </table>
+      ${chunkCounts.length ? `<p class="budget-note-line">Zdroje: ${escapeHtml(chunkCounts.join(" · "))}.</p>` : ""}
+      ${view.summaryUsed ? `<p class="budget-note-line">Historie konverzace je poslána jako shrnutí.</p>` : ""}
+      ${historyCounts}
+      ${compactionThreshold}
+      ${foldedNote}
+      ${summaryBlock}
+    </details>
+  `;
 }
 
 function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBudget = null, conversationSummary = "") {
@@ -4885,13 +5318,9 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
       </div>
     `);
   }
-  if (tokenBudget) {
-    parts.push(`
-      <details class="budget-details">
-        <summary>Tokenový rozpočet</summary>
-        <p>Prompt bez zdrojů: ${escapeHtml(tokenBudget.estimated_non_source_tokens ?? "?")} tokenů · zdroje: ${escapeHtml(tokenBudget.estimated_source_tokens ?? "?")} · rezerva odpovědi: ${escapeHtml(tokenBudget.reserved_output_tokens ?? "?")} · window: ${escapeHtml(tokenBudget.context_window_tokens ?? "?")}</p>
-      </details>
-    `);
+  const tokenBudgetHtml = renderTokenBudgetDetails(tokenBudget);
+  if (tokenBudgetHtml) {
+    parts.push(tokenBudgetHtml);
   }
   if (conversationSummary) {
     parts.push(`
@@ -4902,16 +5331,10 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
     `);
   }
   if (omittedChunks.length) {
+    // The chunks themselves render as badged cards in the uncited group; this
+    // only says how many the budget dropped.
     parts.push(`
-      <details class="budget-details">
-        <summary>Neposlané nalezené chunky (${omittedChunks.length})</summary>
-        ${omittedChunks
-          .map((chunk) => {
-            const title = chunk.metadata?.title || chunk.metadata?.source_path || "Neznámý dokument";
-            return `<p><strong>[${escapeHtml(chunk.citation_id)}] ${escapeHtml(title)}</strong><br>${escapeHtml(shortenText(chunk.text || "", 320))}</p>`;
-          })
-          .join("")}
-      </details>
+      <p class="budget-note-line">Token budget vynechal ${omittedChunks.length} nalezených chunků z promptu.</p>
     `);
   }
   if (parts.length) {
@@ -4920,10 +5343,16 @@ function renderBudgetNotes(container, warnings = [], omittedChunks = [], tokenBu
 }
 
 function updateUsedSourceHighlights(container, usedCitationIds) {
-  for (const card of container.querySelectorAll(".source")) {
+  const cards = Array.from(container.querySelectorAll(".source"));
+  const citedCount = cards.filter((card) => usedCitationIds.has(card.dataset.citationId || "")).length;
+  // Same rule as the rendered layout: the green only means something while some
+  // card on screen is still uncited.
+  const highlightCited = citedCount > 0 && citedCount < cards.length;
+  for (const card of cards) {
     const citationId = card.dataset.citationId || "";
     const isUsed = usedCitationIds.has(citationId);
-    card.classList.toggle("used-source", isUsed);
+    card.classList.toggle("cited-source", isUsed);
+    card.classList.toggle("used-source", isUsed && highlightCited);
     // A card can become cited mid-stream, so its toggle is enabled here rather
     // than only at render time.
     const toggle = card.querySelector(".source-cite-btn");
@@ -5146,7 +5575,7 @@ function applyCitationHighlights() {
   const card = scope
     ? document.querySelector(`${scope.sourcesSelector} ${sourceCardSelector(activeCitation.citationId)}`)
     : null;
-  if (!card || !card.classList.contains("used-source")) {
+  if (!card || !card.classList.contains("cited-source")) {
     activeCitation = null;
     return;
   }
@@ -5203,7 +5632,7 @@ function toggleCitationHighlightFromSource(event) {
   }
   const citationId = card.dataset.citationId || "";
   const scope = citationScopeForCard(card);
-  if (!citationId || !scope || !card.classList.contains("used-source")) {
+  if (!citationId || !scope || !card.classList.contains("cited-source")) {
     return;
   }
   const isActive = activeCitation?.scope === scope.name && activeCitation.citationId === citationId;
@@ -5230,7 +5659,7 @@ function getConversationEntries() {
 }
 
 function setConversationEntries(entries) {
-  return saveEntryListWithQuotaPruning(
+  return saveEntryListSafely(
     CONVERSATION_STORAGE_KEY,
     entries,
     compactStoredConversation,
@@ -5246,6 +5675,10 @@ function createConversation() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     conversation_summary: "",
+    // How many leading messages the server has already folded into
+    // conversation_summary. They stay on screen but are no longer uploaded, so
+    // the running context shrinks instead of growing forever.
+    conversation_compacted_through: 0,
     rewrite_query_for_retrieval: true,
     // New conversations inherit the main page's current settings, then own them.
     settings: currentMainSettings(),
@@ -5285,6 +5718,7 @@ function updateConversation(updatedConversation) {
   if (!savedConversations.some((entry) => entry.id === selectedConversationId)) {
     selectedConversationId = savedConversations[0]?.id ?? null;
   }
+  return storageSaveSucceeded.get(CONVERSATION_STORAGE_KEY) === true;
 }
 
 function deleteSelectedConversation() {
@@ -5335,6 +5769,7 @@ function captureSettingsSnapshot() {
     model: selectedModelValue(),
     msearch_collection: msearchCollection.value,
     context_window_tokens: nullableInteger(contextWindowTokens.value),
+    reasoning_effort: reasoningEffort?.value || "",
   };
 }
 
@@ -5393,6 +5828,13 @@ function applySettingsToGlobals(settings) {
     setContextWindowTokensValue(s.context_window_tokens);
   }
   updateModelContextWindowNote();
+  refreshReasoningEffortOptions();
+  if (reasoningEffort && s.reasoning_effort !== undefined) {
+    const wanted = String(s.reasoning_effort || "");
+    reasoningEffort.value = Array.from(reasoningEffort.options).some((option) => option.value === wanted)
+      ? wanted
+      : REASONING_DEFAULT_VALUE;
+  }
 }
 
 // Apply a WP for conversation mode: WP + its default collection + default
@@ -5511,6 +5953,8 @@ function persistActiveConversationSettings() {
 // create/delete). Keeps settings application out of the streaming render path.
 function selectConversation(id) {
   selectedConversationId = id;
+  // Whatever is stored is already final; let the panel settle itself on render.
+  conversationSourcesView = null;
   if (conversationSettingsActive) {
     applyConversationSettings(ensureSelectedConversation());
   }
@@ -5521,9 +5965,50 @@ function openConversationWorkspace() {
   mainSettingsBackup = captureSettingsSnapshot();
   conversationSettingsActive = true;
   activePlaceholderContainer = convPlaceholderControls;
+  const storedConversations = getConversationEntries();
+  if (storedConversations.length) {
+    // Apply the current compact representation to existing conversations too,
+    // rather than waiting for each one to receive another message.
+    setConversationEntries(storedConversations);
+  }
   renderConversationWorkspace();
+  refreshConversationStorageStatus();
   applyConversationSettings(ensureSelectedConversation());
   conversationDialog.showModal();
+}
+
+function exportLegacyHistory() {
+  const raw = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  if (!raw) {
+    refreshConversationStorageStatus();
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `czdemos4ai-history-legacy-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function deleteLegacyHistory() {
+  const raw = localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) || "";
+  if (!raw) {
+    refreshConversationStorageStatus();
+    return;
+  }
+  const confirmed = window.confirm(
+    "Smazat starou místní historii? Tato data už aplikace nezobrazuje. "
+    + "Pokud je chcete zachovat, nejdříve použijte Exportovat starou historii.",
+  );
+  if (!confirmed) {
+    return;
+  }
+  localStorage.removeItem(LEGACY_HISTORY_STORAGE_KEY);
+  conversationStorageFailure = "";
+  refreshConversationStorageStatus();
 }
 
 // Restore the main page's own settings after the conversation modal closes.
@@ -5584,23 +6069,52 @@ function renderConversationDetail(conversation) {
   `;
 
   if (!messages.length) {
-    conversationMessages.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
+    conversationMessageList.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
-    conversationMessages.innerHTML = messages
-      .map((message) => renderConversationMessage(message))
+    const latestAssistantIndex = messages.lastIndexOf(latestAssistant);
+    conversationMessageList.innerHTML = messages
+      .map((message, index) =>
+        renderConversationMessage(
+          message,
+          index,
+          index === latestAssistantIndex ? conversation.conversation_summary || "" : "",
+        ))
       .join("");
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
 
+  renderConversationSourceCards(latestAssistant, latestSources, latestChunks);
+  renderConversationRetrievalInfo(latestAssistant);
+}
+
+// Same panel machinery as the main page, driven by conversationSourcesView so
+// the two cannot drift apart. Split out so the view toggles can re-render just
+// the source column instead of the whole conversation detail.
+function renderConversationSourceCards(latestAssistant, sources, chunks) {
+  const combined = withOmittedChunks(sources, chunks, latestAssistant?.omitted_chunks || []);
+  const orderedCitationIds = Avatar.extractOrderedCitationIds(latestAssistant?.content || "");
+  if (!conversationSourcesView) {
+    conversationSourcesView = Avatar.completedSourcesView(
+      Avatar.createSourcesView({ canFlip: Boolean(latestAssistant) }),
+      orderedCitationIds,
+    );
+  }
+  const layout = Avatar.layoutSources(combined.sources, conversationSourcesView, {
+    orderedCitationIds,
+    omittedCitationIds: combined.omittedCitationIds,
+  });
   renderSourceCards(
     conversationSources,
-    latestSources,
-    latestChunks,
+    combined.sources,
+    combined.chunks,
     conversationRetrievalQuery(latestAssistant, conversationQuestion.value),
-    AvatarMarkdown.extractCitationIds(latestAssistant?.content || ""),
+    layout,
     "conversation-source",
+    (patch) => {
+      conversationSourcesView = { ...conversationSourcesView, ...patch };
+      renderConversationSourceCards(latestAssistant, sources, chunks);
+    },
   );
-  renderConversationRetrievalInfo(latestAssistant);
 }
 
 function conversationOriginalQuestion(message, fallback = "") {
@@ -5622,13 +6136,17 @@ function renderConversationRetrievalInfo(message) {
   }
   const originalQuestion = conversationOriginalQuestion(message);
   const retrievalQuery = conversationRetrievalQuery(message);
-  if (!originalQuestion && !retrievalQuery) {
+  const rewriteView = Avatar.conversationQueryRewriteView(message);
+  if ((!originalQuestion && !retrievalQuery) || (!rewriteView.showQueries && !rewriteView.skippedMessage)) {
     conversationRetrievalInfo.hidden = true;
     conversationRetrievalInfo.innerHTML = "";
     return;
   }
-  const rewritten = message.retrieval_query_was_rewritten === true;
   conversationRetrievalInfo.hidden = false;
+  if (!rewriteView.showQueries) {
+    conversationRetrievalInfo.innerHTML = `<p>${escapeHtml(rewriteView.skippedMessage)}</p>`;
+    return;
+  }
   conversationRetrievalInfo.innerHTML = `
     <div class="conversation-retrieval-info-row">
       <span>Původní dotaz</span>
@@ -5638,7 +6156,8 @@ function renderConversationRetrievalInfo(message) {
       <span>Dotaz pro vyhledávání</span>
       <strong>${escapeHtml(retrievalQuery || originalQuestion)}</strong>
     </div>
-    ${rewritten ? `<p>Dotaz byl upraven pro lepší vyhledání zdrojů.</p>` : ""}
+    ${rewriteView.rewritten ? `<p>Dotaz byl upraven pro lepší vyhledání zdrojů.</p>` : ""}
+    ${rewriteView.unchangedMessage ? `<p>${escapeHtml(rewriteView.unchangedMessage)}</p>` : ""}
   `;
 }
 
@@ -5655,15 +6174,23 @@ function retrievalInfoFromEvent(data = {}, fallbackQuestion = "", previous = nul
     original_question: originalQuestion,
     retrieval_query: retrievalQuery,
     retrieval_query_was_rewritten: rewritten,
+    retrieval_query_rewrite_attempted:
+      data.retrieval_query_rewrite_attempted === true
+        ? true
+        : data.retrieval_query_rewrite_attempted === false
+          ? false
+          : previous?.retrieval_query_rewrite_attempted === true,
+    retrieval_query_rewrite_skip_reason:
+      data.retrieval_query_rewrite_skip_reason ?? previous?.retrieval_query_rewrite_skip_reason ?? null,
   };
 }
 
-function renderConversationMessage(message) {
+function renderConversationMessage(message, index = 0, conversationSummary = "") {
   const roleLabel = message.role === "assistant" ? "Avatar" : "Ty";
   const messageClass = message.role === "assistant" ? "assistant" : "user";
   const body =
     message.role === "assistant"
-      ? AvatarMarkdown.renderMarkdown(message.content || "", message.sources || [], "conversation-source")
+      ? Avatar.renderMarkdown(message.content || "", message.sources || [], "conversation-source")
       : `<p>${escapeHtml(message.content || "")}</p>`;
   const metaParts = [];
   if (message.role === "assistant" && message.model_used) {
@@ -5678,21 +6205,39 @@ function renderConversationMessage(message) {
           .map((warning) => `<p>${escapeHtml(warning)}</p>`)
           .join("")}</div>`
       : "";
-  const contextStatus = message.role === "assistant" ? renderConversationContextStatus(message) : "";
+  const contextStatus =
+    message.role === "assistant" ? renderConversationContextStatus(message, conversationSummary) : "";
+  const reasoningBlock =
+    message.role === "assistant" && (message.reasoning || "").trim()
+      ? `<details class="reasoning-panel"${message.reasoning_streaming ? " open" : ""}>
+          <summary>Uvažování modelu</summary>
+          <pre class="reasoning-text">${escapeHtml(message.reasoning)}</pre>
+        </details>`
+      : "";
+  const copyActions =
+    message.role === "assistant" && (message.content || "").trim()
+      ? `<div class="answer-actions">
+          <button type="button" class="ghost-button" data-copy-scope="conversation">Kopírovat odpověď</button>
+          <button type="button" class="ghost-button" data-copy-scope="conversation" data-copy-sources="1">Kopírovat se zdroji</button>
+          <span class="copy-status" role="status" aria-live="polite"></span>
+        </div>`
+      : "";
   return `
-    <article class="conversation-message ${messageClass}">
+    <article class="conversation-message ${messageClass}" data-message-index="${index}">
       <div class="conversation-message-label">${roleLabel}</div>
+      ${reasoningBlock}
       <div class="conversation-message-body">${body}</div>
       ${budgetWarnings}
       ${contextStatus}
+      ${copyActions}
       ${metaParts.length ? `<div class="conversation-message-meta">${metaParts.join(" · ")}</div>` : ""}
     </article>
   `;
 }
 
-function renderConversationContextStatus(message) {
+function renderConversationContextStatus(message, conversationSummary = "") {
   const budget = message.token_budget;
-  const summary = message.conversation_summary || "";
+  const summary = conversationSummary || "";
   if (!budget && !summary) {
     return "";
   }
@@ -5707,60 +6252,28 @@ function renderConversationContextStatus(message) {
       : budget
         ? "bez zdrojových chunků"
         : "stav kontextu";
-  const compressionText = budget?.conversation_summary_used || summary ? "komprese zapnutá" : "bez komprese";
+  const foldedMessages = Number(message?.conversation_compacted_through) || 0;
+  const compressionText = foldedMessages
+    ? `${foldedMessages} starších zpráv ve shrnutí`
+    : budget?.conversation_summary_used || summary
+      ? "použito shrnutí starší konverzace"
+      : "bez komprese";
   const visibleParts = [sourceText, compressionText];
   if (trimmedChunks > 0) {
     visibleParts.push(`${trimmedChunks} zkráceno`);
   }
-  const totalInputTokens =
-    budget?.estimated_total_input_tokens ??
-    (budget ? Number(budget.estimated_non_source_tokens ?? 0) + Number(budget.estimated_source_tokens ?? 0) : null);
-  const usedWindowTokens =
-    budget && totalInputTokens !== null
-      ? totalInputTokens + Number(budget.reserved_output_tokens ?? 0)
-      : null;
-  const usagePercent =
-    budget?.context_window_tokens && usedWindowTokens !== null
-      ? Math.max(0, Math.min(100, Math.round((usedWindowTokens / Number(budget.context_window_tokens)) * 100)))
-      : null;
+  const budgetView = Avatar.tokenBudgetView(budget, { foldedMessages, conversationSummary: summary });
+  const totalInputTokens = budgetView?.totalInput ?? null;
+  const usagePercent = budgetView?.windowUsagePercent ?? null;
   if (totalInputTokens !== null) {
     visibleParts.unshift(`${totalInputTokens} tokenů vstup`);
   }
 
-  const detailRows = budget
-    ? [
-        ["Context window", budget.context_window_tokens],
-        ["Celkem vstup", totalInputTokens],
-        ["Použitelný vstup po rezervě", budget.usable_input_tokens],
-        ["Prompt bez zdrojů", budget.estimated_non_source_tokens],
-        ["Historie konverzace", budget.estimated_conversation_history_tokens ?? 0],
-        ["Zdroje poslané modelu", budget.estimated_source_tokens],
-        ["Rezerva pro odpověď", budget.reserved_output_tokens],
-        ["Využití okna včetně rezervy", usagePercent === null ? null : `${usagePercent}%`],
-        ["Použité chunky", usedChunks],
-        ["Vynechané chunky", omittedChunks],
-        ["Zkrácené chunky", trimmedChunks],
-        ["Komprese konverzace", budget.conversation_summary_used || summary ? "ano" : "ne"],
-      ]
-    : [["Komprese konverzace", "ano"]];
-  const detailTable = detailRows
-    .map(
-      ([label, value]) => `
-        <div class="context-budget-row">
-          <span>${escapeHtml(label)}</span>
-          <strong>${escapeHtml(value ?? "?")}</strong>
-        </div>
-      `,
-    )
-    .join("");
-  const summaryBlock = summary
-    ? `
-      <div class="context-summary-block">
-        <h4>Komprimovaný kontext konverzace</h4>
-        <p>${escapeHtml(summary)}</p>
-      </div>
-    `
-    : "";
+  const budgetDetails = renderTokenBudgetDetails(budget, {
+    conversationSummary: summary,
+    foldedMessages,
+    className: "conversation-context-details",
+  });
 
   return `
     <div class="conversation-context-status">
@@ -5772,17 +6285,24 @@ function renderConversationContextStatus(message) {
         }
         <strong>${visibleParts.map((part) => escapeHtml(part)).join(" · ")}</strong>
       </div>
-      <details class="budget-details conversation-context-details">
-        <summary>Detail kontextového okna</summary>
-        <div class="context-budget-grid">${detailTable}</div>
-        ${summaryBlock}
-      </details>
+      ${budgetDetails}
     </div>
   `;
 }
 
 // In-flight conversation request, aborted by the conversation cancel button.
 let activeConversationController = null;
+
+function setConversationRequestStatus(message, { error = false } = {}) {
+  if (!conversationRequestStatus) {
+    return;
+  }
+  conversationRequestStatus.textContent = message || "";
+  conversationRequestStatus.classList.toggle("error", error);
+  if (message && conversationMessages) {
+    conversationMessages.scrollTop = conversationMessages.scrollHeight;
+  }
+}
 
 async function submitConversationTurn() {
   const prompt = conversationQuestion.value.trim();
@@ -5792,16 +6312,27 @@ async function submitConversationTurn() {
   const controller = new AbortController();
   const turnId = newAnalyticsId();
   activeConversationController = controller;
+  let requestFailed = false;
+  setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
   conversationSubmitButton.disabled = true;
   if (conversationCancelButton) {
     conversationCancelButton.hidden = false;
     conversationCancelButton.disabled = false;
   }
-  const conversation = ensureSelectedConversation();
+  const storedConversation = ensureSelectedConversation();
+  const cleanedMessages = Avatar.removeLegacyTokenBudgetRejectedTurns(storedConversation.messages);
+  const conversation =
+    cleanedMessages.length === storedConversation.messages.length
+      ? storedConversation
+      : { ...storedConversation, messages: cleanedMessages, updatedAt: new Date().toISOString() };
+  if (conversation !== storedConversation) {
+    updateConversation(conversation);
+  }
   const rewriteQueryForRetrieval = conversationRewriteEnabled(conversation);
   const userMessage = {
     role: "user",
     content: prompt,
+    request_turn_id: turnId,
     createdAt: new Date().toISOString(),
   };
   const workingConversation = {
@@ -5811,22 +6342,88 @@ async function submitConversationTurn() {
     rewrite_query_for_retrieval: rewriteQueryForRetrieval,
     messages: [...conversation.messages, userMessage],
   };
-  updateConversation(workingConversation);
+  const turnSaved = updateConversation(workingConversation);
+  if (!turnSaved) {
+    renderConversationWorkspace();
+    refreshConversationStorageStatus();
+    setConversationRequestStatus("");
+    conversationSubmitButton.disabled = false;
+    if (conversationCancelButton) {
+      conversationCancelButton.hidden = true;
+    }
+    activeConversationController = null;
+    return;
+  }
   renderConversationWorkspace();
   conversationQuestion.value = "";
 
   let assistantText = "";
+  let assistantReasoning = "";
+  // Reasoning deltas and answer tokens both grow the same in-progress assistant
+  // message, so they share one writer rather than two copies that drift.
+  const upsertStreamingAssistantMessage = ({ reasoningStreaming }) => {
+    const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
+    if (!liveConversation) {
+      return;
+    }
+    const messages = [...liveConversation.messages];
+    const lastMessage = messages[messages.length - 1];
+    const streamed = {
+      content: assistantText,
+      reasoning: assistantReasoning,
+      reasoning_streaming: reasoningStreaming,
+      sources: latestSources,
+      retrieved_chunks: latestChunks,
+    };
+    if (lastMessage?.role === "assistant") {
+      Object.assign(lastMessage, streamed, latestRetrievalInfo);
+    } else {
+      messages.push({
+        role: "assistant",
+        question: prompt,
+        ...latestRetrievalInfo,
+        ...streamed,
+        settings: sanitizedPayload,
+        omitted_chunks: [],
+        token_budget: null,
+        chunk_budget_warnings: [],
+        model_used: payload.model,
+        upstream_model: null,
+        response_time_seconds: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    updateConversation({
+      ...liveConversation,
+      rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+      updatedAt: new Date().toISOString(),
+      messages,
+    });
+    renderConversationWorkspace();
+  };
+  const clearStreamingReasoningFlag = () => {
+    const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
+    const lastMessage = liveConversation?.messages?.[liveConversation.messages.length - 1];
+    if (!lastMessage?.reasoning_streaming) {
+      return;
+    }
+    const messages = [...liveConversation.messages];
+    messages[messages.length - 1] = { ...lastMessage, reasoning_streaming: false };
+    updateConversation({ ...liveConversation, messages });
+    renderConversationWorkspace();
+  };
   let latestSources = [];
   let latestChunks = [];
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
   // Build the payload from the conversation's own settings rather than the live
   // main-page controls, so each turn uses the settings this conversation owns.
   const convSettings = conversationSettingsFor(conversation);
+  const compactedThrough = Number(conversation.conversation_compacted_through) || 0;
   const payload = buildRequestPayload({
     question: prompt,
     conversation_summary: conversation.conversation_summary || null,
     rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-    conversation_history: conversation.messages.map((message) => ({
+    conversation_history: conversation.messages.slice(compactedThrough).map((message) => ({
       role: message.role,
       content: message.content,
     })),
@@ -5843,6 +6440,7 @@ async function submitConversationTurn() {
     llm_api_key: nullableString(selectedProviderApiKey(convSettings.llm_provider)),
     msearch_collection: convSettings.msearch_collection,
     context_window_tokens: convSettings.context_window_tokens,
+    reasoning_effort: nullableString(convSettings.reasoning_effort),
   });
   const sanitizedPayload = {
     ...sanitizeHistorySettings(payload),
@@ -5850,6 +6448,8 @@ async function submitConversationTurn() {
   };
 
   try {
+    // A new turn puts the panel back in retrieved order until the answer settles.
+    conversationSourcesView = Avatar.createSourcesView();
     const handleConversationSources = (data) => {
       latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
       latestChunks = data.retrieved_chunks || [];
@@ -5874,7 +6474,6 @@ async function submitConversationTurn() {
           omitted_chunks: [],
           token_budget: null,
           chunk_budget_warnings: [],
-          conversation_summary: liveConversation.conversation_summary || null,
           model_used: payload.model,
           upstream_model: null,
           response_time_seconds: null,
@@ -5890,51 +6489,29 @@ async function submitConversationTurn() {
       renderConversationWorkspace();
     };
     await chatRequest(payload, {
+      onStatus(data) {
+        setConversationRequestStatus(Avatar.requestStatusMessage(data.phase));
+      },
       onPreliminarySources(data) {
+        setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
         handleConversationSources(data);
       },
       onSources(data) {
+        setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
         handleConversationSources(data);
       },
+      onReasoning(delta) {
+        setConversationRequestStatus("");
+        assistantReasoning += delta;
+        // The trace arrives before the answer does, so this is what creates the
+        // assistant bubble on a reasoning model — with `reasoning_streaming` set
+        // so the panel renders open until the first answer token clears it.
+        upsertStreamingAssistantMessage({ reasoningStreaming: true });
+      },
       onToken(token) {
+        setConversationRequestStatus("");
         assistantText += token;
-        const liveConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id);
-        if (!liveConversation) {
-          return;
-        }
-        const messages = [...liveConversation.messages];
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage?.role === "assistant") {
-          lastMessage.content = assistantText;
-          lastMessage.sources = latestSources;
-          lastMessage.retrieved_chunks = latestChunks;
-          Object.assign(lastMessage, latestRetrievalInfo);
-        } else {
-          messages.push({
-            role: "assistant",
-            question: prompt,
-            ...latestRetrievalInfo,
-            content: assistantText,
-            settings: sanitizedPayload,
-            sources: latestSources,
-            retrieved_chunks: latestChunks,
-            omitted_chunks: [],
-            token_budget: null,
-            chunk_budget_warnings: [],
-            conversation_summary: liveConversation.conversation_summary || null,
-            model_used: payload.model,
-            upstream_model: null,
-            response_time_seconds: null,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        updateConversation({
-          ...liveConversation,
-          rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-          updatedAt: new Date().toISOString(),
-          messages,
-        });
-        renderConversationWorkspace();
+        upsertStreamingAssistantMessage({ reasoningStreaming: false });
       },
       onDone(data) {
         latestRetrievalInfo = retrievalInfoFromEvent(data, prompt, latestRetrievalInfo);
@@ -5951,7 +6528,9 @@ async function submitConversationTurn() {
           omitted_chunks: data.omitted_chunks || [],
           token_budget: data.token_budget || null,
           chunk_budget_warnings: data.chunk_budget_warnings || [],
-          conversation_summary: data.conversation_summary || null,
+          reasoning: data.reasoning || assistantReasoning,
+          reasoning_streaming: false,
+          conversation_compacted_through: compactedThrough + (Number(data.conversation_folded_message_count) || 0),
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
@@ -5962,9 +6541,17 @@ async function submitConversationTurn() {
         } else {
           messages.push(assistantMessage);
         }
+        conversationSourcesView = Avatar.completedSourcesView(
+          conversationSourcesView,
+          Avatar.extractOrderedCitationIds(assistantMessage.content || ""),
+        );
+        // The server folded this many of the messages we uploaded, so stop
+        // uploading them. The marker only ever moves forward.
+        const foldedNow = Number(data.conversation_folded_message_count) || 0;
         updateConversation({
           ...liveConversation,
           conversation_summary: data.conversation_summary || liveConversation.conversation_summary || "",
+          conversation_compacted_through: compactedThrough + foldedNow,
           rewrite_query_for_retrieval: rewriteQueryForRetrieval,
           updatedAt: new Date().toISOString(),
           messages,
@@ -5976,31 +6563,54 @@ async function submitConversationTurn() {
     if (error.name === "AbortError") {
       return;
     }
+    requestFailed = true;
     const failedConversation = getConversationEntries().find((entry) => entry.id === workingConversation.id) || workingConversation;
-    updateConversation({
-      ...failedConversation,
-      updatedAt: new Date().toISOString(),
-      rewrite_query_for_retrieval: rewriteQueryForRetrieval,
-      messages: [
-        ...failedConversation.messages,
-        {
-          role: "assistant",
-          question: prompt,
-          ...latestRetrievalInfo,
-          content: `Nepodařilo se dokončit odpověď: ${error.message}`,
-          settings: sanitizedPayload,
-          sources: [],
-          retrieved_chunks: [],
-          model_used: payload.model,
-          response_time_seconds: null,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    });
+    const tokenBudgetRejected = Avatar.isTokenBudgetErrorDetail(error.detail);
+    if (tokenBudgetRejected) {
+      updateConversation({
+        ...failedConversation,
+        title: conversation.messages.length ? failedConversation.title : conversation.title,
+        updatedAt: new Date().toISOString(),
+        rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+        messages: Avatar.rollbackRejectedTurn(failedConversation.messages, turnId),
+      });
+      if (!conversationQuestion.value.trim()) {
+        conversationQuestion.value = prompt;
+      }
+    } else {
+      updateConversation({
+        ...failedConversation,
+        updatedAt: new Date().toISOString(),
+        rewrite_query_for_retrieval: rewriteQueryForRetrieval,
+        messages: [
+          ...failedConversation.messages,
+          {
+            role: "assistant",
+            question: prompt,
+            ...latestRetrievalInfo,
+            content: `Nepodařilo se dokončit odpověď: ${error.message}`,
+            settings: sanitizedPayload,
+            sources: [],
+            retrieved_chunks: [],
+            model_used: payload.model,
+            response_time_seconds: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      });
+    }
     renderConversationWorkspace();
+    setConversationRequestStatus(error.message, { error: true });
   } finally {
     if (activeConversationController === controller) {
       activeConversationController = null;
+    }
+    // An aborted or failed stream never reaches `onDone`, and the flag is
+    // stored with the message — leave it set and the panel stays wedged open
+    // for the life of the conversation.
+    clearStreamingReasoningFlag();
+    if (!requestFailed) {
+      setConversationRequestStatus("");
     }
     conversationSubmitButton.disabled = false;
     if (conversationCancelButton) {
@@ -6056,7 +6666,7 @@ function saveHistoryEntry(entry) {
     createdAt: new Date().toISOString(),
   });
   const trimmed = history.slice(0, MAX_STORED_HISTORY_ENTRIES);
-  const savedHistory = saveEntryListWithQuotaPruning(
+  const savedHistory = saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     trimmed,
     compactStoredHistoryEntry,
@@ -6276,7 +6886,7 @@ function mutateLocalHistoryEntry(id, mutate) {
     return;
   }
   mutate(entry);
-  saveEntryListWithQuotaPruning(
+  saveEntryListSafely(
     HISTORY_STORAGE_KEY,
     history,
     compactStoredHistoryEntry,
@@ -6308,7 +6918,7 @@ function clearLocalSharedMarker(sharedId) {
     }
   }
   if (changed) {
-    saveEntryListWithQuotaPruning(
+    saveEntryListSafely(
       HISTORY_STORAGE_KEY,
       history,
       compactStoredHistoryEntry,
@@ -6537,7 +7147,11 @@ async function unshareSharedItem(item) {
   }
 }
 
+// The entry currently mounted in the history detail, for the copy buttons.
+let historyDetailEntry = null;
+
 function renderHistoryDetail(entry) {
+  historyDetailEntry = entry;
   const sharedBadge = entry.shared_id
     ? ` <span class="history-shared-badge">Sdíleno ✓</span>`
     : "";
@@ -6635,7 +7249,12 @@ function renderHistorySettingsAndAnswer(entry) {
       entry.answer
         ? `<section class="history-block">
             <h4>Odpověď</h4>
-            <div class="history-answer">${AvatarMarkdown.renderMarkdown(entry.answer, sources, "history-source")}</div>
+            <div class="answer-actions">
+              <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
+              <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
+              <span class="copy-status" role="status" aria-live="polite"></span>
+            </div>
+            <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
           </section>`
         : ""
     }
@@ -6696,13 +7315,37 @@ function mountHistoryDetailSources(entry) {
   const chunks = entry.retrieved_chunks || [];
   const omittedChunks = entry.omitted_chunks || [];
   const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
-  const usedCitationIds = AvatarMarkdown.extractCitationIds(entry.answer || "");
   const historySources = historyDetail.querySelector("#historySources");
   if (!historySources) {
     return;
   }
   const retrievalQuery = entry.retrieval_query || entry.settings?.retrieval_query || entry.question;
-  renderSourceCards(historySources, sources, chunks, retrievalQuery, usedCitationIds, "history-source");
+  // History replays a finished answer, so it opens directly in the settled
+  // state: citation order, uncited collapsed, no streaming notice.
+  const orderedCitationIds = Avatar.extractOrderedCitationIds(entry.answer || "");
+  let historyView = Avatar.completedSourcesView(
+    Avatar.createSourcesView({ canFlip: entry.mode !== "retrieve" }),
+    orderedCitationIds,
+  );
+  const combined = withOmittedChunks(sources, chunks, omittedChunks);
+  const renderHistorySources = () => {
+    renderSourceCards(
+      historySources,
+      combined.sources,
+      combined.chunks,
+      retrievalQuery,
+      Avatar.layoutSources(combined.sources, historyView, {
+        orderedCitationIds,
+        omittedCitationIds: combined.omittedCitationIds,
+      }),
+      "history-source",
+      (patch) => {
+        historyView = { ...historyView, ...patch };
+        renderHistorySources();
+      },
+    );
+  };
+  renderHistorySources();
   renderBudgetNotes(
     historySources,
     entry.chunk_budget_warnings || [],
@@ -6883,13 +7526,18 @@ function restoreAnswerFromHistoryEntry(entry) {
   currentBudgetWarnings = entry.chunk_budget_warnings || [];
   currentTokenBudget = entry.token_budget || null;
   currentConversationSummary = entry.conversation_summary || "";
+  currentReasoning = entry.reasoning || "";
+  renderReasoning(currentReasoning);
   // Stored entries have no baseline / rescore comparison to show.
   currentBaselineChunks = [];
   currentMsearchRescoreUsed = false;
   renderAnswer(streamedAnswerText);
+  // A stored answer is final, so the panel opens in the settled state rather
+  // than replaying the streaming notice.
+  mainSourcesView = Avatar.createSourcesView({ canFlip: entry.mode !== "retrieve" });
   // renderSources internally re-applies renderBudgetNotes from the current* state
   // vars set above, mirroring the live flow.
-  renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+  completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
 }
 
 function formatHistoryTime(timestamp) {

@@ -1,0 +1,181 @@
+{
+  "_comment": [
+    "One entry per model: context window, reasoning, and whatever else we learn",
+    "later. 'provider_defaults' applies to every model of a provider that has no",
+    "entry of its own; the provider key must match the label shown in the UI.",
+    "",
+    "context_window — usable input+output tokens. Omitted means fall back to the",
+    "provider default, then to CONTEXT_WINDOW_TOKENS.",
+    "",
+    "max_context_window — provider_defaults only. The largest window a value",
+    "discovered from the provider's catalogue may set. Absent means the",
+    "provider's own context_window doubles as the ceiling, so discovery can only",
+    "reveal that a model is SMALLER than we assumed. Several OpenRouter models",
+    "advertise a million tokens; that is capacity, not a budget, and letting it",
+    "through would switch off trimming and misreport how full the prompt is.",
+    "Raise this to use the bigger windows on purpose. e-infra is raised to",
+    "262144 because it costs no tokens and genuinely serves 131k-262k slots;",
+    "only its six models that claim a million are held down. OpenRouter keeps",
+    "the default as its ceiling, because there the window is a bill.",
+    "",
+    "reasoning — omitted means the model does not reason and nothing is sent.",
+    "  param      'reasoning' sends {reasoning: {effort: X}}, 'reasoning_effort'",
+    "             sends {reasoning_effort: X}.",
+    "  efforts    literal values the provider accepts, in the order the UI shows",
+    "             them. An EMPTY or missing list means the effort cannot be",
+    "             steered: no control is offered and no parameter is sent.",
+    "  default    sent when the user has not chosen. Omitting it derives one:",
+    "             a MANDATORY model gets the cheapest level it accepts, because",
+    "             it was going to think regardless and the trace is output",
+    "             nobody asked for; an OPTIONAL model gets nothing, because",
+    "             sending a level would change whether it thinks at all and",
+    "             declaring a model must not change how it answers for anyone",
+    "             who never touches the selector. Set one explicitly only to",
+    "             overrule that — e.g. a model whose cheapest level is too thin",
+    "             to ground an answer well.",
+    "  mandatory  the model reasons whether or not it is asked to, so its trace",
+    "             is shown (collapsed) rather than discarded. A mandatory model",
+    "             may not list 'none'/'off' among its efforts; the loader strips",
+    "             them, because a switch that cannot work is worse than no switch.",
+    "  note       for humans only; never parsed, never sent.",
+    "",
+    "Not every model has to appear here. OpenRouter publishes reasoning support",
+    "in its own catalogue and we read it at startup, so its models need an entry",
+    "only to override what the catalogue says. ai.ufal and e-infra publish",
+    "nothing usable, so theirs are probed by hand and written down below.",
+    "",
+    "Probed 2026-08-22 and 2026-08-23 against all three providers. The short",
+    "version:",
+    "  ai.ufal   the Open WebUI gateway accepts every parameter form with a 200",
+    "            and ignores all of them — even reasoning_effort:'bogus' — so",
+    "            every model runs at its own built-in default and declares no",
+    "            efforts. Nothing to steer and nothing that can break.",
+    "  e-infra   honours reasoning_effort, and the vocabulary differs per model:",
+    "            an unaccepted value is a 400, so each entry below lists what its",
+    "            model actually took. What the LiteLLM catalogue reports is not",
+    "            usable — supported_openai_params carries 'reasoning_effort' for",
+    "            every vLLM-served model including the embedding ones, and omits",
+    "            it for 'thinker', which does reason.",
+    "  OpenRouter honours the parameter and publishes accurate metadata.",
+    "            openai/gpt-oss-120b once declared 'none' here, which OpenRouter",
+    "            answers with '400 Reasoning is mandatory for this endpoint and",
+    "            cannot be disabled' — it broke every answer from that model.",
+    "",
+    "e-infra 'coder' and 'agentic' accept the parameter and return no trace at",
+    "any level (they are served with enable_thinking off), so they declare",
+    "nothing and get no control — same as a model that does not reason.",
+    "",
+    "The MLX-backed Nemotrons report no context length and we have not measured",
+    "one, so they deliberately have no context_window and fall back to the AI Ufal",
+    "provider default. Guessing high risks overflowing the served slot."
+  ],
+  "models": {
+    "mini": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["low", "medium", "high"],
+        "mandatory": true,
+        "note": "e-infra. Probed 2026-08-23: low/medium/high are honoured and the trace grows with them. 'none' is accepted but does not disable — it returns the same trace as omitting the parameter — so no off switch is offered. minimal/xhigh/max are a 400."
+      }
+    },
+    "gpt-oss-120b": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["low", "medium", "high"],
+        "mandatory": true,
+        "note": "e-infra. Same model and same behaviour as 'mini': 'none' is accepted and ignored, minimal/xhigh/max are a 400. Not to be confused with 'openai/gpt-oss-120b', which is the OpenRouter route to it and takes the nested 'reasoning' parameter."
+      }
+    },
+    "thinker": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra (deepseek). Probed 2026-08-23: 'none' really does turn it off. The other levels are all accepted but barely change the trace length, so the useful choice here is on or off."
+      }
+    },
+    "qwen3.5": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "low", "medium", "high"],
+        "note": "e-infra. Probed 2026-08-23: reasons at length unless asked not to (4k characters of trace on a one-sentence question), and 'none' turns it off. minimal/xhigh/max are a 400."
+      }
+    },
+    "glm-5.2": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra. Probed 2026-08-23: the whole vocabulary is accepted and 'none' turns it off, but trace length does not track the level in any consistent way."
+      }
+    },
+    "mistral-medium-3.5": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "high"],
+        "note": "e-infra. Probed 2026-08-23: 'reasoning_effort must be either \"none\" or \"high\"' — anything else is a 400, including the low/medium/max that the serving stack's own validator claims to accept. Off unless asked."
+      }
+    },
+    "command-a": {
+      "reasoning": {
+        "param": "reasoning_effort",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "note": "e-infra. Probed 2026-08-23: returns no trace at all until asked, then the same trace for every level above 'none'. The switch is real; the levels are not."
+      }
+    },
+    "LLM3.unsloth/Llama-3.3-70B-Instruct-GGUF:UD-Q6_K_XL": {
+      "context_window": 16000
+    },
+    "LLM3.unsloth/gpt-oss-120b-GGUF:UD-Q8_K_XL": {
+      "context_window": 65500,
+      "reasoning": {
+        "mandatory": true,
+        "note": "ai.ufal. Reasons always, returns reasoning_content. reasoning_effort is dropped by the gateway (the model self-reports 'Reasoning: medium' whatever we send, on /api, /api/v1 and /openai), so no control is offered. Upstream it would accept low/medium/high and cannot be turned off."
+      }
+    },
+    "LLM7.unsloth/gemma-4-12b-it-GGUF:UD-Q8_K_XL": {
+      "context_window": 262000
+    },
+    "LLM3.unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF:IQ4_XS": {
+      "context_window": 65500
+    },
+    "LLM3.unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q8_K_XL": {
+      "context_window": 65500,
+      "reasoning": {
+        "mandatory": true,
+        "note": "ai.ufal. Reasons always, returns reasoning_content — including when asked for 'off'. At temperature 0 all of off/low/medium/high/xhigh produce byte-identical output, so the gateway drops the parameter. Upstream Qwen3.6 would accept off/low/medium/high/xhigh."
+      }
+    },
+    "MAC2.mlx-community--NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-MXFP4": {
+      "reasoning": {
+        "mandatory": true,
+        "note": "ai.ufal. Reasons always, returns reasoning_content — 'off' still produced a full trace. Upstream Nemotron would accept off/low/medium/high."
+      }
+    },
+    "MAC2.mlx-community--Nemotron-3-Ultra-550B-A55B": {
+      "reasoning": {
+        "mandatory": true,
+        "note": "ai.ufal. Reasons always, returns reasoning_content; trace was identical for none/off/high."
+      }
+    },
+    "LLM6-2xRTX5000.gemma3:12b-it-qat": {
+      "context_window": 4000
+    },
+    "LLM1-A40.llama3.3:latest": {
+      "context_window": 4500
+    },
+    "LLM1-MI210.llama3.3:latest": {
+      "context_window": 20000
+    }
+  },
+  "provider_defaults": {
+    "AI Ufal": {
+      "context_window": 16000
+    },
+    "e-infra": {
+      "context_window": 60000,
+      "max_context_window": 262144
+    },
+    "OpenRouter": {
+      "context_window": 60000
+    }
+  }
+}

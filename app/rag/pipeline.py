@@ -11,6 +11,7 @@ from typing import Any
 from app.config import Settings
 from app.analytics import bind_context, current_context
 from app.models import ChatResponse, RetrievedChunk, Source
+from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.catalog import save_chunk_catalog
 from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
@@ -23,12 +24,28 @@ from app.rag.retrieval import HybridRetriever
 from app.rag.token_budget import (
     PromptBudgetConfig,
     conversation_history_tokens,
+    estimate_text_tokens,
     prepare_prompt_budget,
-    summarized_history,
+    truncate_text_to_token_limit,
 )
 from app.rag.vector_store import QdrantVectorStore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationContext:
+    """What one turn sends of the conversation, and what the client should drop.
+
+    ``folded_message_count`` is how many of the uploaded messages were folded
+    into ``summary`` on this turn. The client advances its own compaction marker
+    by that many so it stops uploading them.
+    """
+
+    history: list[dict[str, str]]
+    summary: str | None = None
+    folded_message_count: int = 0
+    warning: str | None = None
 
 
 @dataclass
@@ -122,6 +139,7 @@ class RAGPipeline:
                 api_key=provider_api_key(provider_id, provider_presets),
                 model=str(provider_config.get("default_model") or ""),
                 base_url=str(provider_config.get("base_url") or ""),
+                timeout=self.settings.llm_timeout_seconds,
             )
         return self._llm
 
@@ -468,6 +486,7 @@ class RAGPipeline:
         rewrite_query_for_retrieval: bool = False,
         retrieval_query_override: str | None = None,
         use_retrieval_query_for_answer: bool = False,
+        reasoning: dict[str, object] | None = None,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -481,15 +500,54 @@ class RAGPipeline:
             token_budget_safety_margin=token_budget_safety_margin,
             conversation_summary_trigger_tokens=conversation_summary_trigger_tokens,
         )
-        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+        if not use_retrieval_query_for_answer:
+            self.preflight_chat_prompt(
+                question=question,
+                length=length,
+                model=resolved_model,
+                budget_config=budget_config,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
+                system_prompt=system_prompt,
+                user_prompt_template=user_prompt_template,
+            )
+        elif retrieval_query_override is not None:
+            self.preflight_chat_prompt(
+                question=retrieval_query_override,
+                length=length,
+                model=resolved_model,
+                budget_config=budget_config,
+                placeholder_defs=placeholder_defs,
+                selections=selections,
+                system_prompt=system_prompt,
+                user_prompt_template=user_prompt_template,
+            )
+        conversation = self._resolve_conversation_context(
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=resolved_model,
+            length=length,
             budget_config=budget_config,
             api_key=llm_api_key,
             base_url=llm_base_url,
         )
         if retrieval_query_override is None:
+            rewrite_attempted = self.should_rewrite_query_for_retrieval(
+                question,
+                conversation_history=conversation_history or [],
+                enabled=rewrite_query_for_retrieval,
+                model=resolved_model,
+            )
+            rewrite_skip_reason = (
+                None
+                if rewrite_attempted
+                else self.query_rewrite_skip_reason(
+                    question,
+                    conversation_history=conversation_history or [],
+                    enabled=rewrite_query_for_retrieval,
+                    model=resolved_model,
+                )
+            )
             retrieval_query = self.rewrite_query_for_retrieval(
                 question,
                 conversation_history=conversation_history or [],
@@ -500,6 +558,8 @@ class RAGPipeline:
                 base_url=llm_base_url,
             )
         else:
+            rewrite_attempted = False
+            rewrite_skip_reason = None
             retrieval_query = _clean_retrieval_query(retrieval_query_override)
             if not retrieval_query:
                 raise ValueError("Retrieval query must not be empty.")
@@ -534,22 +594,27 @@ class RAGPipeline:
             config=budget_config,
             placeholder_defs=placeholder_defs,
             selections=selections,
-            conversation_history=effective_history,
+            conversation_history=conversation.history,
+            conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
         )
-        if summary_warning:
-            budget.warnings.append(summary_warning)
-        budget.conversation_summary_used = bool(effective_summary)
+        if conversation.warning:
+            budget.warnings.append(conversation.warning)
+        budget.conversation_summary_used = bool(conversation.summary)
         prompt_prepare_seconds = time.perf_counter() - prompt_prepare_started
         generation_started = time.perf_counter()
+        # Only the answering call carries the reasoning parameter: the query
+        # rewrite and the conversation summary are utility calls where reasoning
+        # would be paid for and thrown away.
         generation = self.llm.generate(
             budget.messages,
             model=resolved_model,
             api_key=llm_api_key,
             base_url=llm_base_url,
+            reasoning=reasoning,
         )
-        answer = generation.answer
+        answer = strip_model_source_list(generation.answer)
         generation_seconds = time.perf_counter() - generation_started
         upstream_model = generation.model or resolved_model
         elapsed = time.perf_counter() - started
@@ -566,6 +631,8 @@ class RAGPipeline:
             retrieval_query=retrieval_query,
             answer_question=answer_question,
             retrieval_query_was_rewritten=retrieval_query != question,
+            retrieval_query_rewrite_attempted=rewrite_attempted,
+            retrieval_query_rewrite_skip_reason=rewrite_skip_reason,
             sources=[_source_from_chunk(chunk) for chunk in budget.used_chunks],
             retrieved_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
             used_chunks=[_retrieved_chunk_from_record(chunk) for chunk in budget.used_chunks],
@@ -573,7 +640,9 @@ class RAGPipeline:
             baseline_chunks=[_retrieved_chunk_from_record(chunk) for chunk in baseline_retrieved],
             token_budget=budget.metadata(),
             chunk_budget_warnings=budget.warnings,
-            conversation_summary=effective_summary,
+            conversation_summary=conversation.summary,
+            conversation_folded_message_count=conversation.folded_message_count,
+            reasoning=generation.reasoning,
             model=resolved_model,
             upstream_model=upstream_model,
             response_time_seconds=round(elapsed, 3),
@@ -601,10 +670,11 @@ class RAGPipeline:
         budget_config: PromptBudgetConfig | None = None,
     ):
         resolved_config = budget_config or PromptBudgetConfig.from_settings(self.settings)
-        effective_history, effective_summary, summary_warning = self._resolve_conversation_context(
+        conversation = self._resolve_conversation_context(
             conversation_history or [],
             conversation_summary=conversation_summary,
             model=model,
+            length=length,
             budget_config=resolved_config,
             api_key=llm_api_key,
             base_url=llm_base_url,
@@ -617,14 +687,48 @@ class RAGPipeline:
             config=resolved_config,
             placeholder_defs=placeholder_defs,
             selections=selections,
-            conversation_history=effective_history,
+            conversation_history=conversation.history,
+            conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
         )
-        if summary_warning:
-            budget.warnings.append(summary_warning)
-        budget.conversation_summary_used = bool(effective_summary)
-        return budget, effective_summary
+        if conversation.warning:
+            budget.warnings.append(conversation.warning)
+        budget.conversation_summary_used = bool(conversation.summary)
+        return budget, conversation
+
+    def preflight_chat_prompt(
+        self,
+        *,
+        question: str,
+        length: str,
+        model: str,
+        budget_config: PromptBudgetConfig,
+        placeholder_defs: dict[str, Any] | None = None,
+        selections: dict[str, str] | None = None,
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
+    ) -> None:
+        """Reject a current prompt that cannot fit before doing any remote work.
+
+        Conversation history is intentionally excluded here. It may still fit
+        after the normal rolling-summary compaction. The final budget check in
+        ``build_chat_prompt`` validates that complete, possibly compacted prompt.
+        """
+
+        prepare_prompt_budget(
+            question=question,
+            retrieved_chunks=[],
+            length=length,
+            model=model,
+            config=budget_config,
+            placeholder_defs=placeholder_defs,
+            selections=selections,
+            conversation_history=[],
+            conversation_summary=None,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+        )
 
     def rewrite_query_for_retrieval(
         self,
@@ -638,7 +742,12 @@ class RAGPipeline:
         base_url: str | None,
     ) -> str:
         clean_question = question.strip()
-        if not enabled or not clean_question or not conversation_history:
+        if not self.should_rewrite_query_for_retrieval(
+            clean_question,
+            conversation_history=conversation_history,
+            enabled=enabled,
+            model=model,
+        ):
             return clean_question
 
         context_parts: list[str] = []
@@ -689,6 +798,50 @@ class RAGPipeline:
             return clean_question
         return rewritten
 
+    def should_rewrite_query_for_retrieval(
+        self,
+        question: str,
+        *,
+        conversation_history: list[dict[str, str]] | None,
+        enabled: bool,
+        model: str | None,
+    ) -> bool:
+        """Return whether a conversation message needs the extra LLM rewrite.
+
+        First turns are already standalone. Very long later turns are treated as
+        self-contained too: rewriting them duplicates a large input and can be
+        slower than the answer call itself. Retrieval still runs with the
+        original text when this returns false.
+        """
+
+        return self.query_rewrite_skip_reason(
+            question,
+            conversation_history=conversation_history,
+            enabled=enabled,
+            model=model,
+        ) is None
+
+    def query_rewrite_skip_reason(
+        self,
+        question: str,
+        *,
+        conversation_history: list[dict[str, str]] | None,
+        enabled: bool,
+        model: str | None,
+    ) -> str | None:
+        """Explain why the optional conversation query rewrite will not run."""
+
+        clean_question = question.strip()
+        if not enabled:
+            return "disabled"
+        if not clean_question:
+            return "empty_question"
+        if not conversation_history:
+            return "no_conversation_history"
+        if estimate_text_tokens(clean_question, model) >= self.settings.conversation_query_rewrite_max_tokens:
+            return "question_too_long"
+        return None
+
     def close(self) -> None:
         if self._vector_store is not None:
             logger.info("Closing vector store")
@@ -701,62 +854,173 @@ class RAGPipeline:
         *,
         conversation_summary: str | None,
         model: str,
+        length: str,
         budget_config: PromptBudgetConfig,
         api_key: str | None,
         base_url: str | None,
-    ) -> tuple[list[dict[str, str]], str | None, str | None]:
-        clean_summary = (conversation_summary or "").strip()
-        history_tokens = conversation_history_tokens(history, model)
-        if clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
-            return summarized_history(clean_summary, history), clean_summary, None
-        if not clean_summary and history_tokens < budget_config.conversation_summary_trigger_tokens:
-            return history, None, None
-        try:
-            summary = self._summarize_conversation(history, model=model, api_key=api_key, base_url=base_url)
-        except Exception as exc:
-            if clean_summary:
-                return (
-                    summarized_history(clean_summary, history),
-                    clean_summary,
-                    f"Conversation compression failed; the previous compressed summary was used instead: {exc}",
-                )
-            return history, None, f"Conversation compression failed; raw recent history was used instead: {exc}"
-        return summarized_history(summary, history), summary, None
+    ) -> ConversationContext:
+        """Decide what of the conversation goes into this turn's prompt.
 
-    def _summarize_conversation(
+        The live tail is compacted only when it crosses the adaptive token
+        trigger or the configured message-count trigger. Prompt packing pressure
+        alone never invokes the summariser. After compaction, the immediately
+        preceding complete turn is retained, followed by as many additional
+        recent complete turns as fit the token-aware target and six-message cap.
+        """
+
+        clean_summary = (conversation_summary or "").strip() or None
+        clean_history, to_fold, retained = self._conversation_compaction_plan(
+            history,
+            model=model,
+            length=length,
+            budget_config=budget_config,
+        )
+        if not to_fold:
+            return ConversationContext(history=clean_history, summary=clean_summary)
+
+        try:
+            summary = self._summarize_conversation(
+                to_fold,
+                previous_summary=clean_summary,
+                model=model,
+                target_tokens=budget_config.conversation_summary_target_tokens(length),
+                api_key=api_key,
+                base_url=base_url,
+            )
+        except Exception as exc:
+            # Compaction is an optimisation: on failure fall back to sending the
+            # tail as it is rather than losing the turn.
+            if clean_summary:
+                return ConversationContext(
+                    history=clean_history,
+                    summary=clean_summary,
+                    warning=(
+                        "Conversation compression failed; the previous compressed summary "
+                        f"was used instead: {exc}"
+                    ),
+                )
+            return ConversationContext(
+                history=clean_history,
+                summary=None,
+                warning=f"Conversation compression failed; raw recent history was used instead: {exc}",
+            )
+
+        return ConversationContext(
+            history=retained,
+            summary=summary,
+            folded_message_count=len(to_fold),
+        )
+
+    def conversation_compaction_needed(
         self,
         history: list[dict[str, str]],
         *,
         model: str,
+        length: str,
+        budget_config: PromptBudgetConfig,
+    ) -> bool:
+        """Whether resolving this live tail will make a summarisation call."""
+
+        _, to_fold, _ = self._conversation_compaction_plan(
+            history,
+            model=model,
+            length=length,
+            budget_config=budget_config,
+        )
+        return bool(to_fold)
+
+    def _conversation_compaction_plan(
+        self,
+        history: list[dict[str, str]],
+        *,
+        model: str,
+        length: str,
+        budget_config: PromptBudgetConfig,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
+        clean_history = [
+            {"role": turn.get("role", ""), "content": turn.get("content") or ""}
+            for turn in history
+            if turn.get("role") in {"user", "assistant"} and (turn.get("content") or "").strip()
+        ]
+        history_tokens = conversation_history_tokens(clean_history, model)
+        trigger_tokens = budget_config.effective_conversation_trigger_tokens(length)
+        if (
+            history_tokens <= trigger_tokens
+            and len(clean_history) <= budget_config.conversation_summary_trigger_messages
+        ):
+            return clean_history, [], clean_history
+
+        if len(clean_history) <= 2:
+            # The latest complete turn is deliberately verbatim even when it is
+            # unusually large; there is no older context that can be folded.
+            return clean_history, [], clean_history
+
+        max_keep = min(budget_config.conversation_recent_messages, 6, len(clean_history))
+        target_tokens = min(trigger_tokens // 4, max(1, history_tokens // 2))
+        keep_count = 2 if len(clean_history) >= 2 else 1
+        while keep_count + 2 <= max_keep:
+            candidate = clean_history[-(keep_count + 2) :]
+            if conversation_history_tokens(candidate, model) > target_tokens:
+                break
+            keep_count += 2
+
+        retained = clean_history[-keep_count:]
+        to_fold = clean_history[:-keep_count]
+        return clean_history, to_fold, retained
+
+    def _summarize_conversation(
+        self,
+        messages_to_fold: list[dict[str, str]],
+        *,
+        previous_summary: str | None,
+        model: str,
+        target_tokens: int,
         api_key: str | None,
         base_url: str | None,
     ) -> str:
+        """Fold `messages_to_fold` into `previous_summary` and return the result.
+
+        Incremental on purpose: the model sees the summary so far plus only the
+        turns being folded now, not the whole transcript. Cost stays flat as the
+        conversation grows, and nothing already folded is re-read.
+        """
+
         turns = []
-        for turn in history:
+        for turn in messages_to_fold:
             role = turn.get("role")
             content = (turn.get("content") or "").strip()
             if role in {"user", "assistant"} and content:
                 label = "Uživatel" if role == "user" else "Avatar"
                 turns.append(f"{label}: {content}")
+        sections = []
+        if previous_summary:
+            sections.append(f"Dosavadní shrnutí:\n{previous_summary}")
+        sections.append("Nové zprávy k zahrnutí:\n" + "\n\n".join(turns))
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "Compress the conversation for a RAG assistant. Preserve user preferences, unresolved "
-                    "references, named entities, constraints, and commitments from previous answers. Do not "
-                    "invent facts. Write a concise Czech summary unless the conversation is clearly in another language."
+                    "Compress the conversation for a RAG assistant. Rewrite the previous summary and the "
+                    "new messages into one coherent replacement summary. Do not append a new section to "
+                    "the previous summary. Remove repetition and outdated details, consolidate overlapping "
+                    "information, and keep everything from the previous summary that is still relevant. "
+                    "Preserve user preferences, unresolved references, named entities, constraints, and "
+                    "commitments from previous answers. Do not invent facts. Write a concise Czech summary "
+                    "unless the conversation is clearly in another language. Put the newest and most "
+                    "important information first so it survives the hard output limit. "
+                    f"Keep the merged summary below approximately {target_tokens} tokens."
                 ),
             },
             {
                 "role": "user",
-                "content": "\n\n".join(turns),
+                "content": "\n\n".join(sections),
             },
         ]
         context = current_context()
         manager = bind_context(context, purpose="conversation_summary") if context else nullcontext()
         with manager:
             generation = self.llm.generate(messages, model=model, api_key=api_key, base_url=base_url)
-        return generation.answer.strip()
+        return truncate_text_to_token_limit(generation.answer, target_tokens, model)
 
 
 def _retrieved_chunk_from_record(record: dict[str, Any]) -> RetrievedChunk:

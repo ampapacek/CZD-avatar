@@ -140,7 +140,10 @@ class AnalyticsEndpointTests(unittest.TestCase):
         real_client = httpx.Client(transport=httpx.MockTransport(stream_handler))
         with bind_context(context):
             with patch("app.rag.llm.httpx.Client", return_value=real_client):
-                self.assertEqual(list(client.stream_generate([{"role": "user", "content": "another secret"}])), ["token"])
+                self.assertEqual(
+                    list(client.stream_generate([{"role": "user", "content": "another secret"}])),
+                    [("answer", "token")],
+                )
         calls = [event for event in self.events() if event["event"] == "upstream_call"]
         self.assertEqual(len(calls), 2)
         self.assertEqual({event["streaming"] for event in calls}, {False, True})
@@ -149,6 +152,44 @@ class AnalyticsEndpointTests(unittest.TestCase):
         serialized = json.dumps(calls)
         for secret in ("secret prompt", "secret answer", "another secret", "server-secret-key"):
             self.assertNotIn(secret, serialized)
+
+    def test_blocking_chat_flattens_the_token_budget_into_the_turn_event(self):
+        # token_budget is a pydantic model; analytics splats it as kwargs, so a
+        # populated budget used to make every successful /chat return 500.
+        from app.models import ChatResponse, TokenBudgetMetadata
+
+        budget = TokenBudgetMetadata(
+            context_window_tokens=16000,
+            usable_input_tokens=12000,
+            reserved_output_tokens=4000,
+            estimated_non_source_tokens=300,
+            estimated_source_tokens=900,
+            used_chunk_count=3,
+            omitted_chunk_count=1,
+            trimmed_chunk_count=0,
+        )
+        chat = main.pipeline.chat
+        try:
+            main.pipeline.chat = lambda *_args, **_kwargs: ChatResponse(
+                answer="odpoved",
+                sources=[],
+                retrieved_chunks=[],
+                token_budget=budget,
+                model="test-model",
+                response_time_seconds=0.1,
+            )
+            response = self.client.post(
+                "/chat",
+                headers={"X-Turn-Id": "turn-budget"},
+                json={"question": "otazka", "wp_id": "WP1-historie", "top_k": 0},
+            )
+        finally:
+            main.pipeline.chat = chat
+        self.assertEqual(response.status_code, 200, response.text)
+        turn = next(event for event in self.events() if event.get("turn_id") == "turn-budget")
+        self.assertEqual(turn["status"], "ok")
+        self.assertEqual(turn["usable_input_tokens"], 12000)
+        self.assertEqual(turn["omitted_chunk_count"], 1)
 
     def test_chat_stream_context_survives_worker_context_changes(self):
         from app.rag.pipeline import RetrievalCandidates

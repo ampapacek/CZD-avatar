@@ -49,8 +49,13 @@ from app.models import (
     UnlockRequest,
     UnlockResponse,
 )
+from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.msearch import clear_collections_cache
-from app.rag.model_metadata import load_model_context_metadata
+from app.rag.model_metadata import (
+    ReasoningSupport,
+    load_model_metadata,
+    resolve_reasoning_support,
+)
 from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import reranker_model_available
 from app.rag.prompt_presets import (
@@ -77,14 +82,14 @@ from app.rag.placeholders import (
     save_placeholder,
 )
 from app.rag.llm_providers import (
-    available_llm_providers,
+    load_provider_configs,
     provider_default_model,
     provider_api_key,
     provider_preset,
     provider_public_models,
     resolve_llm_provider,
 )
-from app.rag.llm import validate_api_key
+from app.rag.llm import REASONING, validate_api_key
 from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
@@ -124,26 +129,36 @@ analytics = AnalyticsWriter(
     settings.analytics_dir,
     settings.analytics_instance_id,
 )
-model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
-provider_presets = available_llm_providers(
-    model_context_windows=model_context_windows,
-    provider_context_window_defaults=provider_context_window_defaults,
-)
+model_metadata = load_model_metadata(settings.model_metadata_path)
+provider_presets: list[dict[str, object]] = []
 default_provider = ""
 default_provider_preset: dict[str, object] = {}
 all_llm_models: list[str] = []
 default_model = ""
+# `data/models.json` plus whatever the providers' own catalogues added. Keyed by
+# model name across every provider, the same way the declared map always was: in
+# practice the names are provider-qualified (`openai/gpt-oss-120b` on OpenRouter
+# against `gpt-oss-120b` on e-infra), so they do not collide.
+model_reasoning: dict[str, ReasoningSupport] = {}
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
-    global model_context_windows, provider_context_window_defaults
+    global model_metadata, model_reasoning
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
-    model_context_windows, provider_context_window_defaults = load_model_context_metadata(settings.model_context_windows_path)
-    provider_presets = available_llm_providers(
+    model_metadata = load_model_metadata(settings.model_metadata_path)
+    provider_configs = load_provider_configs(
         force_model_refresh=force_model_refresh,
-        model_context_windows=model_context_windows,
-        provider_context_window_defaults=provider_context_window_defaults,
+        model_context_windows=model_metadata.context_windows,
+        provider_context_window_defaults=model_metadata.provider_context_windows,
+        provider_context_window_ceilings=model_metadata.provider_context_window_ceilings,
+        model_reasoning=model_metadata.reasoning,
     )
+    provider_presets = [provider.to_dict() for provider in provider_configs]
+    model_reasoning = {
+        model: support
+        for provider in provider_configs
+        for model, support in (provider.model_reasoning or {}).items()
+    }
     default_provider = resolve_llm_provider(settings.llm_provider, provider_presets)
     default_provider_preset = provider_preset(default_provider, provider_presets)
     provider_model_presets = _dedupe_preserve_order(
@@ -151,6 +166,26 @@ def _refresh_provider_state(force_model_refresh: bool = False) -> None:
     )
     default_model = provider_default_model(default_provider, provider_presets)
     all_llm_models = _dedupe_preserve_order(provider_model_presets)
+
+
+def _reasoning_payload(model: str | None, provider_id: str | None, effort: str | None) -> dict[str, object]:
+    """Request fragment for the model's reasoning setting, or {} to send nothing.
+
+    An effort the model does not declare is dropped rather than forwarded: a
+    stale client or a hand-made request must not be able to put an arbitrary
+    value into the upstream payload.
+    """
+
+    label = str(provider_preset(provider_id or "", provider_presets).get("label") or "")
+    support = resolve_reasoning_support(
+        model,
+        provider_label=label,
+        model_reasoning=model_reasoning,
+        provider_reasoning_defaults=model_metadata.provider_reasoning,
+    )
+    if support is None:
+        return {}
+    return support.payload(effort)
 
 
 def _llm_settings_payload() -> dict[str, object]:
@@ -162,8 +197,12 @@ def _llm_settings_payload() -> dict[str, object]:
         "llm_providers": provider_presets,
         "model_presets": selected_provider["model_presets"],
         "all_model_presets": all_llm_models,
-        "model_context_windows": model_context_windows,
-        "provider_context_window_defaults": provider_context_window_defaults,
+        "model_context_windows": model_metadata.context_windows,
+        "provider_context_window_defaults": model_metadata.provider_context_windows,
+        "model_reasoning": {name: support.as_dict() for name, support in model_reasoning.items()},
+        "provider_reasoning_defaults": {
+            name: support.as_dict() for name, support in model_metadata.provider_reasoning.items()
+        },
         "llm_policy": {
             "provider": default_provider,
             "providers": provider_presets,
@@ -353,6 +392,8 @@ def get_public_settings(request: Request) -> dict[str, object]:
             "min_prompt_chunks": settings.min_prompt_chunks,
             "token_budget_safety_margin": settings.token_budget_safety_margin,
             "conversation_summary_trigger_tokens": settings.conversation_summary_trigger_tokens,
+            "conversation_summary_trigger_messages": settings.conversation_summary_trigger_messages,
+            "conversation_recent_messages": settings.conversation_recent_messages,
         },
         "msearch_defaults": {
             "collection": settings.msearch_collection,
@@ -1270,11 +1311,15 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
             rewrite_query_for_retrieval=request.rewrite_query_for_retrieval,
             retrieval_query_override=request.retrieval_query,
                 use_retrieval_query_for_answer=request.use_retrieval_query_for_answer,
+                reasoning=_reasoning_payload(resolved_model, resolved_provider, request.reasoning_effort),
             )
-        budget = response.token_budget or {}
+        # A pydantic model, not a mapping — analytics splats it as kwargs.
+        budget = response.token_budget.model_dump() if response.token_budget else {}
         event_fields = {
             **fields,
             "retrieval_query_was_rewritten": response.retrieval_query_was_rewritten,
+            "retrieval_query_rewrite_attempted": response.retrieval_query_rewrite_attempted,
+            "retrieval_query_rewrite_skip_reason": response.retrieval_query_rewrite_skip_reason,
             "upstream_model": response.upstream_model,
         }
         analytics.event(
@@ -1337,7 +1382,51 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            budget_config = PromptBudgetConfig.from_settings(
+                settings,
+                context_window_tokens=request.context_window_tokens,
+                output_token_budget_short=request.output_token_budget_short,
+                output_token_budget_medium=request.output_token_budget_medium,
+                output_token_budget_long=request.output_token_budget_long,
+                min_prompt_chunks=request.min_prompt_chunks,
+                token_budget_safety_margin=request.token_budget_safety_margin,
+                conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
+            )
+            preflight_question = (
+                request.retrieval_query
+                if request.use_retrieval_query_for_answer and request.retrieval_query is not None
+                else request.question
+            )
+            if not request.use_retrieval_query_for_answer or request.retrieval_query is not None:
+                pipeline.preflight_chat_prompt(
+                    question=preflight_question,
+                    length=length,
+                    model=resolved_model,
+                    budget_config=budget_config,
+                    placeholder_defs=placeholder_defs,
+                    selections=selections,
+                    system_prompt=request.system_prompt,
+                    user_prompt_template=request.user_prompt_template,
+                )
             if request.retrieval_query is None:
+                rewrite_attempted = pipeline.should_rewrite_query_for_retrieval(
+                    request.question,
+                    conversation_history=request.conversation_history,
+                    enabled=request.rewrite_query_for_retrieval,
+                    model=resolved_model,
+                )
+                rewrite_skip_reason = (
+                    None
+                    if rewrite_attempted
+                    else pipeline.query_rewrite_skip_reason(
+                        request.question,
+                        conversation_history=request.conversation_history,
+                        enabled=request.rewrite_query_for_retrieval,
+                        model=resolved_model,
+                    )
+                )
+                if rewrite_attempted:
+                    yield _sse_event("status", {"phase": "query_rewrite"})
                 with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="query_rewrite"):
                     retrieval_query = pipeline.rewrite_query_for_retrieval(
                         request.question,
@@ -1348,7 +1437,10 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                         api_key=resolved_api_key,
                         base_url=resolved_base_url,
                     )
+                yield _sse_event("status", {"phase": "retrieval"})
             else:
+                rewrite_attempted = False
+                rewrite_skip_reason = None
                 retrieval_query = _clean_transformed_query(request.retrieval_query)
                 if not retrieval_query:
                     raise HTTPException(status_code=400, detail="Vyhledávací dotaz nesmí být prázdný.")
@@ -1390,6 +1482,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                         "retrieval_query": retrieval_query,
                         "answer_question": answer_question,
                         "retrieval_query_was_rewritten": retrieval_query != request.question,
+                        "retrieval_query_rewrite_attempted": rewrite_attempted,
+                        "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                         "retrieved_chunks": baseline_payload,
                         "sources": [_serialize_source(chunk) for chunk in candidates.baseline],
                     },
@@ -1413,18 +1507,15 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     retrieved, rerank_seconds = event[1], event[2]
             rerank_ms = ms(rerank_seconds) if candidates.rerank_active else None
             prompt_started = time.perf_counter()
-            budget_config = PromptBudgetConfig.from_settings(
-                settings,
-                context_window_tokens=request.context_window_tokens,
-                output_token_budget_short=request.output_token_budget_short,
-                output_token_budget_medium=request.output_token_budget_medium,
-                output_token_budget_long=request.output_token_budget_long,
-                min_prompt_chunks=request.min_prompt_chunks,
-                token_budget_safety_margin=request.token_budget_safety_margin,
-                conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
-            )
+            if pipeline.conversation_compaction_needed(
+                request.conversation_history,
+                model=resolved_model,
+                length=length,
+                budget_config=budget_config,
+            ):
+                yield _sse_event("status", {"phase": "conversation_compaction"})
             with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="conversation_summary"):
-                budget, conversation_summary = pipeline.build_chat_prompt(
+                budget, conversation = pipeline.build_chat_prompt(
                     question=answer_question,
                 retrieved=retrieved,
                 length=length,
@@ -1449,6 +1540,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "retrieval_query": retrieval_query,
                     "answer_question": answer_question,
                     "retrieval_query_was_rewritten": retrieval_query != request.question,
+                    "retrieval_query_rewrite_attempted": rewrite_attempted,
+                    "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                     "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                     "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
@@ -1456,7 +1549,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                     "token_budget": budget.metadata(),
                     "chunk_budget_warnings": budget.warnings,
-                    "conversation_summary": conversation_summary,
+                    "conversation_summary": conversation.summary,
+                    "conversation_folded_message_count": conversation.folded_message_count,
                 },
             )
             answer_parts: list[str] = []
@@ -1468,31 +1562,49 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     model=resolved_model,
                     api_key=resolved_api_key,
                     base_url=resolved_base_url,
+                    reasoning=_reasoning_payload(resolved_model, resolved_provider, request.reasoning_effort),
                 )
             # Starlette advances sync response iterators in a worker thread and
             # may resume each yield in a different copied Context.  The stream
             # captures the analytics context above, so do not keep a ContextVar
             # token open while yielding SSE events.
-            for token in stream:
-                if first_token_at is None and token:
+            for kind, text in stream:
+                if kind == REASONING:
+                    # A separate event, so the trace can be shown as it is
+                    # written without ever being mistaken for the answer. Note
+                    # that it deliberately does not start the TTFT clock: a
+                    # reasoning model sends its whole trace first, and counting
+                    # that as "time to first token" would report a model as
+                    # faster the longer it thinks.
+                    yield _sse_event("reasoning", {"text": text})
+                    continue
+                if first_token_at is None and text:
                     first_token_at = time.perf_counter()
                     ttft_ms = ms(first_token_at - generation_started)
-                answer_parts.append(token)
-                answer += token
-                yield _sse_event("token", {"text": token})
+                answer_parts.append(text)
+                answer += text
+                yield _sse_event("token", {"text": text})
 
             generation_seconds = time.perf_counter() - generation_started
-            answer = answer.strip()
+            # Tokens went out raw so the client could render them as they
+            # arrived; the stored/replayed answer is the cleaned one.
+            answer = strip_model_source_list(answer)
+            # The whole trace, for history and for a client that missed the
+            # deltas (a reconnect, or one that does not handle the event).
+            reasoning_text = (getattr(stream, "reasoning_text", "") or "").strip()
             if first_token_at is not None:
                 token_stream_ms = ms(time.perf_counter() - first_token_at)
             elapsed = time.perf_counter() - started
             upstream_model = getattr(stream, "upstream_model", None) or resolved_model
             response = {
                 "answer": answer,
+                "reasoning": reasoning_text,
                 "original_question": request.question,
                 "retrieval_query": retrieval_query,
                 "answer_question": answer_question,
                 "retrieval_query_was_rewritten": retrieval_query != request.question,
+                "retrieval_query_rewrite_attempted": rewrite_attempted,
+                "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
                 "sources": [_serialize_source(chunk) for chunk in budget.used_chunks],
                 "retrieved_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
                 "used_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.used_chunks],
@@ -1500,7 +1612,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "baseline_chunks": baseline_payload,
                 "token_budget": budget.metadata(),
                 "chunk_budget_warnings": budget.warnings,
-                "conversation_summary": conversation_summary,
+                "conversation_summary": conversation.summary,
+                "conversation_folded_message_count": conversation.folded_message_count,
                 "model": resolved_model,
                 "upstream_model": upstream_model,
                 "response_time_seconds": round(elapsed, 3),
@@ -1521,6 +1634,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 **fields,
                 "upstream_model": upstream_model,
                 "retrieval_query_was_rewritten": retrieval_query != request.question,
+                "retrieval_query_rewrite_attempted": rewrite_attempted,
+                "retrieval_query_rewrite_skip_reason": rewrite_skip_reason,
             }
             analytics.event(
                 "turn",

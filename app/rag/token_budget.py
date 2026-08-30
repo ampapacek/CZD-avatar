@@ -14,6 +14,10 @@ except Exception:  # pragma: no cover - exercised only when dependency is unavai
     tiktoken = None
 
 
+DEFAULT_CONVERSATION_RECENT_MESSAGES = 6
+DEFAULT_CONVERSATION_SUMMARY_TRIGGER_MESSAGES = 16
+
+
 class PromptBudgetError(RuntimeError):
     """Raised when required non-source prompt content cannot fit the context window."""
 
@@ -54,6 +58,10 @@ class PromptBudgetConfig:
     min_prompt_chunks: int
     token_budget_safety_margin: float
     conversation_summary_trigger_tokens: int
+    # Defaults so callers that build a config by hand (tests, scripts) do not
+    # have to know about compaction; `from_settings` always fills them in.
+    conversation_recent_messages: int = DEFAULT_CONVERSATION_RECENT_MESSAGES
+    conversation_summary_trigger_messages: int = DEFAULT_CONVERSATION_SUMMARY_TRIGGER_MESSAGES
 
     @classmethod
     def from_settings(
@@ -67,6 +75,8 @@ class PromptBudgetConfig:
         min_prompt_chunks: int | None = None,
         token_budget_safety_margin: float | None = None,
         conversation_summary_trigger_tokens: int | None = None,
+        conversation_recent_messages: int | None = None,
+        conversation_summary_trigger_messages: int | None = None,
     ) -> "PromptBudgetConfig":
         return cls(
             context_window_tokens=context_window_tokens or settings.context_window_tokens,
@@ -82,6 +92,12 @@ class PromptBudgetConfig:
             conversation_summary_trigger_tokens=(
                 conversation_summary_trigger_tokens or settings.conversation_summary_trigger_tokens
             ),
+            conversation_recent_messages=(
+                conversation_recent_messages or settings.conversation_recent_messages
+            ),
+            conversation_summary_trigger_messages=(
+                conversation_summary_trigger_messages or settings.conversation_summary_trigger_messages
+            ),
         )
 
     def output_budget_for_length(self, length: str) -> int:
@@ -95,6 +111,13 @@ class PromptBudgetConfig:
         input_budget = self.context_window_tokens - self.output_budget_for_length(length)
         return max(0, math.floor(input_budget * (1 - self.token_budget_safety_margin)))
 
+    def effective_conversation_trigger_tokens(self, length: str) -> int:
+        adaptive = 250 + math.floor(self.usable_input_tokens(length) * 0.25)
+        return min(self.conversation_summary_trigger_tokens, adaptive)
+
+    def conversation_summary_target_tokens(self, length: str) -> int:
+        return min(768, max(256, self.effective_conversation_trigger_tokens(length) // 8))
+
 
 @dataclass(slots=True)
 class PromptBudgetResult:
@@ -106,20 +129,46 @@ class PromptBudgetResult:
     usable_input_tokens: int = 0
     reserved_output_tokens: int = 0
     estimated_non_source_tokens: int = 0
+    estimated_retrieved_source_tokens: int = 0
     estimated_source_tokens: int = 0
     estimated_conversation_history_tokens: int = 0
+    conversation_history_message_count: int = 0
+    conversation_history_used_message_count: int = 0
+    conversation_history_omitted_message_count: int = 0
+    effective_conversation_trigger_tokens: int = 0
+    conversation_summary_trigger_messages: int = DEFAULT_CONVERSATION_SUMMARY_TRIGGER_MESSAGES
     estimated_total_input_tokens: int = 0
     trimmed_chunk_count: int = 0
     conversation_summary_used: bool = False
+    safety_margin_ratio: float = 0.0
+
+    @property
+    def safety_margin_tokens(self) -> int:
+        """The safety margin as the residual of the subtraction the UI shows.
+
+        Derived from the three numbers already reported rather than from
+        `token_budget_safety_margin`, so the displayed column adds up by
+        construction even if the flooring or the formula changes.
+        """
+
+        return max(0, self.context_window_tokens - self.reserved_output_tokens - self.usable_input_tokens)
 
     def metadata(self) -> dict[str, object]:
         return {
             "context_window_tokens": self.context_window_tokens,
             "usable_input_tokens": self.usable_input_tokens,
             "reserved_output_tokens": self.reserved_output_tokens,
+            "safety_margin_tokens": self.safety_margin_tokens,
+            "safety_margin_ratio": self.safety_margin_ratio,
             "estimated_non_source_tokens": self.estimated_non_source_tokens,
+            "estimated_retrieved_source_tokens": self.estimated_retrieved_source_tokens,
             "estimated_source_tokens": self.estimated_source_tokens,
             "estimated_conversation_history_tokens": self.estimated_conversation_history_tokens,
+            "conversation_history_message_count": self.conversation_history_message_count,
+            "conversation_history_used_message_count": self.conversation_history_used_message_count,
+            "conversation_history_omitted_message_count": self.conversation_history_omitted_message_count,
+            "effective_conversation_trigger_tokens": self.effective_conversation_trigger_tokens,
+            "conversation_summary_trigger_messages": self.conversation_summary_trigger_messages,
             "estimated_total_input_tokens": self.estimated_total_input_tokens,
             "used_chunk_count": len(self.used_chunks),
             "omitted_chunk_count": len(self.omitted_chunks),
@@ -147,6 +196,78 @@ def estimate_messages_tokens(messages: list[dict[str, str]], model: str | None =
     return total
 
 
+def truncate_text_to_token_limit(text: str, limit: int, model: str | None = None) -> str:
+    """Return a readable prefix whose estimated size does not exceed ``limit``."""
+
+    clean = text.strip()
+    if not clean or limit <= 0:
+        return ""
+    if estimate_text_tokens(clean, model) <= limit:
+        return clean
+
+    suffix = "…"
+    low, high = 0, len(clean)
+    while low < high:
+        middle = (low + high + 1) // 2
+        candidate = clean[:middle].rstrip() + suffix
+        if estimate_text_tokens(candidate, model) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+
+    candidate = clean[:low].rstrip()
+    # Prefer a nearby paragraph or sentence boundary so the enforced cap does
+    # not normally leave the summary halfway through a statement.
+    boundaries = [
+        candidate.rfind("\n\n"),
+        candidate.rfind(". "),
+        candidate.rfind("! "),
+        candidate.rfind("? "),
+        candidate.rfind("; "),
+    ]
+    boundary = max(boundaries)
+    if boundary >= math.floor(len(candidate) * 0.6):
+        candidate = candidate[: boundary + 1].rstrip()
+    result = candidate + suffix
+    while result and estimate_text_tokens(result, model) > limit:
+        candidate = candidate[:-1].rstrip()
+        result = candidate + suffix
+    return result
+
+
+def _clean_history_messages(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    return [
+        {"role": turn.get("role", ""), "content": (turn.get("content") or "").strip()}
+        for turn in (history or [])
+        if turn.get("role") in {"user", "assistant"} and (turn.get("content") or "").strip()
+    ]
+
+
+def _last_complete_turn(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    if len(history) >= 2 and history[-2]["role"] == "user" and history[-1]["role"] == "assistant":
+        return history[-2:]
+    return history[-1:]
+
+
+def _history_turns_newest_first(history: list[dict[str, str]]) -> list[list[dict[str, str]]]:
+    """Return chronological message blocks ordered from newest to oldest."""
+
+    turns: list[list[dict[str, str]]] = []
+    cursor = len(history)
+    while cursor:
+        if (
+            cursor >= 2
+            and history[cursor - 2]["role"] == "user"
+            and history[cursor - 1]["role"] == "assistant"
+        ):
+            start = cursor - 2
+        else:
+            start = cursor - 1
+        turns.append(history[start:cursor])
+        cursor = start
+    return turns
+
+
 def prepare_prompt_budget(
     *,
     question: str,
@@ -157,33 +278,48 @@ def prepare_prompt_budget(
     placeholder_defs: dict[str, "PlaceholderDef"] | None = None,
     selections: dict[str, str] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
+    conversation_summary: str | None = None,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
 ) -> PromptBudgetResult:
-    empty_context = ""
-    non_source_messages = build_messages(
-        question,
-        [],
-        placeholder_defs,
-        selections,
-        conversation_history=conversation_history,
-        system_prompt=system_prompt,
-        user_prompt_template=user_prompt_template,
-        context_text=empty_context,
-    )
     usable_input = config.usable_input_tokens(length)
     reserved_output = config.output_budget_for_length(length)
-    non_source_tokens = estimate_messages_tokens(non_source_messages, model)
-    history_tokens = estimate_history_tokens_for_prompt(conversation_history, model)
-    if non_source_tokens > usable_input:
-        over_by = non_source_tokens - usable_input
+    clean_history = _clean_history_messages(conversation_history)
+    last_turn = _last_complete_turn(clean_history)
+
+    def prompt_messages(
+        chunks: list[dict[str, Any]],
+        history: list[dict[str, str]],
+        *,
+        summary: str | None = conversation_summary,
+    ) -> list[dict[str, str]]:
+        return build_messages(
+            question,
+            chunks,
+            placeholder_defs,
+            selections,
+            conversation_history=history,
+            conversation_summary=summary,
+            history_limit=len(history),
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+            context_text=format_context(chunks),
+        )
+
+    # The summary and immediately preceding complete turn are required context.
+    # Older raw turns and non-minimum chunks compete for the remaining space in
+    # the explicit order documented below.
+    required_non_source_messages = prompt_messages([], last_turn)
+    required_non_source_tokens = estimate_messages_tokens(required_non_source_messages, model)
+    if required_non_source_tokens > usable_input:
+        over_by = required_non_source_tokens - usable_input
         raise PromptBudgetError(
             (
                 "Prompt is too long before any retrieved sources can be added. "
                 f"Configured context window: {config.context_window_tokens} tokens. "
                 f"Reserved answer budget: {reserved_output} tokens. "
                 f"Usable input budget after safety margin: {usable_input} tokens. "
-                f"Current prompt without sources: about {non_source_tokens} tokens, "
+                f"Current prompt without sources: about {required_non_source_tokens} tokens, "
                 f"which is {over_by} tokens over the limit. "
                 "Shorten the system prompt, custom instructions, conversation, or question; "
                 "choose a larger-context model; or increase the context window setting."
@@ -191,31 +327,63 @@ def prepare_prompt_budget(
             context_window_tokens=config.context_window_tokens,
             usable_input_tokens=usable_input,
             reserved_output_tokens=reserved_output,
-            estimated_non_source_tokens=non_source_tokens,
+            estimated_non_source_tokens=required_non_source_tokens,
             over_by_tokens=over_by,
         )
 
-    source_budget = max(0, usable_input - non_source_tokens)
-    used_chunks, omitted_chunks, warnings = _fit_chunks(
+    # Packing priority:
+    #   1. configured minimum chunks (trimmed when needed),
+    #   2. summary + last complete turn (already reserved above),
+    #   3. every additional chunk except the final lowest-ranked one,
+    #   4. older complete conversation turns, newest first,
+    #   5. the final lowest-ranked chunk.
+    required_count = min(max(config.min_prompt_chunks, 0), len(retrieved_chunks))
+    source_budget = max(0, usable_input - required_non_source_tokens)
+    required_chunks, _, warnings = _fit_chunks(
         question=question,
-        chunks=retrieved_chunks,
+        chunks=retrieved_chunks[:required_count],
         source_budget=source_budget,
-        min_prompt_chunks=config.min_prompt_chunks,
+        min_prompt_chunks=required_count,
         model=model,
     )
-    context_text = format_context(used_chunks)
-    messages = build_messages(
-        question,
-        used_chunks,
-        placeholder_defs,
-        selections,
-        conversation_history=conversation_history,
-        system_prompt=system_prompt,
-        user_prompt_template=user_prompt_template,
-        context_text=context_text,
-    )
+    used_chunks = list(required_chunks)
+    selected_history = list(last_turn)
+
+    deferred_last_index = len(retrieved_chunks) - 1 if len(retrieved_chunks) > required_count else None
+    additional_end = deferred_last_index if deferred_last_index is not None else len(retrieved_chunks)
+    for chunk in retrieved_chunks[required_count:additional_end]:
+        candidate = [*used_chunks, _mark_chunk(chunk, "used")]
+        if estimate_messages_tokens(prompt_messages(candidate, selected_history), model) > usable_input:
+            break
+        used_chunks = candidate
+
+    older_history = clean_history[: len(clean_history) - len(last_turn)] if last_turn else clean_history
+    for turn in _history_turns_newest_first(older_history):
+        candidate_history = [*turn, *selected_history]
+        if estimate_messages_tokens(prompt_messages(used_chunks, candidate_history), model) > usable_input:
+            break
+        selected_history = candidate_history
+
+    if deferred_last_index is not None:
+        last_chunk = _mark_chunk(retrieved_chunks[deferred_last_index], "used")
+        candidate = [*used_chunks, last_chunk]
+        if estimate_messages_tokens(prompt_messages(candidate, selected_history), model) <= usable_input:
+            used_chunks = candidate
+
+    messages = prompt_messages(used_chunks, selected_history)
+    non_source_messages = prompt_messages([], selected_history)
+    non_source_tokens = estimate_messages_tokens(non_source_messages, model)
+    all_source_messages = prompt_messages(retrieved_chunks, selected_history)
+    retrieved_source_tokens = max(0, estimate_messages_tokens(all_source_messages, model) - non_source_tokens)
     source_tokens = max(0, estimate_messages_tokens(messages, model) - non_source_tokens)
     total_input_tokens = non_source_tokens + source_tokens
+    history_tokens = conversation_history_tokens(selected_history, model)
+    used_ids = {chunk.get("chunk_id") for chunk in used_chunks}
+    omitted_chunks = [
+        _mark_chunk(chunk, "omitted")
+        for chunk in retrieved_chunks
+        if chunk.get("chunk_id") not in used_ids
+    ]
     trimmed_count = sum(1 for chunk in used_chunks if chunk.get("metadata", {}).get("budget_status") == "trimmed")
     if omitted_chunks:
         warnings.append(f"Kvůli limitu kontextu nebylo modelu posláno {len(omitted_chunks)} nalezených chunků.")
@@ -223,7 +391,11 @@ def prepare_prompt_budget(
         warnings.append(f"Před odesláním modelu bylo zkráceno {trimmed_count} chunků.")
     if retrieved_chunks and not used_chunks:
         warnings.append("Do zbývajícího kontextového limitu se nevešel žádný nalezený chunk; model odpověděl bez zdrojů.")
-
+    omitted_history_count = len(clean_history) - len(selected_history)
+    if omitted_history_count:
+        warnings.append(
+            f"Kvůli limitu kontextu nebylo modelu posláno {omitted_history_count} starších zpráv konverzace."
+        )
     return PromptBudgetResult(
         messages=messages,
         used_chunks=used_chunks,
@@ -233,22 +405,17 @@ def prepare_prompt_budget(
         usable_input_tokens=usable_input,
         reserved_output_tokens=reserved_output,
         estimated_non_source_tokens=non_source_tokens,
+        estimated_retrieved_source_tokens=retrieved_source_tokens,
         estimated_source_tokens=source_tokens,
         estimated_conversation_history_tokens=history_tokens,
+        conversation_history_message_count=len(clean_history),
+        conversation_history_used_message_count=len(selected_history),
+        conversation_history_omitted_message_count=omitted_history_count,
+        effective_conversation_trigger_tokens=config.effective_conversation_trigger_tokens(length),
+        conversation_summary_trigger_messages=config.conversation_summary_trigger_messages,
         estimated_total_input_tokens=total_input_tokens,
         trimmed_chunk_count=trimmed_count,
-    )
-
-
-def estimate_history_tokens_for_prompt(history: list[dict[str, str]] | None, model: str | None = None) -> int:
-    messages = _history_messages_for_prompt(history)
-    if not messages:
-        return 0
-    return sum(
-        4
-        + estimate_text_tokens(message["role"], model)
-        + estimate_text_tokens(message["content"], model)
-        for message in messages
+        safety_margin_ratio=config.token_budget_safety_margin,
     )
 
 
@@ -259,32 +426,6 @@ def conversation_history_tokens(history: list[dict[str, str]] | None, model: str
         if turn.get("role") in {"user", "assistant"} and (turn.get("content") or "").strip()
     ]
     return estimate_messages_tokens(messages, model) if messages else 0
-
-
-def summarized_history(summary: str, history: list[dict[str, str]] | None, recent_turns: int = 6) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
-    clean_summary = summary.strip()
-    if clean_summary:
-        result.append(
-            {
-                "role": "assistant",
-                "content": f"Shrnutí předchozí konverzace pro navazující odpověď:\n{clean_summary}",
-            }
-        )
-    result.extend((history or [])[-recent_turns:])
-    return result
-
-
-def _history_messages_for_prompt(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
-    messages = []
-    for turn in (history or [])[-8:]:
-        role = turn.get("role")
-        content = (turn.get("content") or "").strip()
-        if role in {"user", "assistant"} and content:
-            messages.append({"role": role, "content": content})
-    return messages
-
-
 def _fit_chunks(
     *,
     question: str,

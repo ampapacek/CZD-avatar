@@ -11,6 +11,10 @@ from typing import Any
 # from request data; ``{current_date}`` is the server-local date.
 SYSTEM_PLACEHOLDERS = frozenset({"question", "retrieved_snippets", "current_date"})
 
+# Fallback for direct callers. The budget-aware conversation path supplies its
+# selected history explicitly and is not constrained by this value.
+DEFAULT_CONVERSATION_PROMPT_MESSAGES = 16
+
 
 @dataclass(frozen=True)
 class OptionDef:
@@ -100,7 +104,7 @@ Forma odpovědi:
 - Zvol přirozenou strukturu podle otázky.
 - Pokud cituješ nalezený kontext, používej značky uvedené v kontextu jako markdownové poznámky pod čarou ve tvaru [^Z1], [^Z2] atd. Poznámku dávej vždy až za interpunkci, bez mezery mezi interpunkcí a značkou, např. věta končí tečkou.[^Z1] nebo vsuvka končí čárkou,[^Z2] a text pokračuje. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. tvrzení podporuje více zdrojů.[^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5].
 - Zmiňuj pouze zdroje, které v odpovědi skutečně používáš.
-- Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů. Přehled zdrojů vytvoří rozhraní samo.
+- Nevytvářej na konci samostatný seznam "Použité zdroje" ani jiný vlastní závěrečný seznam zdrojů a nepiš ani definiční řádky poznámek pod čarou ve tvaru "[^Z1]: ...". Používej pouze značky [^Z1] v textu; přehled zdrojů vytvoří rozhraní samo.
 - Neuzavírej odpověď nabídkami typu "Pokud chceš..." nebo podobnými dodatky. Odpověz přímo a přirozeně.
 """.strip()
 
@@ -124,6 +128,8 @@ def build_messages(
     placeholder_defs: dict[str, PlaceholderDef] | None = None,
     selections: dict[str, str] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
+    conversation_summary: str | None = None,
+    history_limit: int = DEFAULT_CONVERSATION_PROMPT_MESSAGES,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
     context_text: str | None = None,
@@ -150,7 +156,17 @@ def build_messages(
     )
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-    for turn in (conversation_history or [])[-8:]:
+    # The rolling summary stands for every turn already folded away, so it goes
+    # in ahead of the history and is never subject to `history_limit`.
+    clean_summary = (conversation_summary or "").strip()
+    if clean_summary:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": f"Shrnutí předchozí konverzace pro navazující odpověď:\n{clean_summary}",
+            }
+        )
+    for turn in (conversation_history or [])[-history_limit:]:
         role = turn.get("role")
         content = (turn.get("content") or "").strip()
         if role not in {"user", "assistant"} or not content:
