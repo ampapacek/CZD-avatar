@@ -84,6 +84,7 @@ describe("token budget presentation", () => {
   });
 
   it("maps the streamed preparation phase to visible Czech copy", () => {
+    expect(requestStatusMessage("thinking")).toBe("Přemýšlím…");
     expect(requestStatusMessage("query_rewrite")).toBe("Připravuji vyhledávací dotaz…");
     expect(requestStatusMessage("retrieval")).toBe("Vyhledávám zdroje…");
     expect(requestStatusMessage("conversation_compaction")).toBe("Komprimuji starší část konverzace…");

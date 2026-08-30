@@ -158,6 +158,7 @@ const conversationDialog = document.querySelector("#conversationDialog");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
+const conversationMessageList = document.querySelector("#conversationMessageList");
 const conversationSources = document.querySelector("#conversationSources");
 const conversationRetrievalInfo = document.querySelector("#conversationRetrievalInfo");
 const conversationRewriteQuery = document.querySelector("#conversationRewriteQuery");
@@ -2698,6 +2699,17 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
   let donePayload = null;
+  let firstOutputPainted = false;
+
+  const yieldAfterFirstOutput = async () => {
+    if (firstOutputPainted) {
+      return;
+    }
+    firstOutputPainted = true;
+    // If the gateway flushes several SSE events together, let the browser paint
+    // the first reasoning/answer update before the final event is processed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
 
   while (true) {
     const { value, done } = await reader.read();
@@ -2719,8 +2731,10 @@ async function streamChatWithHandlers(payload, handlers = {}, { signal, turnId =
         handlers.onSources?.(event.data);
       } else if (event.event === "reasoning") {
         handlers.onReasoning?.(event.data.text || "", event.data);
+        await yieldAfterFirstOutput();
       } else if (event.event === "token") {
         handlers.onToken?.(event.data.text || "", event.data);
+        await yieldAfterFirstOutput();
       } else if (event.event === "done") {
         donePayload = event.data;
         handlers.onDone?.(donePayload);
@@ -6055,10 +6069,10 @@ function renderConversationDetail(conversation) {
   `;
 
   if (!messages.length) {
-    conversationMessages.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
+    conversationMessageList.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
     const latestAssistantIndex = messages.lastIndexOf(latestAssistant);
-    conversationMessages.innerHTML = messages
+    conversationMessageList.innerHTML = messages
       .map((message, index) =>
         renderConversationMessage(
           message,
@@ -6279,6 +6293,17 @@ function renderConversationContextStatus(message, conversationSummary = "") {
 // In-flight conversation request, aborted by the conversation cancel button.
 let activeConversationController = null;
 
+function setConversationRequestStatus(message, { error = false } = {}) {
+  if (!conversationRequestStatus) {
+    return;
+  }
+  conversationRequestStatus.textContent = message || "";
+  conversationRequestStatus.classList.toggle("error", error);
+  if (message && conversationMessages) {
+    conversationMessages.scrollTop = conversationMessages.scrollHeight;
+  }
+}
+
 async function submitConversationTurn() {
   const prompt = conversationQuestion.value.trim();
   if (!prompt) {
@@ -6288,10 +6313,7 @@ async function submitConversationTurn() {
   const turnId = newAnalyticsId();
   activeConversationController = controller;
   let requestFailed = false;
-  if (conversationRequestStatus) {
-    conversationRequestStatus.textContent = "";
-    conversationRequestStatus.classList.remove("error");
-  }
+  setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
   conversationSubmitButton.disabled = true;
   if (conversationCancelButton) {
     conversationCancelButton.hidden = false;
@@ -6324,6 +6346,7 @@ async function submitConversationTurn() {
   if (!turnSaved) {
     renderConversationWorkspace();
     refreshConversationStorageStatus();
+    setConversationRequestStatus("");
     conversationSubmitButton.disabled = false;
     if (conversationCancelButton) {
       conversationCancelButton.hidden = true;
@@ -6467,23 +6490,18 @@ async function submitConversationTurn() {
     };
     await chatRequest(payload, {
       onStatus(data) {
-        if (conversationRequestStatus) {
-          conversationRequestStatus.textContent = Avatar.requestStatusMessage(data.phase);
-        }
+        setConversationRequestStatus(Avatar.requestStatusMessage(data.phase));
       },
       onPreliminarySources(data) {
-        if (conversationRequestStatus) {
-          conversationRequestStatus.textContent = "";
-        }
+        setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
         handleConversationSources(data);
       },
       onSources(data) {
-        if (conversationRequestStatus) {
-          conversationRequestStatus.textContent = "";
-        }
+        setConversationRequestStatus(Avatar.requestStatusMessage("thinking"));
         handleConversationSources(data);
       },
       onReasoning(delta) {
+        setConversationRequestStatus("");
         assistantReasoning += delta;
         // The trace arrives before the answer does, so this is what creates the
         // assistant bubble on a reasoning model — with `reasoning_streaming` set
@@ -6491,6 +6509,7 @@ async function submitConversationTurn() {
         upsertStreamingAssistantMessage({ reasoningStreaming: true });
       },
       onToken(token) {
+        setConversationRequestStatus("");
         assistantText += token;
         upsertStreamingAssistantMessage({ reasoningStreaming: false });
       },
@@ -6581,10 +6600,7 @@ async function submitConversationTurn() {
       });
     }
     renderConversationWorkspace();
-    if (conversationRequestStatus) {
-      conversationRequestStatus.textContent = error.message;
-      conversationRequestStatus.classList.add("error");
-    }
+    setConversationRequestStatus(error.message, { error: true });
   } finally {
     if (activeConversationController === controller) {
       activeConversationController = null;
@@ -6593,9 +6609,8 @@ async function submitConversationTurn() {
     // stored with the message — leave it set and the panel stays wedged open
     // for the life of the conversation.
     clearStreamingReasoningFlag();
-    if (conversationRequestStatus && !requestFailed) {
-      conversationRequestStatus.textContent = "";
-      conversationRequestStatus.classList.remove("error");
+    if (!requestFailed) {
+      setConversationRequestStatus("");
     }
     conversationSubmitButton.disabled = false;
     if (conversationCancelButton) {

@@ -81,6 +81,9 @@ export function conversationQueryRewriteView(message) {
 }
 
 export function requestStatusMessage(phase) {
+  if (phase === "thinking") {
+    return "Přemýšlím…";
+  }
   if (phase === "query_rewrite") {
     return "Připravuji vyhledávací dotaz…";
   }
