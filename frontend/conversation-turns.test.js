@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   assistantMessageIndexes,
+  conversationTurnRailItems,
+  conversationTurnRailSignature,
+  conversationTurnTarget,
   conversationSourcesBinding,
   resolveSelectedAssistantIndex,
 } from "./conversation-turns.js";
@@ -26,6 +29,40 @@ describe("assistantMessageIndexes", () => {
   it("tolerates an empty or missing thread", () => {
     expect(assistantMessageIndexes([])).toEqual([]);
     expect(assistantMessageIndexes(undefined)).toEqual([]);
+  });
+});
+
+describe("conversationTurnRailItems", () => {
+  it("creates one question-labelled mark per completed Q/A pair", () => {
+    expect(conversationTurnRailItems(thread)).toEqual([
+      { answerNumber: 1, assistantIndex: 1, userIndex: 0, question: "první" },
+      { answerNumber: 2, assistantIndex: 3, userIndex: 2, question: "druhá" },
+      { answerNumber: 3, assistantIndex: 5, userIndex: 4, question: "třetí" },
+    ]);
+  });
+
+  it("omits a source-only streaming placeholder until it has output", () => {
+    const streaming = [
+      { role: "user", content: "čekající" },
+      { role: "assistant", content: "", sources: [{ citation_id: "A1" }] },
+    ];
+    expect(conversationTurnRailItems(streaming)).toEqual([]);
+  });
+
+  it("keeps the same signature while answer tokens stream into an existing turn", () => {
+    const early = thread.slice(0, 2);
+    const later = [{ ...early[0] }, { ...early[1], content: `${early[1].content} další tokeny` }];
+
+    expect(conversationTurnRailSignature(7, early)).toBe(conversationTurnRailSignature(7, later));
+    expect(conversationTurnRailSignature(8, later)).not.toBe(conversationTurnRailSignature(7, later));
+  });
+
+  it("resolves a clicked mark to its answer and question indexes", () => {
+    expect(conversationTurnTarget({
+      conversationAssistantIndex: "3",
+      conversationUserIndex: "2",
+    })).toEqual({ assistantIndex: 3, scrollIndex: 2 });
+    expect(conversationTurnTarget({ conversationAssistantIndex: "invalid" })).toBeNull();
   });
 });
 

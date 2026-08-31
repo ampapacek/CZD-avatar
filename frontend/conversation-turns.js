@@ -18,6 +18,52 @@ export function assistantMessageIndexes(messages) {
   return indexes;
 }
 
+export function conversationTurnRailItems(messages) {
+  const list = messages || [];
+  return assistantMessageIndexes(list)
+    .filter((assistantIndex) => {
+      const answer = list[assistantIndex];
+      return Boolean(String(answer?.content || "").trim() || String(answer?.reasoning || "").trim());
+    })
+    .map((assistantIndex, index) => {
+      let userIndex = assistantIndex - 1;
+      while (userIndex >= 0 && list[userIndex]?.role !== "user") {
+        userIndex -= 1;
+      }
+      const answer = list[assistantIndex];
+      const question = String(answer?.question || list[userIndex]?.content || "").trim();
+      return {
+        answerNumber: index + 1,
+        assistantIndex,
+        userIndex: userIndex >= 0 ? userIndex : assistantIndex,
+        question,
+      };
+    });
+}
+
+export function conversationTurnRailSignature(conversationId, messages) {
+  return JSON.stringify([
+    conversationId,
+    ...conversationTurnRailItems(messages).map((item) => [
+      item.assistantIndex,
+      item.userIndex,
+      item.question,
+    ]),
+  ]);
+}
+
+export function conversationTurnTarget(dataset) {
+  const assistantIndex = Number(dataset?.conversationAssistantIndex);
+  const userIndex = Number(dataset?.conversationUserIndex);
+  if (!Number.isInteger(assistantIndex)) {
+    return null;
+  }
+  return {
+    assistantIndex,
+    scrollIndex: Number.isInteger(userIndex) ? userIndex : assistantIndex,
+  };
+}
+
 // `null`, or an index that is no longer an assistant turn (a different thread,
 // a deleted turn), means "follow the latest answer".
 export function resolveSelectedAssistantIndex(messages, selectedIndex = null) {
