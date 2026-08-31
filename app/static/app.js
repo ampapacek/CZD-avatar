@@ -154,7 +154,10 @@ const baselineSourcesEl = document.querySelector("#baselineSources");
 const baselineColumnEl = document.querySelector("#baselineColumn");
 const rerankedColumnTitleEl = document.querySelector("#rerankedColumnTitle");
 const toggleBaselineBtn = document.querySelector("#toggleBaseline");
-const conversationButton = document.querySelector("#conversationButton");
+const modeSingleButton = document.querySelector("#modeSingleButton");
+const modeConversationButton = document.querySelector("#modeConversationButton");
+const workspaceEl = document.querySelector(".workspace");
+const conversationView = document.querySelector("#conversationView");
 const historyButton = document.querySelector("#historyButton");
 const historyDialog = document.querySelector("#historyDialog");
 const historyList = document.querySelector("#historyList");
@@ -168,7 +171,6 @@ const historyAuthorName = document.querySelector("#historyAuthorName");
 const historyAuthorNameLabel = document.querySelector("#historyAuthorNameLabel");
 const historyShareStatus = document.querySelector("#historyShareStatus");
 const shareSelectedButton = document.querySelector("#shareSelectedButton");
-const conversationDialog = document.querySelector("#conversationDialog");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
@@ -187,8 +189,15 @@ const legacyHistoryStorageActions = document.querySelector("#legacyHistoryStorag
 const exportLegacyHistoryButton = document.querySelector("#exportLegacyHistoryButton");
 const deleteLegacyHistoryButton = document.querySelector("#deleteLegacyHistoryButton");
 const newConversationButton = document.querySelector("#newConversationButton");
-const deleteConversationButton = document.querySelector("#deleteConversationButton");
-const closeConversationButton = document.querySelector("#closeConversationButton");
+const conversationSettingsPopover = document.querySelector("#conversationSettingsPopover");
+const conversationSettingsToggle = document.querySelector("#conversationSettingsToggle");
+const conversationSettingsClose = document.querySelector("#conversationSettingsClose");
+const conversationChipModel = document.querySelector("#conversationChipModel");
+const conversationChipWp = document.querySelector("#conversationChipWp");
+const conversationChipPrompt = document.querySelector("#conversationChipPrompt");
+const conversationSourcesHeading = document.querySelector("#conversationSourcesHeading");
+const conversationSourcesLatest = document.querySelector("#conversationSourcesLatest");
+const conversationSubmitShortcut = document.querySelector("#conversationSubmitShortcut");
 const convWpSelect = document.querySelector("#convWpSelect");
 const convPromptSelect = document.querySelector("#convPromptSelect");
 const convProvider = document.querySelector("#convProvider");
@@ -310,6 +319,10 @@ let welcomeDismissed = false;
 // null means "not decided yet" — the panel derives the settled view from the
 // stored answer on first render, and keeps whatever the user toggles after that.
 let conversationSourcesView = null;
+// Which assistant turn the conversation source panel is bound to. null means
+// "follow the latest answer"; a citation click in an older turn pins it there so
+// [A1] in turn 1 and [A1] in turn 3 stop resolving to the same cards.
+let conversationSelectedAssistantIndex = null;
 // The baseline column is a rank-vs-rank comparison, so it never flips.
 const STATIC_SOURCES_VIEW = Avatar.createSourcesView({ canFlip: false, complete: true });
 let currentBaselineChunks = [];
@@ -1640,20 +1653,11 @@ shareSelectedButton.addEventListener("click", () => {
   shareSelectedEntries();
 });
 
-conversationButton.addEventListener("click", () => {
-  openConversationWorkspace();
+modeSingleButton?.addEventListener("click", () => {
+  setAppMode(APP_MODE_SINGLE);
 });
-closeConversationButton.addEventListener("click", () => {
-  conversationDialog.close();
-});
-conversationDialog.addEventListener("click", (event) => {
-  if (event.target === conversationDialog) {
-    conversationDialog.close();
-  }
-});
-// Centralize restore so it also covers closing via the Escape key.
-conversationDialog.addEventListener("close", () => {
-  restoreMainSettings();
+modeConversationButton?.addEventListener("click", () => {
+  setAppMode(APP_MODE_CONVERSATION);
 });
 newConversationButton.addEventListener("click", () => {
   createConversation();
@@ -1663,11 +1667,33 @@ newConversationButton.addEventListener("click", () => {
   renderConversationWorkspace();
   conversationQuestion.focus();
 });
-deleteConversationButton.addEventListener("click", () => {
-  deleteSelectedConversation();
-  if (conversationSettingsActive) {
-    applyConversationSettings(ensureSelectedConversation());
+conversationSettingsToggle?.addEventListener("click", () => {
+  setConversationSettingsPopover(conversationSettingsPopover?.hidden !== false);
+});
+conversationSettingsClose?.addEventListener("click", () => {
+  setConversationSettingsPopover(false);
+  conversationSettingsToggle?.focus();
+});
+// Click-outside closes the settings popover. The popover is a detail of the
+// composer, not the mode, so dismissing it never leaves the conversation.
+document.addEventListener("click", (event) => {
+  if (conversationSettingsPopover?.hidden !== false) {
+    return;
   }
+  if (event.target.closest("#conversationSettingsPopover, #conversationSettingsToggle")) {
+    return;
+  }
+  setConversationSettingsPopover(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || conversationSettingsPopover?.hidden !== false) {
+    return;
+  }
+  setConversationSettingsPopover(false);
+  conversationSettingsToggle?.focus();
+});
+conversationSourcesLatest?.addEventListener("click", () => {
+  selectConversationAssistantTurn(null);
 });
 convWpSelect?.addEventListener("change", () => {
   // Changing WP resets prompt + collection to that WP's defaults. Uses a lighter
@@ -1736,6 +1762,10 @@ document.addEventListener("click", pulseSourceCardFromCitation);
 document.addEventListener("click", toggleCitationHighlightFromSource);
 question.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, form));
 conversationQuestion.addEventListener("keydown", (event) => maybeSubmitOnCommandEnter(event, conversationForm));
+conversationQuestion.addEventListener("input", () => autoGrowTextarea(conversationQuestion));
+if (conversationSubmitShortcut) {
+  conversationSubmitShortcut.textContent = isMacPlatform() ? "\u2318" : "Ctrl";
+}
 
 clearHistoryButton.addEventListener("click", () => {
   localStorage.removeItem(HISTORY_STORAGE_KEY);
@@ -5674,16 +5704,15 @@ function pulseSourceCardFromCitation(event) {
   if (!citationId) {
     return;
   }
-  const scopeRoot =
-    trigger.closest(".conversation-main") ||
-    trigger.closest(".history-detail") ||
-    trigger.closest(".answer-panel")?.closest(".workspace") ||
-    document;
+  // Pair the answer the citation was clicked in with the panel that answer's
+  // cards live in, via the same scope table the reverse direction uses. The
+  // conversation panel is a sibling of the thread, not a descendant, so it has
+  // to be looked up by scope rather than searched under the click.
+  const scope = CITATION_SCOPES.find((entry) => trigger.closest(entry.answerSelector));
   const sourceSelector = sourceCardSelector(citationId);
-  const sourceCard =
-    (scopeRoot.classList?.contains("workspace")
-      ? document.querySelector(`.sources-panel ${sourceSelector}`)
-      : scopeRoot.querySelector(sourceSelector)) || null;
+  const sourceCard = scope
+    ? document.querySelector(`${scope.sourcesSelector} ${sourceSelector}`)
+    : document.querySelector(sourceSelector);
   if (!sourceCard) {
     return;
   }
@@ -5819,11 +5848,30 @@ function toggleCitationHighlightFromSource(event) {
 }
 
 function maybeSubmitOnCommandEnter(event, targetForm) {
-  if (event.key !== "Enter" || !event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) {
+  // The composer advertises this shortcut, so accept the modifier each platform
+  // actually offers rather than Command only.
+  const modifier = event.metaKey || event.ctrlKey;
+  if (event.key !== "Enter" || !modifier || event.shiftKey || event.altKey) {
     return;
   }
   event.preventDefault();
   targetForm.requestSubmit();
+}
+
+function isMacPlatform() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  return /mac/i.test(platform);
+}
+
+// Grow the composer with its content instead of a fixed rows="3", capped so a
+// long draft never eats the thread.
+function autoGrowTextarea(textarea, maxHeight = 220) {
+  if (!textarea) {
+    return;
+  }
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 function getConversationEntries() {
@@ -5897,15 +5945,29 @@ function updateConversation(updatedConversation) {
   return storageSaveSucceeded.get(CONVERSATION_STORAGE_KEY) === true;
 }
 
-function deleteSelectedConversation() {
+// Deleting is a per-item action in the list, so it names the thread it is about
+// to destroy and asks first.
+function deleteConversation(id) {
   const conversations = getConversationEntries();
-  if (!conversations.length || selectedConversationId === null) {
+  const target = conversations.find((entry) => entry.id === id);
+  if (!target) {
     return;
   }
-  const remaining = conversations.filter((entry) => entry.id !== selectedConversationId);
+  const label = conversationDisplayTitle(target);
+  if (!window.confirm(`Smazat konverzaci „${label}“? Tuto akci nelze vrátit zpět.`)) {
+    return;
+  }
+  const remaining = conversations.filter((entry) => entry.id !== id);
   const savedConversations = setConversationEntries(remaining);
-  selectedConversationId = savedConversations[0]?.id ?? null;
+  if (id === selectedConversationId) {
+    selectedConversationId = savedConversations[0]?.id ?? null;
+    conversationSourcesView = null;
+    conversationSelectedAssistantIndex = null;
+  }
   renderConversationWorkspace();
+  if (conversationSettingsActive) {
+    applyConversationSettings(ensureSelectedConversation());
+  }
 }
 
 function renderConversationWorkspace() {
@@ -6123,6 +6185,7 @@ function persistActiveConversationSettings() {
     entry.id === selectedConversationId ? { ...entry, settings: snapshot } : entry,
   );
   setConversationEntries(next);
+  updateConversationChips(next.find((entry) => entry.id === selectedConversationId));
 }
 
 // Select a conversation and load its settings (used by list clicks and after
@@ -6131,13 +6194,67 @@ function selectConversation(id) {
   selectedConversationId = id;
   // Whatever is stored is already final; let the panel settle itself on render.
   conversationSourcesView = null;
+  conversationSelectedAssistantIndex = null;
   if (conversationSettingsActive) {
     applyConversationSettings(ensureSelectedConversation());
   }
   renderConversationWorkspace();
 }
 
-function openConversationWorkspace() {
+// ---------------------------------------------------------------------------
+// Application mode. Conversation mode is a view inside the shell, not a window
+// on top of it: exactly one of the two views is mounted at a time. Every switch
+// goes through setAppMode, so the single place that knows "which mode am I
+// showing" is also the single place a router would later hook into.
+// ---------------------------------------------------------------------------
+const APP_MODE_SINGLE = "single";
+const APP_MODE_CONVERSATION = "conversation";
+let activeAppMode = APP_MODE_SINGLE;
+
+function setAppMode(mode) {
+  const nextMode = mode === APP_MODE_CONVERSATION ? APP_MODE_CONVERSATION : APP_MODE_SINGLE;
+  if (nextMode === activeAppMode) {
+    return;
+  }
+  activeAppMode = nextMode;
+  const conversationActive = nextMode === APP_MODE_CONVERSATION;
+  if (conversationActive) {
+    enterConversationMode();
+  } else {
+    setConversationSettingsPopover(false);
+    restoreMainSettings();
+  }
+  // The main workspace and the sources panel are hidden by CSS rather than by
+  // `hidden`, so the sources panel's own collapsed/expanded state survives a
+  // round trip through conversation mode untouched.
+  document.body.classList.toggle("mode-conversation", conversationActive);
+  if (conversationView) {
+    conversationView.hidden = !conversationActive;
+  }
+  if (workspaceEl) {
+    workspaceEl.setAttribute("aria-hidden", conversationActive ? "true" : "false");
+  }
+  for (const [button, isActive] of [
+    [modeSingleButton, !conversationActive],
+    [modeConversationButton, conversationActive],
+  ]) {
+    button?.classList.toggle("active", isActive);
+    button?.setAttribute("aria-selected", isActive ? "true" : "false");
+  }
+  if (conversationActive) {
+    // The thread was rendered while the view was still hidden, so it had no
+    // height to scroll; land on the latest turn now that it does.
+    if (conversationMessages) {
+      conversationMessages.scrollTop = conversationMessages.scrollHeight;
+    }
+    autoGrowTextarea(conversationQuestion);
+    // preventScroll: the composer is at the bottom of a full-height view, and
+    // scrolling it into view would push the topbar off screen.
+    conversationQuestion?.focus({ preventScroll: true });
+  }
+}
+
+function enterConversationMode() {
   mainSettingsBackup = captureSettingsSnapshot();
   conversationSettingsActive = true;
   activePlaceholderContainer = convPlaceholderControls;
@@ -6150,7 +6267,15 @@ function openConversationWorkspace() {
   renderConversationWorkspace();
   refreshConversationStorageStatus();
   applyConversationSettings(ensureSelectedConversation());
-  conversationDialog.showModal();
+  autoGrowTextarea(conversationQuestion);
+}
+
+function setConversationSettingsPopover(open) {
+  if (!conversationSettingsPopover) {
+    return;
+  }
+  conversationSettingsPopover.hidden = !open;
+  conversationSettingsToggle?.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function exportLegacyHistory() {
@@ -6198,56 +6323,133 @@ function restoreMainSettings() {
   mainSettingsBackup = null;
 }
 
-function renderConversationList(conversations) {
-  if (!conversations.length) {
-    conversationList.innerHTML = `<p class="history-empty">Zatím tu nejsou žádné konverzace.</p>`;
-    deleteConversationButton.disabled = true;
-    return;
+// A thread is named by the question that started it; the stored title is only
+// used once it has been set to something other than the placeholder.
+function conversationDisplayTitle(conversation) {
+  const stored = String(conversation?.title || "").trim();
+  if (stored && stored !== "Nová konverzace") {
+    return stored;
   }
-  deleteConversationButton.disabled = false;
-  conversationList.innerHTML = conversations
-    .map((entry) => {
-      const lastAssistant = [...(entry.messages || [])].reverse().find((message) => message.role === "assistant");
-      const summary = lastAssistant?.content ? shortenText(lastAssistant.content, 72) : "Bez odpovědi";
-      return `
-        <button class="history-item ${entry.id === selectedConversationId ? "active" : ""}" type="button" data-conversation-id="${entry.id}">
-          <strong>${escapeHtml(entry.title || "Nová konverzace")}</strong>
-          <span>${escapeHtml(summary)}</span>
-          <span>${formatHistoryTime(entry.updatedAt || entry.createdAt)}</span>
-        </button>
-      `;
-    })
-    .join("");
-  for (const item of conversationList.querySelectorAll(".history-item")) {
-    item.addEventListener("click", () => {
-      selectConversation(Number(item.dataset.conversationId));
-    });
+  const firstUser = (conversation?.messages || []).find((message) => message.role === "user");
+  const fromFirstQuestion = firstUser?.content ? shortenText(firstUser.content, 64) : "";
+  return fromFirstQuestion || "Nová konverzace";
+}
+
+const CONVERSATION_GROUPS = [
+  { id: "today", label: "Dnes" },
+  { id: "week", label: "Tento týden" },
+  { id: "older", label: "Starší" },
+];
+
+function conversationGroupId(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "older";
+  }
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  if (date >= startOfToday) {
+    return "today";
+  }
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 6);
+  return date >= startOfWeek ? "week" : "older";
+}
+
+// The date group already carries the day, so a row only needs the part the
+// group does not say.
+function formatConversationTime(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  try {
+    return conversationGroupId(timestamp) === "today"
+      ? date.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })
+      : date.toLocaleDateString("cs-CZ", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    return "";
   }
 }
 
+function renderConversationList(conversations) {
+  if (!conversations.length) {
+    conversationList.innerHTML = `<p class="conversation-list-empty">Zatím tu nejsou žádné konverzace.</p>`;
+    return;
+  }
+  const grouped = new Map(CONVERSATION_GROUPS.map((group) => [group.id, []]));
+  for (const entry of conversations) {
+    grouped.get(conversationGroupId(entry.updatedAt || entry.createdAt))?.push(entry);
+  }
+  conversationList.innerHTML = CONVERSATION_GROUPS.filter((group) => grouped.get(group.id).length)
+    .map((group) => {
+      const items = grouped
+        .get(group.id)
+        .map((entry) => {
+          const title = conversationDisplayTitle(entry);
+          const lastAssistant = [...(entry.messages || [])].reverse().find((message) => message.role === "assistant");
+          const summary = lastAssistant?.content ? shortenText(lastAssistant.content, 72) : "Bez odpovědi";
+          return `
+            <div class="conversation-item-row">
+              <button class="conversation-item ${entry.id === selectedConversationId ? "active" : ""}" type="button" data-conversation-id="${entry.id}">
+                <strong>${escapeHtml(title)}</strong>
+                <span class="conversation-item-preview">${escapeHtml(summary)}</span>
+                <span class="conversation-item-time">${escapeHtml(formatConversationTime(entry.updatedAt || entry.createdAt))}</span>
+              </button>
+              <button class="conversation-item-delete" type="button" data-delete-conversation-id="${entry.id}" title="Smazat konverzaci" aria-label="Smazat konverzaci „${escapeHtml(title)}“">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4.5 6.5h15"></path>
+                  <path d="M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5"></path>
+                  <path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.5"></path>
+                </svg>
+              </button>
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <div class="conversation-list-group">
+          <div class="conversation-list-group-label">${escapeHtml(group.label)}</div>
+          ${items}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+conversationList?.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-conversation-id]");
+  if (deleteButton) {
+    deleteConversation(Number(deleteButton.dataset.deleteConversationId));
+    return;
+  }
+  const item = event.target.closest("[data-conversation-id]");
+  if (item) {
+    selectConversation(Number(item.dataset.conversationId));
+  }
+});
+
 function renderConversationDetail(conversation) {
   const messages = conversation?.messages || [];
-  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  const latestSources =
-    latestAssistant?.sources?.length ? latestAssistant.sources : chunksToSources(latestAssistant?.retrieved_chunks || []);
-  const latestChunks = latestAssistant?.retrieved_chunks || [];
+  const assistantIndexes = Avatar.assistantMessageIndexes(messages);
+  const latestAssistantIndex = assistantIndexes.length ? assistantIndexes[assistantIndexes.length - 1] : null;
   if (conversationRewriteQuery) {
     conversationRewriteQuery.checked = conversationRewriteEnabled(conversation);
   }
 
+  const questionCount = messages.filter((message) => message.role === "user").length;
   conversationMeta.innerHTML = `
-    <div>
-      <h3>${escapeHtml(conversation?.title || "Nová konverzace")}</h3>
-      <p class="conversation-meta-copy">
-        ${messages.length ? `${messages.filter((message) => message.role === "user").length} dotazů v této konverzaci` : "Začni první otázkou."}
+    <div class="conversation-header-main">
+      <h2>${escapeHtml(conversationDisplayTitle(conversation))}</h2>
+      <p class="conversation-header-copy">
+        ${messages.length ? `${questionCount} dotazů v této konverzaci` : "Začni první otázkou."}
       </p>
     </div>
   `;
 
   if (!messages.length) {
-    conversationMessageList.innerHTML = `<p class="history-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
+    conversationMessageList.innerHTML = `<p class="conversation-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
-    const latestAssistantIndex = messages.lastIndexOf(latestAssistant);
     conversationMessageList.innerHTML = messages
       .map((message, index) =>
         renderConversationMessage(
@@ -6259,19 +6461,112 @@ function renderConversationDetail(conversation) {
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
 
-  renderConversationSourceCards(latestAssistant, latestSources, latestChunks);
-  renderConversationRetrievalInfo(latestAssistant);
+  updateConversationChips(conversation);
+  renderConversationSelectedTurn(conversation);
+}
+
+// The source panel belongs to one answer, not to the thread: it follows the
+// selected turn so a citation in an older answer resolves against that answer's
+// own cards. Splitting this out of renderConversationDetail also means a
+// citation click can rebind the panel without re-rendering (and detaching) the
+// message the click came from.
+function renderConversationSelectedTurn(conversation) {
+  const binding = Avatar.conversationSourcesBinding(
+    conversation?.messages || [],
+    conversationSelectedAssistantIndex,
+  );
+  conversationSelectedAssistantIndex = binding.selectedIndex;
+  const selectedAssistant = binding.message || undefined;
+  const selectedSources = selectedAssistant?.sources?.length
+    ? selectedAssistant.sources
+    : chunksToSources(selectedAssistant?.retrieved_chunks || []);
+  const selectedChunks = selectedAssistant?.retrieved_chunks || [];
+
+  if (conversationSourcesHeading) {
+    conversationSourcesHeading.textContent = binding.heading;
+  }
+  if (conversationSourcesLatest) {
+    conversationSourcesLatest.hidden = binding.isLatest;
+  }
+  markSelectedConversationTurn(binding.selectedIndex, binding.answerCount > 1);
+  renderConversationSourceCards(selectedAssistant, selectedSources, selectedChunks);
+  renderConversationRetrievalInfo(selectedAssistant);
+}
+
+// Marked in the thread only once there is more than one answer to tell apart.
+function markSelectedConversationTurn(selectedIndex, showMarker) {
+  if (!conversationMessageList) {
+    return;
+  }
+  for (const marked of conversationMessageList.querySelectorAll(".conversation-message.sources-selected")) {
+    marked.classList.remove("sources-selected");
+  }
+  if (!showMarker || selectedIndex === null) {
+    return;
+  }
+  conversationMessageList
+    .querySelector(`.conversation-message[data-message-index="${selectedIndex}"]`)
+    ?.classList.add("sources-selected");
+}
+
+// Pass null to go back to the latest answer.
+function selectConversationAssistantTurn(messageIndex) {
+  const conversation = ensureSelectedConversation();
+  const messages = conversation?.messages || [];
+  if (messageIndex !== null && messages[messageIndex]?.role !== "assistant") {
+    return;
+  }
+  if (conversationSelectedAssistantIndex === messageIndex) {
+    return;
+  }
+  conversationSelectedAssistantIndex = messageIndex;
+  // Each answer settles its own panel view; don't carry the previous one over.
+  conversationSourcesView = null;
+  renderConversationSelectedTurn(conversation);
+}
+
+// A citation click rebinds the panel to the turn it was clicked in, before the
+// shared citation handler looks for the card to highlight. This listener sits on
+// the message stream, so it runs first on the way up to that document handler.
+conversationMessages?.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".footnote-ref a");
+  if (!trigger) {
+    return;
+  }
+  const index = Number(trigger.closest(".conversation-message")?.dataset.messageIndex);
+  if (Number.isInteger(index)) {
+    selectConversationAssistantTurn(index);
+  }
+});
+
+// The composer answers "which settings apply?" where the question arises, so the
+// chips mirror the conversation's own settings rather than the main page's.
+function updateConversationChips(conversation) {
+  const settings = conversationSettingsFor(conversation);
+  const chips = [
+    [conversationChipModel, settings.model, "Model"],
+    [conversationChipWp, getWpConfig(settings.wp_id)?.label || settings.wp_id, "WP"],
+    [conversationChipPrompt, settings.prompt_preset_name, "Profil"],
+  ];
+  for (const [element, value, label] of chips) {
+    if (!element) {
+      continue;
+    }
+    const text = String(value || "").trim();
+    element.textContent = text ? shortenText(text, 28) : "—";
+    element.title = `${label}: ${text || "—"}`;
+  }
 }
 
 // Same panel machinery as the main page, driven by conversationSourcesView so
 // the two cannot drift apart. Split out so the view toggles can re-render just
 // the source column instead of the whole conversation detail.
-function renderConversationSourceCards(latestAssistant, sources, chunks) {
-  const combined = withOmittedChunks(sources, chunks, latestAssistant?.omitted_chunks || []);
-  const orderedCitationIds = Avatar.extractOrderedCitationIds(latestAssistant?.content || "");
+function renderConversationSourceCards(selectedAssistant, sources, chunks) {
+  const combined = withOmittedChunks(sources, chunks, selectedAssistant?.omitted_chunks || []);
+  const orderedCitationIds = Avatar.extractOrderedCitationIds(selectedAssistant?.content || "");
   if (!conversationSourcesView) {
     conversationSourcesView = Avatar.completedSourcesView(
-      Avatar.createSourcesView({ canFlip: Boolean(latestAssistant) }),
+      Avatar.createSourcesView({ canFlip: Boolean(selectedAssistant) }),
       orderedCitationIds,
     );
   }
@@ -6283,12 +6578,12 @@ function renderConversationSourceCards(latestAssistant, sources, chunks) {
     conversationSources,
     combined.sources,
     combined.chunks,
-    conversationRetrievalQuery(latestAssistant, conversationQuestion.value),
+    conversationRetrievalQuery(selectedAssistant, conversationQuestion.value),
     layout,
     "conversation-source",
     (patch) => {
       conversationSourcesView = { ...conversationSourcesView, ...patch };
-      renderConversationSourceCards(latestAssistant, sources, chunks);
+      renderConversationSourceCards(selectedAssistant, sources, chunks);
     },
   );
 }
@@ -6496,6 +6791,8 @@ async function submitConversationTurn() {
     conversationCancelButton.hidden = false;
     conversationCancelButton.disabled = false;
   }
+  // A new turn is the one the panel should follow, whatever was selected before.
+  conversationSelectedAssistantIndex = null;
   const storedConversation = ensureSelectedConversation();
   const cleanedMessages = Avatar.removeLegacyTokenBudgetRejectedTurns(storedConversation.messages);
   const conversation =
@@ -6533,6 +6830,7 @@ async function submitConversationTurn() {
   }
   renderConversationWorkspace();
   conversationQuestion.value = "";
+  autoGrowTextarea(conversationQuestion);
 
   let assistantText = "";
   let assistantReasoning = "";

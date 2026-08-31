@@ -144,11 +144,50 @@ textarea {
 }
 
 .shell {
+  --shell-margin: 10px;
+  --shell-row-gap: 12px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
+  column-gap: 20px;
+  row-gap: var(--shell-row-gap);
   width: min(1560px, calc(100% - 8px));
-  margin: 10px auto;
+  margin: var(--shell-margin) auto;
+}
+
+/* The topbar is a child of the shell rather than of the workspace, so it stays
+   put while the mode views below it are swapped. */
+.topbar {
+  grid-column: 1 / -1;
+}
+
+/* Conversation mode owns the whole row below the topbar. The single-question
+   views are hidden with CSS rather than [hidden] so the sources panel's own
+   collapsed/expanded state survives a round trip through conversation mode. */
+body.mode-conversation .workspace,
+body.mode-conversation .sources-panel {
+  display: none;
+}
+
+/* A full-height app view: the thread, the rail and the sources each scroll in
+   their own column, so the page itself does not scroll. */
+body.mode-conversation {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.mode-conversation .shell,
+body.mode-conversation .shell.has-sources,
+body.mode-conversation .shell.has-sources.sources-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+  /* The topbar takes the height it needs and the conversation view takes the
+     rest, so the thread fits the viewport without guessing the topbar's size.
+     The margin becomes padding: a block margin here would collapse through the
+     body and add exactly its own height of page scroll. */
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  margin-block: 0;
+  padding-block: var(--shell-margin);
 }
 
 .shell.has-sources {
@@ -160,7 +199,9 @@ textarea {
 }
 
 .workspace,
-.sources-panel {
+.sources-panel,
+.topbar,
+.conversation-view {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -180,9 +221,57 @@ textarea {
   gap: 20px;
   min-height: 88px;
   padding: 14px 20px;
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
   background: var(--header-grad);
   color: #fff;
+}
+
+/* Two-item mode switch: the modes are peers, so neither is a button that opens
+   the other. */
+.mode-switch {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mode-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
+  font-weight: 650;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.mode-switch-item svg {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.mode-switch-item:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.mode-switch-item.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(13, 17, 23, 0.28);
 }
 
 h1,
@@ -1476,81 +1565,317 @@ button:hover {
   color: var(--warn);
 }
 
-.conversation-dialog {
-  width: min(1440px, calc(100% - 20px));
-  max-width: 1440px;
-  height: min(88vh, 920px);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
-}
-
-.conversation-dialog::backdrop {
-  background: rgba(13, 17, 23, 0.42);
-  backdrop-filter: blur(6px);
-}
-
-.conversation-shell {
+/* Conversation mode is a view in the shell, so it sizes itself against the
+   viewport minus the topbar rather than against a dialog box. */
+.conversation-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
-}
-
-.conversation-dialog-body {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 320px;
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .conversation-list-panel {
-  padding: 14px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   border-right: 1px solid var(--line);
-  overflow: auto;
-  align-content: start;
+  background: var(--surface-3);
 }
 
-.conversation-main {
+.conversation-list-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.conversation-list-header h2 {
+  font-size: 16px;
+}
+
+.conversation-list-header p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.conversation-list-scroll {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* "New conversation" is the first row of the list, not a header button. */
+.conversation-new-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.conversation-new-item:hover {
+  border-style: solid;
+  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+}
+
+.conversation-new-item-plus {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 12px;
+}
+
+.conversation-list-group {
+  display: grid;
+  gap: 6px;
+}
+
+.conversation-list-group-label {
+  padding: 2px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.conversation-list-empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.conversation-item-row {
+  position: relative;
+}
+
+.conversation-item {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  padding: 9px 34px 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.conversation-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--surface) 72%, var(--accent) 28%);
+}
+
+.conversation-item strong {
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.conversation-item-preview,
+.conversation-item-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Deleting applies to the thread it sits on, not to "whatever is selected". */
+.conversation-item-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  opacity: 0;
+}
+
+.conversation-item-delete svg {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.conversation-item-row:hover .conversation-item-delete,
+.conversation-item-delete:focus-visible {
+  opacity: 1;
+}
+
+.conversation-item-delete:hover {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  background: var(--surface-2);
+  color: var(--warn);
+}
+
+/* A column, not a fixed row template: the storage warning above the thread comes
+   and goes, and only the message stream should ever take the leftover height. */
+.conversation-main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }
 
-.conversation-settings {
+.conversation-messages {
+  flex: 1 1 auto;
+}
+
+/* Conversation mode's own header. The history browser's chrome
+   (.history-dialog-header) stays with the history browser. */
+.conversation-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-muted, rgba(0, 0, 0, 0.02));
 }
 
-.conversation-settings > summary {
-  cursor: pointer;
-  padding: 10px 18px;
-  font-size: 13px;
-  font-weight: 600;
+.conversation-header h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.conversation-header-copy {
+  margin-top: 4px;
   color: var(--muted);
-  list-style: none;
+  font-size: 13px;
 }
 
-.conversation-settings > summary::-webkit-details-marker {
-  display: none;
+.conversation-empty {
+  color: var(--muted);
+  font-size: 14px;
 }
 
-.conversation-settings > summary::before {
-  content: "▸";
-  display: inline-block;
-  margin-right: 8px;
-  transition: transform 0.15s ease;
+/* The composer's settings popover: the chips say which settings apply, and open
+   them where that question arises. */
+.conversation-composer-dock {
+  position: relative;
+  min-width: 0;
 }
 
-.conversation-settings[open] > summary::before {
-  transform: rotate(90deg);
+.conversation-settings-popover {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(100% - 8px);
+  z-index: 5;
+  max-height: min(60vh, 460px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  /* --surface is translucent (it is paired with a backdrop blur elsewhere); a
+     popover over the thread has to be opaque or the text reads through it. */
+  background: var(--surface-3);
+  box-shadow: 0 12px 32px rgba(13, 17, 23, 0.22);
+}
+
+.conversation-settings-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.conversation-settings-popover-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.conversation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-chips:hover,
+.conversation-chips[aria-expanded="true"] {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.conversation-chip {
+  max-width: 220px;
+  overflow: hidden;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.conversation-chips-caret {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.conversation-chips-caret svg {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.conversation-chips[aria-expanded="true"] .conversation-chips-caret {
+  transform: rotate(180deg);
+}
+
+.conversation-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conversation-hint kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-3);
+  font-family: inherit;
+  font-size: 11px;
 }
 
 .conversation-settings-body {
-  padding: 4px 18px 14px;
+  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1575,17 +1900,6 @@ button:hover {
   display: none;
 }
 
-.conversation-meta {
-  padding: 16px 18px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.conversation-meta-copy {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
 .conversation-messages {
   overflow: auto;
   padding: 18px;
@@ -1603,11 +1917,6 @@ button:hover {
   display: grid;
   gap: 8px;
   min-width: 0;
-  max-width: 92%;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-3);
   overflow-wrap: anywhere;
 }
 
@@ -1636,13 +1945,32 @@ button:hover {
   gap: 8px;
 }
 
+/* The question keeps a card. The answer does not: it is the page's content, and
+   it gets the same borderless full-width treatment as the answer on the main
+   page. Role is carried by the label and the alignment, not by a box. */
 .conversation-message.user {
   justify-self: end;
+  max-width: 92%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: color-mix(in srgb, var(--surface-2) 70%, var(--accent) 30%);
 }
 
 .conversation-message.assistant {
-  justify-self: start;
+  justify-self: stretch;
+  width: 100%;
+  padding: 4px 0 8px;
+}
+
+/* Which answer the source panel is bound to, once there is more than one. */
+.conversation-message.assistant.sources-selected {
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+}
+
+.conversation-message.assistant.sources-selected .conversation-message-label {
+  color: var(--accent);
 }
 
 .conversation-message-label {
@@ -1807,23 +2135,30 @@ button:hover {
 
 .conversation-composer {
   display: grid;
-  gap: 10px;
-  padding: 16px 18px 18px;
+  gap: 8px;
+  padding: 12px 18px 16px;
   border-top: 1px solid var(--line);
   background: var(--surface);
+}
+
+/* rows="1" plus autoGrowTextarea: the composer is one line until it needs more. */
+.conversation-composer textarea {
+  min-height: 44px;
+  max-height: 220px;
+  resize: none;
+  overflow-y: hidden;
 }
 
 .conversation-composer-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   align-items: center;
 }
 
-.conversation-note {
-  color: var(--muted);
-  font-size: 13px;
+.conversation-composer-actions .conversation-hint {
+  margin-right: auto;
 }
 
 .conversation-sources-panel {
@@ -1837,10 +2172,15 @@ button:hover {
 
 .conversation-sources-header {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  justify-items: start;
   min-width: 0;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+}
+
+.conversation-sources-latest {
+  font-size: 12px;
 }
 
 .conversation-rewrite-controls {
@@ -3015,6 +3355,76 @@ body[data-theme="dark"] .source-highlight {
   border-color: var(--accent);
 }
 
+/* D2: at three columns the reading column is squeezed long before the 860px
+   stacking breakpoint, so the rail leaves the reading row first — it is the
+   least useful column while reading — and becomes a strip above the thread. */
+@media (max-width: 1180px) {
+  .conversation-view {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .conversation-list-panel {
+    grid-column: 1 / -1;
+    grid-template-rows: auto minmax(0, 1fr);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .conversation-list-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding: 10px 14px 8px;
+  }
+
+  .conversation-list-header p {
+    margin-top: 0;
+  }
+
+  /* One flat row of threads: a switcher, not a browser. The date groups are a
+     wide-layout affordance, and each row still carries its own date. */
+  .conversation-list-scroll {
+    display: flex;
+    align-items: start;
+    gap: 10px;
+    padding: 10px 12px;
+    overflow-x: auto;
+  }
+
+  .conversation-list {
+    display: flex;
+    gap: 10px;
+  }
+
+  .conversation-list-group {
+    display: contents;
+  }
+
+  .conversation-item-row {
+    flex: 0 0 220px;
+  }
+
+  .conversation-list-group-label {
+    display: none;
+  }
+
+  .conversation-item-preview {
+    display: none;
+  }
+
+  .conversation-item {
+    padding-block: 7px;
+  }
+
+  .conversation-new-item {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 860px) {
   .shell,
   .shell.has-sources,
@@ -3049,8 +3459,16 @@ body[data-theme="dark"] .source-highlight {
   .topbar-actions {
     width: 100%;
     max-width: none;
-    grid-template-columns: repeat(5, minmax(58px, 1fr));
     justify-content: stretch;
+  }
+
+  .mode-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mode-switch-item {
+    justify-content: center;
   }
 
   .topbar-button {
@@ -3073,20 +3491,50 @@ body[data-theme="dark"] .source-highlight {
     max-height: 220px;
   }
 
-  .conversation-dialog {
-    height: min(92vh, 1080px);
+  /* Stacked, the page scrolls again. */
+  body.mode-conversation {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
   }
 
-  .conversation-dialog-body {
+  body.mode-conversation .shell,
+  body.mode-conversation .shell.has-sources,
+  body.mode-conversation .shell.has-sources.sources-collapsed {
+    grid-template-rows: auto auto;
+    height: auto;
+    padding-block: 0;
+    margin-block: 12px var(--shell-margin);
+  }
+
+  .conversation-view {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    height: auto;
+    overflow: visible;
   }
 
   .conversation-list-panel,
   .conversation-sources-panel {
+    grid-column: auto;
     border-right: 0;
     border-left: 0;
     border-bottom: 1px solid var(--line);
     max-height: 220px;
+  }
+
+  .conversation-list-panel {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .conversation-list-scroll {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    max-height: none;
+  }
+
+  .conversation-messages {
+    max-height: 60vh;
   }
 }
 

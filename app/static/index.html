@@ -6,76 +6,86 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=selected-ui-4" />
+    <link rel="stylesheet" href="static/styles.css?v=conversation-mode-1" />
   </head>
   <body>
     <main class="shell">
-      <section class="workspace">
-        <header class="topbar">
-          <div class="brand-block">
-            <div class="brand-copy">
-              <h1>CZD-Avatar</h1>
-              <div class="brand-meta">
-                <img class="ufal-logo" src="static/logo_ufal_110u.png" alt="UFAL" />
-              </div>
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-copy">
+            <h1>CZD-Avatar</h1>
+            <div class="brand-meta">
+              <img class="ufal-logo" src="static/logo_ufal_110u.png" alt="UFAL" />
             </div>
           </div>
-          <div class="topbar-actions">
-            <button id="conversationButton" class="topbar-button" type="button" title="Konverzace: pokračujte navazujícími otázkami ve stejném vlákně." aria-label="Konverzace: pokračujte navazujícími otázkami ve stejném vlákně.">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H17.5A2.5 2.5 0 0 1 20 6.5V13.5A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z"></path>
-                <path d="M8 9h8"></path>
-                <path d="M8 12h5"></path>
+        </div>
+        <div class="mode-switch" role="tablist" aria-label="Režim práce">
+          <button id="modeSingleButton" class="mode-switch-item active" type="button" role="tab" aria-selected="true" title="Jedna otázka: samostatný dotaz a odpověď.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18V6A1.5 1.5 0 0 1 5 4.5Z"></path>
+              <path d="M7.5 9h9"></path>
+              <path d="M7.5 13h5"></path>
+            </svg>
+            <span>Jedna otázka</span>
+          </button>
+          <button id="modeConversationButton" class="mode-switch-item" type="button" role="tab" aria-selected="false" title="Konverzace: pokračujte navazujícími otázkami ve stejném vlákně.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H17.5A2.5 2.5 0 0 1 20 6.5V13.5A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z"></path>
+              <path d="M8 9h8"></path>
+              <path d="M8 12h5"></path>
+            </svg>
+            <span>Konverzace</span>
+          </button>
+        </div>
+        <div class="topbar-actions">
+          <button id="historyButton" class="topbar-button" type="button" title="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje." aria-label="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+              <path d="M3 4v4h4"></path>
+              <path d="M12 7.5v5l3.2 1.9"></path>
+            </svg>
+            <span>Historie</span>
+          </button>
+          <button id="helpButton" class="topbar-button" type="button" title="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení." aria-label="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
+              <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
+            </svg>
+            <span>Nápověda</span>
+          </button>
+          <button id="settingsButton" class="topbar-button" type="button" title="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty." aria-label="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty.">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.97 4.6 1.7 1.7 0 0 0 10 3.04V3a2 2 0 0 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21a2 2 0 0 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+            </svg>
+            <span>Nastavení</span>
+          </button>
+          <button id="themeToggle" class="topbar-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
+            <span class="icon-sun" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4.2"></circle>
+                <path d="M12 2.5v2.2"></path>
+                <path d="M12 19.3v2.2"></path>
+                <path d="M4.93 4.93l1.56 1.56"></path>
+                <path d="M17.51 17.51l1.56 1.56"></path>
+                <path d="M2.5 12h2.2"></path>
+                <path d="M19.3 12h2.2"></path>
+                <path d="M4.93 19.07l1.56-1.56"></path>
+                <path d="M17.51 6.49l1.56-1.56"></path>
               </svg>
-              <span>Konverzace</span>
-            </button>
-            <button id="historyButton" class="topbar-button" type="button" title="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje." aria-label="Historie: zobrazí uložené dotazy, odpovědi, nastavení a zdroje.">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
-                <path d="M3 4v4h4"></path>
-                <path d="M12 7.5v5l3.2 1.9"></path>
+            </span>
+            <span class="icon-moon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.8A8.9 8.9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
               </svg>
-              <span>Historie</span>
-            </button>
-            <button id="helpButton" class="topbar-button" type="button" title="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení." aria-label="Nápověda: vysvětlení odpovědí, citací, zdrojů a nastavení.">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="9"></circle>
-                <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
-                <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
-              </svg>
-              <span>Nápověda</span>
-            </button>
-            <button id="settingsButton" class="topbar-button" type="button" title="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty." aria-label="Nastavení: LLM API, klíče, vlastní poskytovatel a prompty.">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.97 4.6 1.7 1.7 0 0 0 10 3.04V3a2 2 0 0 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21a2 2 0 0 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
-              </svg>
-              <span>Nastavení</span>
-            </button>
-            <button id="themeToggle" class="topbar-button" type="button" title="Přepnout motiv" aria-label="Přepnout motiv">
-              <span class="icon-sun" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="4.2"></circle>
-                  <path d="M12 2.5v2.2"></path>
-                  <path d="M12 19.3v2.2"></path>
-                  <path d="M4.93 4.93l1.56 1.56"></path>
-                  <path d="M17.51 17.51l1.56 1.56"></path>
-                  <path d="M2.5 12h2.2"></path>
-                  <path d="M19.3 12h2.2"></path>
-                  <path d="M4.93 19.07l1.56-1.56"></path>
-                  <path d="M17.51 6.49l1.56-1.56"></path>
-                </svg>
-              </span>
-              <span class="icon-moon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 12.8A8.9 8.9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
-                </svg>
-              </span>
-              <span id="themeToggleLabel">Motiv</span>
-            </button>
-          </div>
-        </header>
+            </span>
+            <span id="themeToggleLabel">Motiv</span>
+          </button>
+        </div>
+      </header>
 
+      <section class="workspace">
         <form id="chatForm" class="composer">
           <div class="controls topic-controls">
             <label class="field wp-control">
@@ -121,7 +131,7 @@
             Vyber <strong>Oblast</strong>, na kterou se chceš ptát, polož otázku a náš avatar vyhledá relevantní zdroje a odpoví na jejich
             základě. Pro upřesnění profilu, délky či dalších instrukcí použij sekci <strong>Podoba odpovědi</strong>. Poskytovatele a model
             vybereš v části <strong>Model</strong>; kolekci a způsob vyhledávání v části <strong>Pokročilé nastavení</strong>. Pro navazující
-            otázky otevři <strong>Konverzaci</strong>. Další možnosti jsou v <strong>Nastavení</strong>. Více informací se dozvíš v sekci
+            otázky přepni nahoře na <strong>Konverzaci</strong>. Další možnosti jsou v <strong>Nastavení</strong>. Více informací se dozvíš v sekci
             <strong>Nápověda</strong>.
           </p>
 
@@ -275,6 +285,115 @@
         </div>
         </div>
       </aside>
+
+      <section id="conversationView" class="conversation-view" hidden>
+        <aside class="conversation-list-panel">
+          <div class="conversation-list-header">
+            <h2>Konverzace</h2>
+            <p>Ukládají se zatím jen lokálně v tomto prohlížeči.</p>
+          </div>
+          <div class="conversation-list-scroll">
+            <button id="newConversationButton" class="conversation-new-item" type="button">
+              <span class="conversation-new-item-plus" aria-hidden="true">+</span>
+              <span>Nová konverzace</span>
+            </button>
+            <div id="conversationList" class="conversation-list"></div>
+          </div>
+        </aside>
+        <section class="conversation-main">
+          <div id="conversationStorageStatus" class="conversation-storage-status" role="status" aria-live="polite" hidden>
+            <span id="conversationStorageStatusText"></span>
+            <div id="legacyHistoryStorageActions" class="conversation-storage-actions" hidden>
+              <button id="exportLegacyHistoryButton" class="secondary" type="button">Exportovat starou historii</button>
+              <button id="deleteLegacyHistoryButton" class="secondary danger-lite" type="button">Smazat starou historii</button>
+            </div>
+          </div>
+          <header id="conversationMeta" class="conversation-header"></header>
+          <div id="conversationMessages" class="conversation-messages">
+            <div id="conversationMessageList" class="conversation-message-list"></div>
+            <div id="conversationRequestStatus" class="conversation-request-status" role="status" aria-live="polite"></div>
+          </div>
+          <div class="conversation-composer-dock">
+            <div id="conversationSettingsPopover" class="conversation-settings-popover" role="dialog" aria-label="Nastavení konverzace" hidden>
+              <div class="conversation-settings-popover-header">
+                <h3>Nastavení konverzace</h3>
+                <button id="conversationSettingsClose" class="icon-button help-close" type="button" aria-label="Zavřít nastavení konverzace" title="Zavřít">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M6 6l12 12"></path>
+                    <path d="M18 6 6 18"></path>
+                  </svg>
+                </button>
+              </div>
+              <div class="conversation-settings-body">
+                <p class="field-note">Každá konverzace si pamatuje vlastní nastavení. Nové konverzace ho převezmou z hlavní stránky; změny na hlavní stránce už existující konverzace nemění.</p>
+                <div class="conversation-settings-grid">
+                  <label class="field">
+                    <span>WP</span>
+                    <select id="convWpSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Prompt</span>
+                    <select id="convPromptSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Poskytovatel</span>
+                    <select id="convProvider"></select>
+                  </label>
+                  <label class="field">
+                    <span>Model</span>
+                    <select id="convModel"></select>
+                  </label>
+                  <label class="field" id="convCustomModelField" hidden>
+                    <span>Jiný model</span>
+                    <input id="convCustomModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
+                  </label>
+                  <label class="field conversation-settings-context">
+                    <span>Kontextové okno (tokeny)</span>
+                    <input id="convContextWindowTokens" type="number" min="1024" step="1" />
+                    <span id="convModelContextWindowNote" class="field-note"></span>
+                  </label>
+                </div>
+                <div id="convPlaceholderControls" class="placeholder-controls conversation-placeholder-controls"></div>
+              </div>
+            </div>
+            <form id="conversationForm" class="conversation-composer">
+              <button id="conversationSettingsToggle" class="conversation-chips" type="button" aria-expanded="false" aria-controls="conversationSettingsPopover" title="Nastavení této konverzace">
+                <span class="conversation-chip" id="conversationChipModel">—</span>
+                <span class="conversation-chip" id="conversationChipWp">—</span>
+                <span class="conversation-chip" id="conversationChipPrompt">—</span>
+                <span class="conversation-chips-caret" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9.5 12 15.5 18 9.5"></path>
+                  </svg>
+                </span>
+              </button>
+              <textarea id="conversationQuestion" rows="1" placeholder="Zeptej se navazující otázku." required></textarea>
+              <div class="conversation-composer-actions">
+                <span class="conversation-hint">Odeslat: <kbd id="conversationSubmitShortcut">⌘</kbd> + <kbd>Enter</kbd></span>
+                <button id="conversationSubmitButton" class="primary" type="submit">Odeslat</button>
+                <button id="conversationCancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající generování odpovědi.">Zrušit</button>
+              </div>
+            </form>
+          </div>
+        </section>
+        <aside class="conversation-sources-panel">
+          <div class="conversation-rewrite-controls">
+            <label class="conversation-rewrite-toggle">
+              <input id="conversationRewriteQuery" type="checkbox" checked />
+              <span class="conversation-rewrite-copy">
+                <strong>Upravit dotazy pro vyhledání zdrojů</strong>
+                <small>Nejdříve model přeformuluje otázku pro lepší vyhledání relevantních dokumentů.</small>
+              </span>
+            </label>
+            <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
+          </div>
+          <div class="conversation-sources-header">
+            <h3 id="conversationSourcesHeading">Zdroje poslední odpovědi</h3>
+            <button id="conversationSourcesLatest" class="ghost-button conversation-sources-latest" type="button" hidden>Zpět na poslední odpověď</button>
+          </div>
+          <div id="conversationSources" class="sources conversation-sources"></div>
+        </aside>
+      </section>
     </main>
 
     <dialog id="helpDialog" class="help-dialog">
@@ -784,107 +903,8 @@
       </div>
     </dialog>
 
-    <dialog id="conversationDialog" class="conversation-dialog">
-      <div class="conversation-shell">
-        <div class="history-dialog-header">
-          <div>
-            <h2>Konverzace</h2>
-            <p>Navazující otázky nad stejným tématem se drží v jedné konverzaci.</p>
-            <p>Konverzace se zatím ukládají jen lokálně v tomto prohlížeči.</p>
-          </div>
-          <div class="history-dialog-actions">
-            <button id="newConversationButton" type="button">Nová konverzace</button>
-            <button id="deleteConversationButton" type="button">Smazat konverzaci</button>
-            <button id="closeConversationButton" class="icon-button help-close" type="button" aria-label="Zavřít konverzaci" title="Zavřít">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M6 6l12 12"></path>
-                <path d="M18 6 6 18"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="conversation-dialog-body">
-          <aside id="conversationList" class="history-list conversation-list-panel"></aside>
-          <section class="conversation-main">
-            <div id="conversationStorageStatus" class="conversation-storage-status" role="status" aria-live="polite" hidden>
-              <span id="conversationStorageStatusText"></span>
-              <div id="legacyHistoryStorageActions" class="conversation-storage-actions" hidden>
-                <button id="exportLegacyHistoryButton" class="secondary" type="button">Exportovat starou historii</button>
-                <button id="deleteLegacyHistoryButton" class="secondary danger-lite" type="button">Smazat starou historii</button>
-              </div>
-            </div>
-            <details id="conversationSettings" class="conversation-settings">
-              <summary>Nastavení konverzace</summary>
-              <div class="conversation-settings-body">
-                <p class="field-note">Každá konverzace si pamatuje vlastní nastavení. Nové konverzace ho převezmou z hlavní stránky; změny na hlavní stránce už existující konverzace nemění.</p>
-                <div class="conversation-settings-grid">
-                  <label class="field">
-                    <span>WP</span>
-                    <select id="convWpSelect"></select>
-                  </label>
-                  <label class="field">
-                    <span>Prompt</span>
-                    <select id="convPromptSelect"></select>
-                  </label>
-                  <label class="field">
-                    <span>Poskytovatel</span>
-                    <select id="convProvider"></select>
-                  </label>
-                  <label class="field">
-                    <span>Model</span>
-                    <select id="convModel"></select>
-                  </label>
-                  <label class="field" id="convCustomModelField" hidden>
-                    <span>Jiný model</span>
-                    <input id="convCustomModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
-                  </label>
-                  <label class="field conversation-settings-context">
-                    <span>Kontextové okno (tokeny)</span>
-                    <input id="convContextWindowTokens" type="number" min="1024" step="1" />
-                    <span id="convModelContextWindowNote" class="field-note"></span>
-                  </label>
-                </div>
-                <div id="convPlaceholderControls" class="placeholder-controls conversation-placeholder-controls"></div>
-              </div>
-            </details>
-            <div id="conversationMeta" class="conversation-meta"></div>
-            <div id="conversationMessages" class="conversation-messages">
-              <div id="conversationMessageList" class="conversation-message-list"></div>
-              <div id="conversationRequestStatus" class="conversation-request-status" role="status" aria-live="polite"></div>
-            </div>
-            <form id="conversationForm" class="conversation-composer">
-              <label class="field">
-                <span>Pokračování dotazu</span>
-                <textarea id="conversationQuestion" rows="3" placeholder="Zeptej se navazující otázku." required></textarea>
-              </label>
-              <div class="conversation-composer-actions">
-                <span class="conversation-note">Použije se nastavení této konverzace (viz „Nastavení konverzace“ nahoře).</span>
-                <button id="conversationSubmitButton" class="primary" type="submit">Odeslat</button>
-                <button id="conversationCancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající generování odpovědi.">Zrušit</button>
-              </div>
-            </form>
-          </section>
-          <aside class="conversation-sources-panel">
-            <div class="conversation-rewrite-controls">
-              <label class="conversation-rewrite-toggle">
-                <input id="conversationRewriteQuery" type="checkbox" checked />
-                <span class="conversation-rewrite-copy">
-                  <strong>Upravit dotazy pro vyhledání zdrojů</strong>
-                  <small>Nejdříve model přeformuluje otázku pro lepší vyhledání relevantních dokumentů.</small>
-                </span>
-              </label>
-              <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
-            </div>
-            <div class="conversation-sources-header">
-              <h3>Zdroje poslední odpovědi</h3>
-            </div>
-            <div id="conversationSources" class="sources conversation-sources"></div>
-          </aside>
-        </div>
-      </div>
-    </dialog>
 
-    <script src="static/avatar.bundle.js?v=selected-ui-4"></script>
-    <script src="static/app.js?v=selected-ui-4"></script>
+    <script src="static/avatar.bundle.js?v=conversation-mode-1"></script>
+    <script src="static/app.js?v=conversation-mode-1"></script>
 </body>
 </html>
