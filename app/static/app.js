@@ -185,6 +185,7 @@ const conversationCancelButton = document.querySelector("#conversationCancelButt
 const conversationRequestStatus = document.querySelector("#conversationRequestStatus");
 const conversationStorageStatus = document.querySelector("#conversationStorageStatus");
 const conversationStorageStatusText = document.querySelector("#conversationStorageStatusText");
+const conversationCompatibilityStatus = document.querySelector("#conversationCompatibilityStatus");
 const legacyHistoryStorageActions = document.querySelector("#legacyHistoryStorageActions");
 const exportLegacyHistoryButton = document.querySelector("#exportLegacyHistoryButton");
 const deleteLegacyHistoryButton = document.querySelector("#deleteLegacyHistoryButton");
@@ -197,15 +198,33 @@ const conversationChipWp = document.querySelector("#conversationChipWp");
 const conversationChipPrompt = document.querySelector("#conversationChipPrompt");
 const conversationSourcesHeading = document.querySelector("#conversationSourcesHeading");
 const conversationSourcesLatest = document.querySelector("#conversationSourcesLatest");
+const conversationSourcesPanel = document.querySelector("#conversationSourcesPanel");
+const conversationSourcesCollapse = document.querySelector("#conversationSourcesCollapse");
+const conversationSourcesReopen = document.querySelector("#conversationSourcesReopen");
+const conversationSourcesReopenCount = document.querySelector("#conversationSourcesReopenCount");
+const conversationTurnRail = document.querySelector("#conversationTurnRail");
+const conversationTurnRailMarks = document.querySelector("#conversationTurnRailMarks");
 const conversationSubmitShortcut = document.querySelector("#conversationSubmitShortcut");
 const convWpSelect = document.querySelector("#convWpSelect");
 const convPromptSelect = document.querySelector("#convPromptSelect");
 const convProvider = document.querySelector("#convProvider");
 const convModel = document.querySelector("#convModel");
+const convAdvancedModel = document.querySelector("#convAdvancedModel");
 const convCustomModelField = document.querySelector("#convCustomModelField");
 const convCustomModel = document.querySelector("#convCustomModel");
 const convContextWindowTokens = document.querySelector("#convContextWindowTokens");
 const convModelContextWindowNote = document.querySelector("#convModelContextWindowNote");
+const convMsearchCollection = document.querySelector("#convMsearchCollection");
+const convTopK = document.querySelector("#convTopK");
+const convTopKValue = document.querySelector("#convTopKValue");
+const convMinRelativeScore = document.querySelector("#convMinRelativeScore");
+const convMinRelativeScoreValue = document.querySelector("#convMinRelativeScoreValue");
+const convMsearchMinConfidence = document.querySelector("#convMsearchMinConfidence");
+const convMsearchMinConfidenceValue = document.querySelector("#convMsearchMinConfidenceValue");
+const convMsearchRescore = document.querySelector("#convMsearchRescore");
+const convRescoreThresholdNote = document.querySelector("#convRescoreThresholdNote");
+const convReasoningEffortField = document.querySelector("#convReasoningEffortField");
+const convReasoningEffort = document.querySelector("#convReasoningEffort");
 const convPlaceholderControls = document.querySelector("#convPlaceholderControls");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsDialog = document.querySelector("#settingsDialog");
@@ -319,6 +338,9 @@ let welcomeDismissed = false;
 // null means "not decided yet" — the panel derives the settled view from the
 // stored answer on first render, and keeps whatever the user toggles after that.
 let conversationSourcesView = null;
+// Collapsing conversation sources is one view preference for conversation mode,
+// independent of the single-question shell's sources-collapsed class.
+let conversationSourcesCollapsed = false;
 // Which assistant turn the conversation source panel is bound to. null means
 // "follow the latest answer"; a citation click in an older turn pins it there so
 // [A1] in turn 1 and [A1] in turn 3 stop resolving to the same cards.
@@ -372,12 +394,16 @@ let placeholderSelections = {};
 // open. Swapping this lets the existing prompt/placeholder machinery target the
 // conversation container without duplicating it.
 let activePlaceholderContainer = placeholderControls;
-// While the conversation modal is open the global settings state (activeWpId,
-// active prompt, provider/model, placeholder selections, ...) represents the
-// ACTIVE conversation. mainSettingsBackup holds the main page's own settings so
-// they can be restored verbatim when the modal closes.
+// The mutually exclusive modes share one live settings state. The main-page
+// snapshot is retained while a conversation owns those controls.
 let conversationSettingsActive = false;
-let mainSettingsBackup = null;
+let mainSettingsSnapshot = null;
+let settingsDialogPreviousSnapshot = null;
+let settingsDialogOwnerPromptSnapshot = null;
+let settingsDialogSyncTimer = null;
+let conversationSettingsPersistTimer = null;
+let conversationSettingsPersistPending = false;
+let conversationTurnRailSignature = "";
 // Browser-local global placeholder defs (name -> def), loaded from localStorage.
 let localPlaceholderDefs = {};
 let llmModelsUnlocked = false;
@@ -945,10 +971,37 @@ function syncSettingsWp(wpId) {
   if (settingsWpSelect) {
     settingsWpSelect.value = settingsWpId;
   }
+  // A temporary Settings-dialog excursion to another WP must not select that
+  // WP's default prompt for the open conversation when the user comes back.
+  if (
+    conversationSettingsActive
+    && settingsDialog.open
+    && settingsWpId === activeWpId
+    && settingsDialogOwnerPromptSnapshot
+  ) {
+    restorePromptSettings(settingsDialogOwnerPromptSnapshot);
+    return;
+  }
   // Load the Settings-scoped WP's currently-selected (or default) prompt into the
   // shared editor. Keep the loaded prompt if it already belongs to this WP.
   const keepCurrent = presetWpId(getPromptPresetById(activePromptPresetId)) === settingsWpId;
-  applyPromptPresetById(keepCurrent ? activePromptPresetId : defaultPromptPresetId(settingsWpId));
+  if (keepCurrent) {
+    renderPromptPresets(activePromptPresetId);
+    return;
+  }
+  applyPromptPresetById(defaultPromptPresetId(settingsWpId));
+}
+
+function restorePromptSettings(settings) {
+  const savedPromptId = promptPresetIdFromSettings(settings);
+  applyPromptPresetById(
+    promptPresetExists(savedPromptId) ? savedPromptId : defaultPromptPresetId(activeWpId),
+  );
+  systemPrompt.value = String(settings.system_prompt ?? "");
+  userPromptTemplate.value = String(settings.user_prompt_template ?? "");
+  renderPlaceholderControls();
+  applyPlaceholderSelections(settings.selections);
+  updatePromptTemplateWarning();
 }
 
 // Switch the active work package: pick its default collection and prompt, which
@@ -1029,6 +1082,14 @@ async function loadSettings() {
   activeWpId = resolveWpId(settings.default_wp);
   populateWpSelect();
   populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
+  // Start the active WP's prepared-question request as soon as the WP is known.
+  // It must not wait behind prompt-profile loading before prefilling the main
+  // question field.
+  const initialQuestionsPromise = loadPredefinedQuestions(activeWpId, {
+    initializeQuestion: true,
+    questionSnapshot: question.value,
+    questionRevisionSnapshot: questionEditRevision,
+  });
   msearchMinConfidence.value = settings.msearch_defaults?.min_confidence ?? 0;
   topK.value = settings.msearch_defaults?.max_results ?? settings.top_k ?? 10;
   systemPrompt.value = settings.prompt_defaults?.system_prompt || "";
@@ -1042,14 +1103,12 @@ async function loadSettings() {
   updateRescoreThresholdNote();
   applyTheme(localStorage.getItem("theme") || "light");
   renderHistory();
-  renderConversationWorkspace();
   await loadPromptPresets();
   renderGlobalPlaceholderDefs();
-  loadPredefinedQuestions(activeWpId, {
-    initializeQuestion: true,
-    questionSnapshot: question.value,
-    questionRevisionSnapshot: questionEditRevision,
-  });
+  // A first conversation must inherit the resolved WP prompt, not the generic
+  // prompt defaults that are visible before prompt profiles finish loading.
+  renderConversationWorkspace();
+  await initialQuestionsPromise;
 }
 
 // Shared by the "Odpovědět" form submit (full answer) and the "Pouze vyhledat
@@ -1595,10 +1654,15 @@ settingsCategoryTabs?.addEventListener("keydown", (event) => {
 });
 
 settingsButton.addEventListener("click", () => {
+  if (conversationSettingsActive) {
+    flushActiveConversationSettingsPersist();
+  }
   renderProviderApiKeyFields();
   populateCustomProviderFields();
   // Scope the Settings editors to the active WP on open; the user can switch.
   syncSettingsWp(activeWpId);
+  settingsDialogPreviousSnapshot = conversationSettingsActive ? captureSettingsSnapshot() : null;
+  settingsDialogOwnerPromptSnapshot = settingsDialogPreviousSnapshot;
   renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
   renderQueryTransformSettings();
@@ -1614,18 +1678,26 @@ settingsDialog.addEventListener("click", (event) => {
   }
 });
 settingsDialog.addEventListener("close", () => {
+  cancelScheduledSettingsDialogSync();
   // If the user edited a different WP in Settings, restore the shared editor to the
   // main page's active WP so the main page (which shares the prompt editor state)
   // is left consistent with its own #wpSelect.
   if (settingsWpId && settingsWpId !== activeWpId) {
     settingsWpId = activeWpId;
-    if (presetWpId(getPromptPresetById(activePromptPresetId)) !== activeWpId) {
+    if (conversationSettingsActive && settingsDialogPreviousSnapshot) {
+      restorePromptSettings(settingsDialogOwnerPromptSnapshot || settingsDialogPreviousSnapshot);
+    } else if (presetWpId(getPromptPresetById(activePromptPresetId)) !== activeWpId) {
       applyPromptPresetById(defaultPromptPresetId(activeWpId));
     } else {
       renderPromptPresets(activePromptPresetId);
     }
   }
+  syncSettingsDialogEditToOwners();
+  settingsDialogPreviousSnapshot = null;
+  settingsDialogOwnerPromptSnapshot = null;
 });
+settingsDialog.addEventListener("input", scheduleSettingsDialogSync);
+settingsDialog.addEventListener("change", () => queueMicrotask(flushSettingsDialogEdits));
 
 historyButton.addEventListener("click", () => {
   renderAuthorName();
@@ -1695,50 +1767,29 @@ document.addEventListener("keydown", (event) => {
 conversationSourcesLatest?.addEventListener("click", () => {
   selectConversationAssistantTurn(null);
 });
-convWpSelect?.addEventListener("change", () => {
-  // Changing WP resets prompt + collection to that WP's defaults. Uses a lighter
-  // apply than selectWp so the main page's shared retrieval controls (backend,
-  // top_k, weights) are never mutated from conversation mode.
-  applyConvWp(convWpSelect.value);
-  mirrorConversationControls();
-  updateConvModelContextWindowNote();
-  persistActiveConversationSettings();
+conversationSourcesCollapse?.addEventListener("click", () => setConversationSourcesCollapsed(true, { focus: true }));
+conversationSourcesReopen?.addEventListener("click", () => setConversationSourcesCollapsed(false, { focus: true }));
+conversationTurnRail?.addEventListener("click", (event) => {
+  const mark = event.target.closest("[data-conversation-assistant-index]");
+  if (!mark) {
+    return;
+  }
+  const target = Avatar.conversationTurnTarget(mark.dataset);
+  if (!target) {
+    return;
+  }
+  selectConversationAssistantTurn(target.assistantIndex);
+  conversationMessageList
+    ?.querySelector(`.conversation-message[data-message-index="${target.scrollIndex}"]`)
+    ?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
-convPromptSelect?.addEventListener("change", () => {
-  applyPromptPresetById(convPromptSelect.value);
-  mirrorConversationControls();
-  persistActiveConversationSettings();
-});
-convProvider?.addEventListener("change", () => {
-  llmProvider.value = convProvider.value;
-  loadProviderValues(convProvider.value, { preferStored: true });
-  refreshModelOptions(appSettings);
-  mirrorConversationControls();
-  resetConvContextWindowToSelectedModel();
-  updateConvModelContextWindowNote();
-  persistActiveConversationSettings();
-});
-convModel?.addEventListener("change", () => {
-  model.value = convModel.value;
-  updateCustomModelVisibility(customModelAllowed());
-  updateConvCustomModelVisibility();
-  resetConvContextWindowToSelectedModel();
-  updateConvModelContextWindowNote();
-  persistActiveConversationSettings();
-});
-convCustomModel?.addEventListener("input", () => {
-  customModel.value = convCustomModel.value;
-  updateConvModelContextWindowNote();
-  persistActiveConversationSettings();
-});
-convContextWindowTokens?.addEventListener("input", () => {
-  updateConvModelContextWindowNote();
-  persistActiveConversationSettings();
-});
+
+conversationSettingsPopover?.addEventListener("input", handleConversationControlEvent);
+conversationSettingsPopover?.addEventListener("change", handleConversationControlEvent);
 // Placeholder controls update the global placeholderSelections via their own
 // listeners; this delegated listener persists the result after they run.
-convPlaceholderControls?.addEventListener("input", persistActiveConversationSettings);
-convPlaceholderControls?.addEventListener("change", persistActiveConversationSettings);
+convPlaceholderControls?.addEventListener("input", scheduleActiveConversationSettingsPersist);
+convPlaceholderControls?.addEventListener("change", () => flushActiveConversationSettingsPersist({ force: true }));
 conversationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitConversationTurn();
@@ -1815,7 +1866,10 @@ userPromptTemplate.addEventListener("input", () => {
   updatePromptTemplateWarning();
 });
 wpSelect.addEventListener("change", () => selectWp(wpSelect.value));
-settingsWpSelect?.addEventListener("change", () => syncSettingsWp(settingsWpSelect.value));
+settingsWpSelect?.addEventListener("change", () => {
+  flushSettingsDialogEdits();
+  syncSettingsWp(settingsWpSelect.value);
+});
 activePromptPreset.addEventListener("change", () => applyPromptPresetById(activePromptPreset.value));
 promptPreset.addEventListener("change", applySelectedPromptPreset);
 sharePromptOnServer.addEventListener("change", updatePromptShareNote);
@@ -2345,6 +2399,9 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     // localStorage must not turn a valid login into a failure.
     const persisted = persistLlmSettings();
     refreshModelOptions(appSettings);
+    if (conversationSettingsActive) {
+      syncConversationControlsFromMain({ refreshOptions: true });
+    }
     updatePromptActionButtonStates(promptPreset.value);
     renderQueryTransformSettings();
     if (!silent) {
@@ -2365,6 +2422,9 @@ async function verifyUnlockPassword({ silent = false } = {}) {
   } catch (error) {
     llmModelsUnlocked = false;
     refreshModelOptions(appSettings);
+    if (conversationSettingsActive) {
+      syncConversationControlsFromMain({ refreshOptions: true });
+    }
     updatePromptActionButtonStates(promptPreset.value);
     renderQueryTransformSettings();
     if (!silent) {
@@ -2390,6 +2450,9 @@ function logoutAdminAccess() {
   setUnlockStatus("Admin přístup byl odhlášen.", "success");
   statusEl.className = "status";
   statusEl.textContent = "Admin přístup byl odhlášen.";
+  if (conversationSettingsActive) {
+    syncConversationControlsFromMain({ refreshOptions: true });
+  }
 }
 
 function setUnlockStatus(message, variant = "") {
@@ -2441,6 +2504,10 @@ async function refreshProviderModels() {
       updateContextWindowForSelectedModel();
     }
     renderProviderApiKeyFields();
+    if (conversationSettingsActive) {
+      syncSettingsDialogEditToOwners();
+      syncConversationControlsFromMain({ refreshOptions: true });
+    }
     const provider = selectedProviderConfig(appSettings);
     const modelCount = Array.isArray(provider?.model_presets) ? provider.model_presets.length : 0;
     const collectionCount = getWpConfig(activeWpId)?.collections?.length ?? 0;
@@ -2613,6 +2680,9 @@ function setContextWindowTokensValue(value) {
   if (mainContextWindowTokens) {
     mainContextWindowTokens.value = nextValue;
   }
+  if (convContextWindowTokens) {
+    convContextWindowTokens.value = nextValue;
+  }
 }
 
 function syncContextWindowTokenInputs(sourceInput) {
@@ -2622,6 +2692,9 @@ function syncContextWindowTokenInputs(sourceInput) {
   }
   if (sourceInput !== mainContextWindowTokens && mainContextWindowTokens) {
     mainContextWindowTokens.value = value;
+  }
+  if (sourceInput !== convContextWindowTokens && convContextWindowTokens) {
+    convContextWindowTokens.value = value;
   }
 }
 
@@ -3216,6 +3289,7 @@ async function refreshAfterPlaceholderDefChange() {
   renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
   renderQueryTransformSettings();
+  syncSettingsDialogEditToOwners();
 }
 
 // Describe where an effective global def currently comes from, for the list.
@@ -4609,6 +4683,7 @@ async function saveCurrentPromptPreset({ mode }) {
   draftPromptPreset = null;
   setPromptPresetStatus("Uloženo sdíleně na serveru.", "success");
   await loadPromptPresets(data.id);
+  syncSettingsDialogEditToOwners();
 }
 
 async function saveCurrentPromptPresetLocally({ mode }) {
@@ -4635,6 +4710,7 @@ async function saveCurrentPromptPresetLocally({ mode }) {
   draftPromptPreset = null;
   setPromptPresetStatus("Uloženo lokálně v tomto prohlížeči.", "success");
   applyPromptPresetById(id);
+  syncSettingsDialogEditToOwners();
 }
 
 function updatePromptShareNote() {
@@ -5995,6 +6071,7 @@ function renderConversationWorkspace() {
 function captureSettingsSnapshot() {
   const activePrompt = activePromptPresetMetadata();
   return {
+    settings_version: Avatar.CONVERSATION_SETTINGS_VERSION,
     wp_id: activeWpId,
     prompt_preset_id: activePromptPresetId,
     prompt_preset_name: activePrompt.name,
@@ -6008,18 +6085,101 @@ function captureSettingsSnapshot() {
     msearch_collection: msearchCollection.value,
     context_window_tokens: nullableInteger(contextWindowTokens.value),
     reasoning_effort: reasoningEffort?.value || "",
+    top_k: Number(topK.value),
+    msearch_rescore: msearchRescore.checked,
+    msearch_min_confidence: nullableNumber(msearchMinConfidence.value),
+    min_relative_score: nullableNumber(minRelativeScore.value),
   };
 }
 
-// The main page's settings: the backup taken when the modal opened, or the live
-// state if the modal is not open. Used to seed new conversations and as a
-// fallback for conversations saved before this feature existed.
+// The main page's settings: the backup taken when conversation mode opened, or
+// the live state otherwise. New conversations inherit this complete snapshot.
 function currentMainSettings() {
-  return mainSettingsBackup || captureSettingsSnapshot();
+  return mainSettingsSnapshot || captureSettingsSnapshot();
 }
 
-function conversationSettingsFor(conversation) {
-  return (conversation && conversation.settings) || currentMainSettings();
+function cancelScheduledSettingsDialogSync() {
+  if (settingsDialogSyncTimer !== null) {
+    window.clearTimeout(settingsDialogSyncTimer);
+    settingsDialogSyncTimer = null;
+  }
+}
+
+function scheduleSettingsDialogSync() {
+  if (!conversationSettingsActive) {
+    return;
+  }
+  cancelScheduledSettingsDialogSync();
+  settingsDialogSyncTimer = window.setTimeout(() => {
+    settingsDialogSyncTimer = null;
+    syncSettingsDialogEditToOwners();
+  }, 250);
+}
+
+function flushSettingsDialogEdits() {
+  cancelScheduledSettingsDialogSync();
+  syncSettingsDialogEditToOwners();
+}
+
+const CONVERSATION_PROMPT_SETTING_KEYS = [
+  "prompt_preset_id",
+  "prompt_preset_name",
+  "prompt_preset_note",
+  "system_prompt",
+  "user_prompt_template",
+  "selections",
+  "placeholder_defs",
+];
+
+function settingsWithPromptFrom(settings, promptOwner) {
+  const restored = { ...settings };
+  for (const key of CONVERSATION_PROMPT_SETTING_KEYS) {
+    restored[key] = promptOwner[key];
+  }
+  return restored;
+}
+
+function syncSettingsDialogEditToOwners() {
+  if (!conversationSettingsActive || !settingsDialogPreviousSnapshot || !mainSettingsSnapshot) {
+    return;
+  }
+  // Prompt editors can temporarily show another WP. Keep that WP's prompt out
+  // of the owner snapshot while still propagating model/API changes made in
+  // the other Settings categories.
+  const editingOwnerPrompt = !settingsWpId || settingsWpId === activeWpId;
+  const observed = captureSettingsSnapshot();
+  const current = editingOwnerPrompt
+    ? observed
+    : settingsWithPromptFrom(observed, settingsDialogOwnerPromptSnapshot);
+  mainSettingsSnapshot = Avatar.mergeChangedSettings(
+    mainSettingsSnapshot,
+    settingsDialogPreviousSnapshot,
+    current,
+  );
+  settingsDialogPreviousSnapshot = current;
+  if (editingOwnerPrompt) {
+    settingsDialogOwnerPromptSnapshot = current;
+  }
+  persistActiveConversationSettings(current);
+  syncConversationControlsFromMain({
+    refreshOptions: true,
+    excludeKeys: editingOwnerPrompt ? [] : ["prompt"],
+  });
+  updateConvModelContextWindowNote();
+}
+
+function saveCurrentSettingsSession() {
+  flushSettingsDialogEdits();
+  if (!conversationSettingsActive) {
+    mainSettingsSnapshot = captureSettingsSnapshot();
+    return;
+  }
+  flushActiveConversationSettingsPersist();
+}
+
+function loadSettingsSession(settings, container) {
+  activePlaceholderContainer = container;
+  applySettingsToGlobals(settings);
 }
 
 // Apply a settings object onto the global state. Reused for both applying a
@@ -6028,7 +6188,7 @@ function conversationSettingsFor(conversation) {
 // the relevant subset of applyHistoryEntryToForm without touching retrieval
 // controls or the question field.
 function applySettingsToGlobals(settings) {
-  const s = settings || {};
+  const s = settings;
   const providerValue = normalizeProviderId(s.llm_provider || llmProvider.value || "");
   if (providerValue) {
     loadProviderValues(providerValue, { preferStored: true });
@@ -6045,8 +6205,8 @@ function applySettingsToGlobals(settings) {
   }
   // Re-apply saved prompt-text overrides (which can change the active tokens),
   // then re-render controls before restoring the saved selection values.
-  systemPrompt.value = s.system_prompt || systemPrompt.value;
-  userPromptTemplate.value = s.user_prompt_template || userPromptTemplate.value;
+  systemPrompt.value = String(s.system_prompt ?? "");
+  userPromptTemplate.value = String(s.user_prompt_template ?? "");
   renderPlaceholderControls();
   applyPlaceholderSelections(s.selections);
   updatePromptTemplateWarning();
@@ -6062,17 +6222,23 @@ function applySettingsToGlobals(settings) {
     model.value = model.options[0].value;
   }
   updateCustomModelVisibility(unlocked);
-  if (s.context_window_tokens != null) {
-    setContextWindowTokensValue(s.context_window_tokens);
-  }
+  setContextWindowTokensValue(s.context_window_tokens ?? "");
   updateModelContextWindowNote();
   refreshReasoningEffortOptions();
-  if (reasoningEffort && s.reasoning_effort !== undefined) {
+  if (reasoningEffort) {
     const wanted = String(s.reasoning_effort || "");
     reasoningEffort.value = Array.from(reasoningEffort.options).some((option) => option.value === wanted)
       ? wanted
       : REASONING_DEFAULT_VALUE;
   }
+  topK.value = Number(s.top_k);
+  msearchRescore.checked = Boolean(s.msearch_rescore);
+  msearchMinConfidence.value = s.msearch_min_confidence;
+  minRelativeScore.value = s.min_relative_score;
+  topKValue.value = topK.value;
+  updateMsearchConfidenceLabel();
+  updateThresholdLabels();
+  updateRescoreThresholdNote();
 }
 
 // Apply a WP for conversation mode: WP + its default collection + default
@@ -6085,36 +6251,153 @@ function applyConvWp(wpId) {
   applyPromptPresetById(defaultPromptPresetId(activeWpId));
 }
 
-// Mirror the (single-sourced) main control option lists + values into the
-// compact conversation controls, avoiding duplicate population logic.
-function mirrorConversationControls() {
-  if (convWpSelect) {
-    convWpSelect.innerHTML = wpSelect.innerHTML;
-    convWpSelect.value = wpSelect.value;
+const CONVERSATION_CONTROL_BINDINGS = [
+    { key: "wp", main: wpSelect, twins: [convWpSelect], event: "change", options: "raw" },
+    { key: "prompt", main: activePromptPreset, twins: [convPromptSelect], event: "change", options: "raw" },
+    { key: "provider", main: llmProvider, twins: [convProvider], event: "change", options: "raw" },
+    {
+      key: "model",
+      main: model,
+      twins: [convModel, convAdvancedModel],
+      event: "change",
+      optionsFor: (twin) => twin === convModel ? "compact-model" : "raw",
+    },
+    { key: "custom-model", main: customModel, twins: [convCustomModel], event: "input" },
+    { key: "context-window", main: contextWindowTokens, twins: [convContextWindowTokens], event: "input" },
+    { key: "collection", main: msearchCollection, twins: [convMsearchCollection], event: "change", options: "raw" },
+    { key: "top-k", main: topK, twins: [convTopK], event: "input" },
+    { key: "relative-score", main: minRelativeScore, twins: [convMinRelativeScore], event: "input" },
+    { key: "confidence", main: msearchMinConfidence, twins: [convMsearchMinConfidence], event: "input" },
+    { key: "rescore", main: msearchRescore, twins: [convMsearchRescore], event: "change" },
+    { key: "reasoning", main: reasoningEffort, twins: [convReasoningEffort], event: "change", options: "raw" },
+].filter((binding) => binding.main && binding.twins.every(Boolean));
+
+function copyConversationSelectOptions(source, target, mode = "raw") {
+  const options = Array.from(source.options);
+  const compactLabels = mode === "compact-model" ? conversationModelLabelMap(options) : null;
+  target.replaceChildren(...options.map((option, index) => {
+    const copy = option.cloneNode(true);
+    if (mode === "compact-model" && option.value !== CUSTOM_MODEL_VALUE) {
+      copy.textContent = compactLabels.get(option.value) || option.textContent;
+    }
+    return copy;
+  }));
+}
+
+function conversationModelLabelMap(options = Array.from(model?.options || [])) {
+  const modelOptions = options.filter((option) => option.value !== CUSTOM_MODEL_VALUE);
+  const labels = Avatar.modelDisplayLabels(modelOptions.map((option) => option.value));
+  return new Map(modelOptions.map((option, index) => [option.value, labels[index]]));
+}
+
+function syncConversationControl(binding, { refreshOptions = false } = {}) {
+  for (const twin of binding.twins) {
+    if (twin instanceof HTMLSelectElement && binding.main instanceof HTMLSelectElement) {
+      if (refreshOptions) {
+        const mode = binding.optionsFor ? binding.optionsFor(twin) : binding.options;
+        copyConversationSelectOptions(binding.main, twin, mode);
+      }
+      twin.value = binding.main.value;
+    } else if (twin.type === "checkbox") {
+      twin.checked = binding.main.checked;
+    } else {
+      twin.value = binding.main.value;
+    }
   }
-  if (convPromptSelect) {
-    convPromptSelect.innerHTML = activePromptPreset.innerHTML;
-    convPromptSelect.value = activePromptPreset.value;
+}
+
+function syncConversationControlsFromMain({
+  refreshOptions = false,
+  optionKeys = [],
+  excludeKeys = [],
+} = {}) {
+  const refreshedKeys = new Set(optionKeys);
+  const excludedKeys = new Set(excludeKeys);
+  for (const binding of CONVERSATION_CONTROL_BINDINGS) {
+    if (excludedKeys.has(binding.key)) {
+      continue;
+    }
+    syncConversationControl(binding, {
+      refreshOptions: refreshOptions || refreshedKeys.has(binding.key),
+    });
   }
-  if (convProvider) {
-    convProvider.innerHTML = llmProvider.innerHTML;
-    convProvider.value = llmProvider.value;
+  if (convTopKValue) {
+    convTopKValue.value = topKValue.value;
   }
-  if (convModel) {
-    convModel.innerHTML = model.innerHTML;
-    convModel.value = model.value;
+  if (convMinRelativeScoreValue) {
+    convMinRelativeScoreValue.value = minRelativeScoreValue.value;
   }
-  if (convCustomModel) {
-    convCustomModel.value = customModel.value;
+  if (convMsearchMinConfidenceValue) {
+    convMsearchMinConfidenceValue.value = msearchMinConfidenceValue.value;
+  }
+  if (convRescoreThresholdNote) {
+    convRescoreThresholdNote.hidden = !msearchRescore.checked;
+  }
+  if (convReasoningEffortField) {
+    convReasoningEffortField.hidden = reasoningEffortField ? reasoningEffortField.hidden : true;
   }
   updateConvCustomModelVisibility();
+}
+
+function writeConversationControlToMain(binding, source) {
+  if (binding.main.type === "checkbox") {
+    binding.main.checked = source.checked;
+  } else {
+    binding.main.value = source.value;
+  }
+}
+
+function handleConversationControlEvent(event) {
+  const binding = CONVERSATION_CONTROL_BINDINGS.find((item) => item.twins.includes(event.target));
+  if (!binding || binding.event !== event.type) {
+    return;
+  }
+  if (binding.key === "context-window") {
+    setContextWindowTokensValue(event.target.value);
+  } else {
+    writeConversationControlToMain(binding, event.target);
+  }
+  const optionKeys = [];
+  if (binding.key === "wp") {
+    applyConvWp(event.target.value);
+    optionKeys.push("prompt", "collection");
+  } else if (binding.key === "prompt") {
+    applyPromptPresetById(event.target.value);
+  } else if (binding.key === "provider") {
+    loadProviderValues(event.target.value, { preferStored: true });
+    refreshModelOptions(appSettings);
+    resetConvContextWindowToSelectedModel();
+    optionKeys.push("model", "reasoning");
+  } else if (binding.key === "model") {
+    updateCustomModelVisibility(customModelAllowed());
+    resetConvContextWindowToSelectedModel();
+    refreshReasoningEffortOptions();
+    optionKeys.push("reasoning");
+  } else if (binding.key === "context-window") {
+    updateModelContextWindowNote();
+  } else if (binding.key === "top-k") {
+    topKValue.value = topK.value;
+  } else if (binding.key === "relative-score") {
+    updateThresholdLabels();
+  } else if (binding.key === "confidence") {
+    updateMsearchConfidenceLabel();
+  } else if (binding.key === "rescore") {
+    updateRescoreThresholdNote();
+  }
+  syncConversationControlsFromMain({ optionKeys });
+  updateConvModelContextWindowNote();
+  if (event.type === "input") {
+    scheduleActiveConversationSettingsPersist();
+  } else {
+    flushActiveConversationSettingsPersist({ force: true });
+  }
 }
 
 function updateConvCustomModelVisibility() {
   if (!convCustomModelField) {
     return;
   }
-  const showCustom = convModel?.value === CUSTOM_MODEL_VALUE && customModelAllowed();
+  const showCustom = model?.value === CUSTOM_MODEL_VALUE && customModelAllowed();
   convCustomModelField.hidden = !showCustom;
 }
 
@@ -6123,7 +6406,7 @@ function resetConvContextWindowToSelectedModel() {
     return;
   }
   const nextWindow = selectedModelContextWindow() ?? defaultContextWindowTokens();
-  convContextWindowTokens.value = nextWindow ?? "";
+  setContextWindowTokensValue(nextWindow ?? "");
 }
 
 // Context-window note for the conversation bar: compares the conversation's own
@@ -6158,29 +6441,31 @@ function updateConvModelContextWindowNote() {
 // conversation settings bar. Called only on selection changes (open, switch,
 // new), never during streaming re-renders.
 function applyConversationSettings(conversation) {
-  const s = conversationSettingsFor(conversation);
-  applySettingsToGlobals(s);
-  if (convContextWindowTokens) {
-    const ctx = s.context_window_tokens ?? nullableInteger(contextWindowTokens.value);
-    convContextWindowTokens.value = ctx ?? "";
+  if (!Avatar.hasCurrentConversationSettings(conversation?.settings)) {
+    return;
   }
-  mirrorConversationControls();
+  loadSettingsSession(conversation.settings, convPlaceholderControls);
+  syncConversationControlsFromMain({ refreshOptions: true });
   updateConvModelContextWindowNote();
 }
 
 // Persist the current global state (plus the conversation context-window input)
 // onto the active conversation's settings, without bumping updatedAt or
 // reordering the list under the user.
-function persistActiveConversationSettings() {
+function persistActiveConversationSettings(snapshot = captureSettingsSnapshot()) {
+  if (conversationSettingsPersistTimer !== null) {
+    window.clearTimeout(conversationSettingsPersistTimer);
+    conversationSettingsPersistTimer = null;
+  }
+  conversationSettingsPersistPending = false;
   if (!conversationSettingsActive || selectedConversationId === null) {
     return;
   }
   const entries = getConversationEntries();
-  if (!entries.some((entry) => entry.id === selectedConversationId)) {
+  const selected = entries.find((entry) => entry.id === selectedConversationId);
+  if (!Avatar.hasCurrentConversationSettings(selected?.settings)) {
     return;
   }
-  const snapshot = captureSettingsSnapshot();
-  snapshot.context_window_tokens = nullableInteger(convContextWindowTokens?.value);
   const next = entries.map((entry) =>
     entry.id === selectedConversationId ? { ...entry, settings: snapshot } : entry,
   );
@@ -6188,9 +6473,35 @@ function persistActiveConversationSettings() {
   updateConversationChips(next.find((entry) => entry.id === selectedConversationId));
 }
 
+function scheduleActiveConversationSettingsPersist() {
+  conversationSettingsPersistPending = true;
+  if (conversationSettingsPersistTimer !== null) {
+    window.clearTimeout(conversationSettingsPersistTimer);
+  }
+  conversationSettingsPersistTimer = window.setTimeout(() => {
+    conversationSettingsPersistTimer = null;
+    flushActiveConversationSettingsPersist();
+  }, 180);
+}
+
+function flushActiveConversationSettingsPersist({ force = false } = {}) {
+  if (conversationSettingsPersistTimer !== null) {
+    window.clearTimeout(conversationSettingsPersistTimer);
+    conversationSettingsPersistTimer = null;
+  }
+  if (!conversationSettingsPersistPending && !force) {
+    return;
+  }
+  conversationSettingsPersistPending = false;
+  persistActiveConversationSettings();
+}
+
 // Select a conversation and load its settings (used by list clicks and after
 // create/delete). Keeps settings application out of the streaming render path.
 function selectConversation(id) {
+  if (conversationSettingsActive) {
+    saveCurrentSettingsSession();
+  }
   selectedConversationId = id;
   // Whatever is stored is already final; let the panel settle itself on render.
   conversationSourcesView = null;
@@ -6255,18 +6566,12 @@ function setAppMode(mode) {
 }
 
 function enterConversationMode() {
-  mainSettingsBackup = captureSettingsSnapshot();
+  saveCurrentSettingsSession();
   conversationSettingsActive = true;
-  activePlaceholderContainer = convPlaceholderControls;
-  const storedConversations = getConversationEntries();
-  if (storedConversations.length) {
-    // Apply the current compact representation to existing conversations too,
-    // rather than waiting for each one to receive another message.
-    setConversationEntries(storedConversations);
-  }
   renderConversationWorkspace();
   refreshConversationStorageStatus();
   applyConversationSettings(ensureSelectedConversation());
+  setConversationSourcesCollapsed(conversationSourcesCollapsed);
   autoGrowTextarea(conversationQuestion);
 }
 
@@ -6314,13 +6619,14 @@ function deleteLegacyHistory() {
 
 // Restore the main page's own settings after the conversation modal closes.
 function restoreMainSettings() {
+  saveCurrentSettingsSession();
   conversationSettingsActive = false;
-  activePlaceholderContainer = placeholderControls;
-  if (!mainSettingsBackup) {
+  if (!mainSettingsSnapshot) {
     return;
   }
-  applySettingsToGlobals(mainSettingsBackup);
-  mainSettingsBackup = null;
+  const restoreSnapshot = mainSettingsSnapshot;
+  loadSettingsSession(restoreSnapshot, placeholderControls);
+  mainSettingsSnapshot = null;
 }
 
 // A thread is named by the question that started it; the stored title is only
@@ -6431,6 +6737,25 @@ conversationList?.addEventListener("click", (event) => {
 
 function renderConversationDetail(conversation) {
   const messages = conversation?.messages || [];
+  const settingsCompatible = Avatar.hasCurrentConversationSettings(conversation?.settings);
+  if (!settingsCompatible) {
+    setConversationSettingsPopover(false);
+  }
+  if (conversationCompatibilityStatus) {
+    conversationCompatibilityStatus.hidden = settingsCompatible;
+  }
+  if (conversationQuestion) {
+    conversationQuestion.disabled = !settingsCompatible;
+  }
+  if (conversationSubmitButton) {
+    conversationSubmitButton.disabled = !settingsCompatible || activeConversationController !== null;
+  }
+  if (conversationSettingsToggle) {
+    conversationSettingsToggle.disabled = !settingsCompatible;
+  }
+  if (conversationRewriteQuery) {
+    conversationRewriteQuery.disabled = !settingsCompatible;
+  }
   const assistantIndexes = Avatar.assistantMessageIndexes(messages);
   const latestAssistantIndex = assistantIndexes.length ? assistantIndexes[assistantIndexes.length - 1] : null;
   if (conversationRewriteQuery) {
@@ -6462,7 +6787,56 @@ function renderConversationDetail(conversation) {
   }
 
   updateConversationChips(conversation);
+  renderConversationTurnRail(conversation?.id, messages);
   renderConversationSelectedTurn(conversation);
+}
+
+function renderConversationTurnRail(conversationId, messages) {
+  if (!conversationTurnRailMarks) {
+    return;
+  }
+  const items = Avatar.conversationTurnRailItems(messages);
+  const signature = Avatar.conversationTurnRailSignature(conversationId, messages);
+  if (signature === conversationTurnRailSignature) {
+    return;
+  }
+  conversationTurnRailSignature = signature;
+  conversationTurnRailMarks.innerHTML = items.map((item) => {
+    const question = item.question || `${item.answerNumber}. odpověď`;
+    return `
+      <button
+        class="conversation-turn-mark"
+        type="button"
+        data-conversation-assistant-index="${item.assistantIndex}"
+        data-conversation-user-index="${item.userIndex}"
+        title="${escapeHtml(question)}"
+        aria-label="${item.answerNumber}. odpověď: ${escapeHtml(question)}"
+        aria-current="false"
+      ><span>${item.answerNumber}</span></button>
+    `;
+  }).join("");
+}
+
+function setConversationSourcesCollapsed(collapsed, { focus = false } = {}) {
+  conversationSourcesCollapsed = Boolean(collapsed);
+  conversationView?.classList.toggle("conversation-sources-collapsed", conversationSourcesCollapsed);
+  if (conversationSourcesPanel) {
+    conversationSourcesPanel.setAttribute("aria-hidden", conversationSourcesCollapsed ? "true" : "false");
+  }
+  if (conversationSourcesCollapse) {
+    conversationSourcesCollapse.setAttribute("aria-expanded", conversationSourcesCollapsed ? "false" : "true");
+  }
+  if (conversationSourcesReopen) {
+    conversationSourcesReopen.hidden = !conversationSourcesCollapsed;
+    conversationSourcesReopen.setAttribute("aria-expanded", conversationSourcesCollapsed ? "false" : "true");
+  }
+  if (focus) {
+    if (conversationSourcesCollapsed) {
+      conversationSourcesReopen?.focus();
+    } else {
+      conversationSourcesCollapse?.focus();
+    }
+  }
 }
 
 // The source panel belongs to one answer, not to the thread: it follows the
@@ -6500,6 +6874,11 @@ function markSelectedConversationTurn(selectedIndex, showMarker) {
   }
   for (const marked of conversationMessageList.querySelectorAll(".conversation-message.sources-selected")) {
     marked.classList.remove("sources-selected");
+  }
+  for (const mark of conversationTurnRailMarks?.querySelectorAll(".conversation-turn-mark") || []) {
+    const active = Number(mark.dataset.conversationAssistantIndex) === selectedIndex;
+    mark.classList.toggle("active", active);
+    mark.setAttribute("aria-current", active ? "true" : "false");
   }
   if (!showMarker || selectedIndex === null) {
     return;
@@ -6542,20 +6921,28 @@ conversationMessages?.addEventListener("click", (event) => {
 // The composer answers "which settings apply?" where the question arises, so the
 // chips mirror the conversation's own settings rather than the main page's.
 function updateConversationChips(conversation) {
-  const settings = conversationSettingsFor(conversation);
+  const settings = Avatar.hasCurrentConversationSettings(conversation?.settings)
+    ? conversation.settings
+    : null;
   const chips = [
-    [conversationChipModel, settings.model, "Model"],
-    [conversationChipWp, getWpConfig(settings.wp_id)?.label || settings.wp_id, "WP"],
-    [conversationChipPrompt, settings.prompt_preset_name, "Profil"],
+    [conversationChipModel, settings?.model, "Model", true],
+    [conversationChipWp, getWpConfig(settings?.wp_id)?.label || settings?.wp_id, "Oblast", false],
+    [conversationChipPrompt, settings ? promptPresetLabelFromSettings(settings) : "", "Profil", false],
   ];
-  for (const [element, value, label] of chips) {
+  for (const [element, value, label, compactModel] of chips) {
     if (!element) {
       continue;
     }
     const text = String(value || "").trim();
-    element.textContent = text ? shortenText(text, 28) : "—";
+    const display = compactModel ? conversationModelDisplayName(text) : text;
+    element.textContent = display ? shortenText(display, 28) : "—";
     element.title = `${label}: ${text || "—"}`;
   }
+}
+
+function conversationModelDisplayName(rawModel) {
+  const raw = String(rawModel || "").trim();
+  return conversationModelLabelMap().get(raw) || Avatar.shortenModelName(raw);
 }
 
 // Same panel machinery as the main page, driven by conversationSourcesView so
@@ -6574,6 +6961,9 @@ function renderConversationSourceCards(selectedAssistant, sources, chunks) {
     orderedCitationIds,
     omittedCitationIds: combined.omittedCitationIds,
   });
+  if (conversationSourcesReopenCount) {
+    conversationSourcesReopenCount.textContent = String(combined.sources.length);
+  }
   renderSourceCards(
     conversationSources,
     combined.sources,
@@ -6781,6 +7171,12 @@ async function submitConversationTurn() {
   if (!prompt) {
     return;
   }
+  flushActiveConversationSettingsPersist();
+  const storedConversation = ensureSelectedConversation();
+  if (!Avatar.hasCurrentConversationSettings(storedConversation?.settings)) {
+    renderConversationWorkspace();
+    return;
+  }
   const controller = new AbortController();
   const turnId = newAnalyticsId();
   activeConversationController = controller;
@@ -6793,7 +7189,6 @@ async function submitConversationTurn() {
   }
   // A new turn is the one the panel should follow, whatever was selected before.
   conversationSelectedAssistantIndex = null;
-  const storedConversation = ensureSelectedConversation();
   const cleanedMessages = Avatar.removeLegacyTokenBudgetRejectedTurns(storedConversation.messages);
   const conversation =
     cleanedMessages.length === storedConversation.messages.length
@@ -6892,7 +7287,7 @@ async function submitConversationTurn() {
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
   // Build the payload from the conversation's own settings rather than the live
   // main-page controls, so each turn uses the settings this conversation owns.
-  const convSettings = conversationSettingsFor(conversation);
+  const convSettings = conversation.settings;
   const compactedThrough = Number(conversation.conversation_compacted_through) || 0;
   const payload = buildRequestPayload({
     question: prompt,
@@ -6916,6 +7311,10 @@ async function submitConversationTurn() {
     msearch_collection: convSettings.msearch_collection,
     context_window_tokens: convSettings.context_window_tokens,
     reasoning_effort: nullableString(convSettings.reasoning_effort),
+    top_k: Number(convSettings.top_k),
+    msearch_rescore: Boolean(convSettings.msearch_rescore),
+    msearch_min_confidence: convSettings.msearch_min_confidence,
+    min_relative_score: convSettings.min_relative_score,
   });
   const sanitizedPayload = {
     ...sanitizeHistorySettings(payload),
@@ -7866,7 +8265,7 @@ function renderPlaceholderSettings(settings) {
 function promptPresetLabelFromSettings(settings) {
   const presetId = promptPresetIdFromSettings(settings);
   const preset = getPromptPresetById(presetId);
-  return settings?.prompt_preset_name || preset?.name || presetId;
+  return preset?.name || settings?.prompt_preset_name || presetId;
 }
 
 function wpLabelFromSettings(settings) {

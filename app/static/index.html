@@ -6,7 +6,7 @@
     <title>CZD-Avatar</title>
     <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
     <link rel="apple-touch-icon" href="static/favicon.svg" />
-    <link rel="stylesheet" href="static/styles.css?v=conversation-mode-1" />
+    <link rel="stylesheet" href="static/styles.css?v=conversation-mode-2" />
   </head>
   <body>
     <main class="shell">
@@ -308,6 +308,9 @@
               <button id="deleteLegacyHistoryButton" class="secondary danger-lite" type="button">Smazat starou historii</button>
             </div>
           </div>
+          <div id="conversationCompatibilityStatus" class="conversation-storage-status" role="status" hidden>
+            Tato konverzace používá starší formát nastavení. Pro pokračování založte novou konverzaci.
+          </div>
           <header id="conversationMeta" class="conversation-header"></header>
           <div id="conversationMessages" class="conversation-messages">
             <div id="conversationMessageList" class="conversation-message-list"></div>
@@ -325,35 +328,73 @@
                 </button>
               </div>
               <div class="conversation-settings-body">
-                <p class="field-note">Každá konverzace si pamatuje vlastní nastavení. Nové konverzace ho převezmou z hlavní stránky; změny na hlavní stránce už existující konverzace nemění.</p>
-                <div class="conversation-settings-grid">
+                <p class="field-note">Každá konverzace si pamatuje vlastní nastavení. Nové konverzace ho převezmou z hlavní stránky; pozdější změny na hlavní stránce ji neovlivní. Změny provedené v dialogu Nastavení platí i pro právě otevřenou konverzaci.</p>
+                <div class="conversation-settings-grid conversation-settings-basic">
                   <label class="field">
-                    <span>WP</span>
+                    <span>Oblast</span>
                     <select id="convWpSelect"></select>
                   </label>
                   <label class="field">
-                    <span>Prompt</span>
+                    <span>Profil</span>
                     <select id="convPromptSelect"></select>
-                  </label>
-                  <label class="field">
-                    <span>Poskytovatel</span>
-                    <select id="convProvider"></select>
                   </label>
                   <label class="field">
                     <span>Model</span>
                     <select id="convModel"></select>
                   </label>
-                  <label class="field" id="convCustomModelField" hidden>
-                    <span>Jiný model</span>
-                    <input id="convCustomModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
-                  </label>
-                  <label class="field conversation-settings-context">
-                    <span>Kontextové okno (tokeny)</span>
-                    <input id="convContextWindowTokens" type="number" min="1024" step="1" />
-                    <span id="convModelContextWindowNote" class="field-note"></span>
-                  </label>
                 </div>
                 <div id="convPlaceholderControls" class="placeholder-controls conversation-placeholder-controls"></div>
+                <details class="advanced conversation-settings-advanced">
+                  <summary>Pokročilé nastavení</summary>
+                  <div class="conversation-settings-grid">
+                    <label class="field">
+                      <span>Poskytovatel</span>
+                      <select id="convProvider"></select>
+                    </label>
+                    <label class="field">
+                      <span>Model</span>
+                      <select id="convAdvancedModel"></select>
+                    </label>
+                    <label class="field conversation-settings-wide" id="convCustomModelField" hidden>
+                      <span>Jiný model</span>
+                      <input id="convCustomModel" type="text" placeholder="Např. anthropic/claude-3.5-sonnet" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Kontextové okno (tokeny)</span>
+                      <input id="convContextWindowTokens" type="number" min="1024" step="1" />
+                      <span id="convModelContextWindowNote" class="field-note"></span>
+                    </label>
+                    <label class="field" id="convReasoningEffortField" hidden>
+                      <span>Úroveň uvažování</span>
+                      <select id="convReasoningEffort"></select>
+                    </label>
+                    <label class="field conversation-settings-wide">
+                      <span>Kolekce</span>
+                      <select id="convMsearchCollection"></select>
+                    </label>
+                    <div class="conversation-retrieval-sliders conversation-settings-wide">
+                      <label class="field">
+                        <span>Dokumentů: <output id="convTopKValue">10</output></span>
+                        <input id="convTopK" type="range" min="0" max="50" step="1" value="10" />
+                      </label>
+                      <label class="field">
+                        <span>Min. vůči nejlepšímu: <output id="convMinRelativeScoreValue">0.30</output></span>
+                        <input id="convMinRelativeScore" type="range" min="0" max="1" step="0.05" value="0.30" />
+                      </label>
+                      <label class="field">
+                        <span>Min. confidence: <output id="convMsearchMinConfidenceValue">0.00</output></span>
+                        <input id="convMsearchMinConfidence" type="range" min="0" max="1" step="0.05" value="0" />
+                      </label>
+                    </div>
+                    <label class="field inline-field rerank-toggle conversation-settings-wide">
+                      <input id="convMsearchRescore" type="checkbox" />
+                      <span>Re-ranking – zpřesní pořadí dokumentů (cross-encoder).</span>
+                    </label>
+                    <p class="field-note rescore-threshold-note conversation-settings-wide" id="convRescoreThresholdNote" hidden>
+                      Pozor: při re-rankingu přes mSearch jsou skóre na jiné škále a bývají nižší. Zkontroluj hodnotu Min. vůči nejlepšímu, ať nevyfiltruje příliš mnoho výsledků.
+                    </p>
+                  </div>
+                </details>
               </div>
             </div>
             <form id="conversationForm" class="conversation-composer">
@@ -376,7 +417,13 @@
             </form>
           </div>
         </section>
-        <aside class="conversation-sources-panel">
+        <nav id="conversationTurnRail" class="conversation-turn-rail" aria-label="Odpovědi v konverzaci">
+          <button id="conversationSourcesReopen" class="conversation-sources-reopen" type="button" hidden aria-expanded="false" aria-controls="conversationSourcesPanel">
+            Zdroje (<span id="conversationSourcesReopenCount">0</span>)
+          </button>
+          <div id="conversationTurnRailMarks" class="conversation-turn-rail-marks"></div>
+        </nav>
+        <aside id="conversationSourcesPanel" class="conversation-sources-panel">
           <div class="conversation-rewrite-controls">
             <label class="conversation-rewrite-toggle">
               <input id="conversationRewriteQuery" type="checkbox" checked />
@@ -388,7 +435,10 @@
             <div id="conversationRetrievalInfo" class="conversation-retrieval-info" hidden></div>
           </div>
           <div class="conversation-sources-header">
-            <h3 id="conversationSourcesHeading">Zdroje poslední odpovědi</h3>
+            <div class="conversation-sources-heading-row">
+              <h3 id="conversationSourcesHeading">Zdroje poslední odpovědi</h3>
+              <button id="conversationSourcesCollapse" class="ghost-button conversation-sources-collapse" type="button" aria-expanded="true" aria-controls="conversationSourcesPanel">Sbalit</button>
+            </div>
             <button id="conversationSourcesLatest" class="ghost-button conversation-sources-latest" type="button" hidden>Zpět na poslední odpověď</button>
           </div>
           <div id="conversationSources" class="sources conversation-sources"></div>
@@ -904,7 +954,7 @@
     </dialog>
 
 
-    <script src="static/avatar.bundle.js?v=conversation-mode-1"></script>
-    <script src="static/app.js?v=conversation-mode-1"></script>
+    <script src="static/avatar.bundle.js?v=conversation-mode-2"></script>
+    <script src="static/app.js?v=conversation-mode-2"></script>
 </body>
 </html>

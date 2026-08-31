@@ -3,6 +3,19 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
 describe("conversation request UI", () => {
+  it("starts loading the active WP's default question before prompt profiles finish", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+    const loadSettingsBody = appSource.slice(
+      appSource.indexOf("async function loadSettings()"),
+      appSource.indexOf("// Shared by the"),
+    );
+
+    expect(loadSettingsBody).toContain("const initialQuestionsPromise = loadPredefinedQuestions(activeWpId");
+    expect(loadSettingsBody.indexOf("initialQuestionsPromise"))
+      .toBeLessThan(loadSettingsBody.indexOf("await loadPromptPresets()"));
+    expect(loadSettingsBody).toContain("await initialQuestionsPromise");
+  });
+
   it("shows request progress inside the scrollable conversation stream", () => {
     const dom = new JSDOM(readFileSync("app/static/index.html", "utf8"));
     const document = dom.window.document;
@@ -111,6 +124,131 @@ describe("conversation mode is a view, not a dialog", () => {
     expect(messages.compareDocumentPosition(popover) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(popover.closest("#conversationForm")).toBeNull();
     expect(document.querySelector("#convWpSelect").closest("#conversationSettingsPopover")).toBe(popover);
+  });
+
+  it("keeps the basic conversation settings compact and puts placeholders below them", () => {
+    const basic = document.querySelector(".conversation-settings-basic");
+    const labels = [...basic.querySelectorAll(":scope > label > span")].map((span) => span.textContent.trim());
+    const placeholders = document.querySelector("#convPlaceholderControls");
+
+    expect(labels).toEqual(["Oblast", "Profil", "Model"]);
+    expect(basic.compareDocumentPosition(placeholders) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("moves all ten advanced controls into a closed disclosure", () => {
+    const details = document.querySelector(".conversation-settings-advanced");
+    const required = [
+      "#convProvider",
+      "#convAdvancedModel",
+      "#convCustomModel",
+      "#convContextWindowTokens",
+      "#convMsearchCollection",
+      "#convTopK",
+      "#convMinRelativeScore",
+      "#convMsearchMinConfidence",
+      "#convMsearchRescore",
+      "#convReasoningEffort",
+    ];
+
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary").textContent.trim()).toBe("Pokročilé nastavení");
+    for (const selector of required) {
+      expect(details.querySelector(selector)).not.toBeNull();
+    }
+    expect(details.querySelector("#convPlaceholderControls")).toBeNull();
+    expect(details.querySelector("#queryTransformSection")).toBeNull();
+    expect(details.querySelector("#convContextWindowTokens").closest("label").nextElementSibling)
+      .toBe(details.querySelector("#convReasoningEffortField"));
+    expect(details.querySelectorAll(".conversation-retrieval-sliders > label")).toHaveLength(3);
+  });
+
+  it("enlarges the collapsed settings chips and resolves current profile names first", () => {
+    const css = readFileSync("app/static/styles.css", "utf8");
+    const appSource = readFileSync("app/static/app.js", "utf8");
+    const labelBody = appSource.slice(
+      appSource.indexOf("function promptPresetLabelFromSettings(settings)"),
+      appSource.indexOf("function wpLabelFromSettings(settings)"),
+    );
+
+    expect(css).toMatch(/\.conversation-chips\[aria-expanded="false"\] \.conversation-chip/);
+    expect(labelBody).toContain("preset?.name || settings?.prompt_preset_name");
+  });
+
+  it("places the turn rail outside the sources panel", () => {
+    const view = document.querySelector("#conversationView");
+    const rail = document.querySelector("#conversationTurnRail");
+    const sources = document.querySelector("#conversationSourcesPanel");
+
+    expect(view.contains(rail)).toBe(true);
+    expect(sources.contains(rail)).toBe(false);
+    expect(Array.from(view.children).includes(rail)).toBe(true);
+    expect(rail.compareDocumentPosition(sources) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("collapses conversation sources independently of the single-turn shell", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+    const css = readFileSync("app/static/styles.css", "utf8");
+
+    expect(document.querySelector("#conversationSourcesCollapse")).not.toBeNull();
+    expect(document.querySelector("#conversationSourcesReopen").closest("#conversationTurnRail")).not.toBeNull();
+    expect(appSource).toMatch(/conversationView\?\.classList\.toggle\("conversation-sources-collapsed"/);
+    expect(css).toMatch(/\.conversation-view\.conversation-sources-collapsed/);
+    expect(appSource).not.toMatch(/setConversationSourcesCollapsed[\s\S]{0,500}shellEl\.classList/);
+  });
+
+  it("captures, applies and directly payload-overrides the four conversation retrieval settings", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+    const snapshotBody = appSource.slice(
+      appSource.indexOf("function captureSettingsSnapshot()"),
+      appSource.indexOf("function currentMainSettings()"),
+    );
+    const applyBody = appSource.slice(
+      appSource.indexOf("function applySettingsToGlobals(settings)"),
+      appSource.indexOf("function applyConvWp("),
+    );
+
+    for (const key of ["top_k", "msearch_rescore", "msearch_min_confidence", "min_relative_score"]) {
+      expect(snapshotBody).toContain(key);
+      expect(applyBody).toContain(key);
+    }
+    expect(appSource).toContain("top_k: Number(convSettings.top_k)");
+    expect(appSource).toContain("msearch_rescore: Boolean(convSettings.msearch_rescore)");
+    expect(appSource).toContain("msearch_min_confidence: convSettings.msearch_min_confidence");
+    expect(appSource).toContain("min_relative_score: convSettings.min_relative_score");
+    expect(appSource).not.toContain("conversationRetrievalOverrides");
+  });
+
+  it("keeps incompatible conversations readable and asks for a new conversation", () => {
+    const status = document.querySelector("#conversationCompatibilityStatus");
+    const appSource = readFileSync("app/static/app.js", "utf8");
+
+    expect(status).not.toBeNull();
+    expect(status.hasAttribute("hidden")).toBe(true);
+    expect(status.textContent.replace(/\s+/g, " ").trim())
+      .toBe("Tato konverzace používá starší formát nastavení. Pro pokračování založte novou konverzaci.");
+    expect(appSource).toContain("Avatar.hasCurrentConversationSettings(conversation?.settings)");
+    expect(appSource).toContain(
+      'conversationChipPrompt, settings ? promptPresetLabelFromSettings(settings) : "", "Profil", false',
+    );
+    expect(appSource).not.toMatch(/conversation\.settings\) \|\| currentMainSettings/);
+  });
+
+  it("debounces Settings input propagation and preserves the owner prompt across WP excursions", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+
+    expect(appSource).toContain('settingsDialog.addEventListener("input", scheduleSettingsDialogSync)');
+    expect(appSource).toContain("settingsDialogOwnerPromptSnapshot");
+    expect(appSource).toContain("restorePromptSettings(settingsDialogOwnerPromptSnapshot");
+    expect(appSource).toContain("syncConversationControlsFromMain({ refreshOptions: true })");
+  });
+
+  it("keeps the turn rail DOM stable while streaming and moves focus when sources collapse", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+
+    expect(appSource).toContain("Avatar.conversationTurnRailSignature(conversationId, messages)");
+    expect(appSource).toContain("if (signature === conversationTurnRailSignature)");
+    expect(appSource).toContain("conversationSourcesReopen?.focus()");
+    expect(appSource).toContain("conversationSourcesCollapse?.focus()");
   });
 
   it("drops the composer label and helper line and surfaces the send shortcut", () => {

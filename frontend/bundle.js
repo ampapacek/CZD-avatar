@@ -7,3 +7,5 @@ export * from "./token-budget.js";
 export * from "./storage.js";
 export * from "./ui-state.js";
 export * from "./conversation-turns.js";
+export * from "./conversation-settings.js";
+export * from "./model-display.js";
