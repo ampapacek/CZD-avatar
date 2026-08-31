@@ -92,6 +92,63 @@ class MSearchTextTests(unittest.TestCase):
         self.assertIsNone(metadata["page_number"])
         self.assertEqual(metadata["url"], "https://storage.ufal.mff.cuni.cz/some-doc.pdf")
 
+    def test_retrieval_channel_is_recorded_for_every_hit(self) -> None:
+        # mSearch returns a single score per hit, so a hybrid "sem-key" hit sets
+        # neither channel score; the raw channel in metadata is what lets the UI
+        # name it instead of showing a bare score.
+        response = {
+            "documents": [
+                {
+                    "document_id": f"doc-{channel}",
+                    "score": 0.53,
+                    "source": channel,
+                    "document": {
+                        "id": f"doc-{channel}",
+                        "title": f"{channel}.pdf",
+                        "content": (
+                            "This is a full passage of real text with more than a "
+                            "handful of unique words so it survives the fallback filter."
+                        ),
+                    },
+                }
+                for channel in ("sem", "key", "sem-key")
+            ]
+        }
+
+        records = _records_from_response(response, limit=10)
+
+        self.assertEqual(
+            [record["metadata"]["retrieval_channel"] for record in records],
+            ["sem", "key", "sem-key"],
+        )
+        # The channel scores are unchanged: only "sem"/"key" map onto one.
+        self.assertEqual(
+            [(record["dense_score"], record["bm25_score"]) for record in records],
+            [(0.53, None), (None, 0.53), (None, None)],
+        )
+
+    def test_retrieval_channel_is_none_when_absent(self) -> None:
+        response = {
+            "documents": [
+                {
+                    "document_id": "doc-nochannel",
+                    "score": 0.4,
+                    "document": {
+                        "id": "doc-nochannel",
+                        "title": "nochannel.pdf",
+                        "content": (
+                            "This is a full passage of real text with more than a "
+                            "handful of unique words so it survives the fallback filter."
+                        ),
+                    },
+                }
+            ]
+        }
+
+        records = _records_from_response(response, limit=10)
+
+        self.assertIsNone(records[0]["metadata"]["retrieval_channel"])
+
     def test_passage_only_keyword_fragments_are_omitted(self) -> None:
         response = {
             "documents": [

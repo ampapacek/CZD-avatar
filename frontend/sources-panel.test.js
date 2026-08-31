@@ -255,6 +255,39 @@ describe("sourceScoreParts", () => {
     ]);
   });
 
+  it("names the channel mSearch reported, hybrid included", () => {
+    // A "sem-key" hit sets neither channel score, so the metadata channel is
+    // the only thing that can name it.
+    const parts = (channel) =>
+      sourceScoreParts({ score: 0.53 }, { metadata: { retrieval_channel: channel } });
+    expect(parts("sem")).toEqual(["score 0.53", "sémanticky"]);
+    expect(parts("key")).toEqual(["score 0.53", "klíčová slova"]);
+    expect(parts("sem-key")).toEqual(["score 0.53", "sémanticky i klíčová slova"]);
+  });
+
+  it("prefers the reported channel over the score-equality guess", () => {
+    expect(
+      sourceScoreParts(
+        { score: 0.53 },
+        { dense_score: 0.53, bm25_score: null, metadata: { retrieval_channel: "sem-key" } },
+      ),
+    ).toEqual(["score 0.53", "sémanticky i klíčová slova"]);
+  });
+
+  it("falls back to the old inference for an unknown or absent channel", () => {
+    // Local hybrid retrieval never reports a channel, and conversations stored
+    // before the field existed have none either.
+    expect(
+      sourceScoreParts({ score: 0.48 }, { dense_score: 0.61, bm25_score: 0.22, metadata: {} }),
+    ).toEqual(["score 0.48", "emb 0.61", "BM25 0.22"]);
+    expect(
+      sourceScoreParts(
+        { score: 0.53 },
+        { dense_score: null, bm25_score: 0.53, metadata: { retrieval_channel: "hocus" } },
+      ),
+    ).toEqual(["score 0.53", "klíčová slova"]);
+  });
+
   it("still prints a lone component that differs from the score", () => {
     expect(sourceScoreParts({ score: 0.4 }, { dense_score: 0.53, bm25_score: null })).toEqual([
       "score 0.40",

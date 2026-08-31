@@ -165,6 +165,15 @@ export function sourceCardLabel(entry, showCitationNumbers) {
 
 export const SEMANTIC_CHANNEL_LABEL = "sémanticky";
 export const KEYWORD_CHANNEL_LABEL = "klíčová slova";
+export const HYBRID_CHANNEL_LABEL = "sémanticky i klíčová slova";
+
+// Null-prototype so an unrelated metadata string ("constructor") cannot resolve
+// to an inherited property and be mistaken for a label.
+const CHANNEL_LABELS = Object.assign(Object.create(null), {
+  sem: SEMANTIC_CHANNEL_LABEL,
+  key: KEYWORD_CHANNEL_LABEL,
+  "sem-key": HYBRID_CHANNEL_LABEL,
+});
 
 function scoreComponent(value) {
   return typeof value === "number" ? value : null;
@@ -179,9 +188,19 @@ function scoreComponent(value) {
  * document, leaving the other one absent — so `score 0.53 · BM25 0.53` printed
  * the same number twice. The only information there is *which* channel found
  * it, so name the channel instead of repeating the number.
+ *
+ * mSearch now states the channel outright in `metadata.retrieval_channel`, so
+ * that wins when it is a channel we know — it is the only way to name a hybrid
+ * `sem-key` hit, whose one score lands in neither channel field. Anything else
+ * (local hybrid retrieval, and conversations stored before the field existed)
+ * falls through to inferring the channel from the score-equality below.
  */
 export function sourceScoreParts(source, chunk) {
   const score = scoreComponent(source?.score);
+  const channelLabel = CHANNEL_LABELS[chunk?.metadata?.retrieval_channel];
+  if (channelLabel) {
+    return [score === null ? "score" : `score ${score.toFixed(2)}`, channelLabel];
+  }
   const dense = scoreComponent(chunk?.dense_score);
   const bm25 = scoreComponent(chunk?.bm25_score);
   const parts = [score === null ? "score" : `score ${score.toFixed(2)}`];

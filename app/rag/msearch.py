@@ -177,6 +177,11 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
         title = _string(document.get("title")) or _string(document.get("Název")) or display_id or "mSearch dokument"
         page_number = _page_number(document.get("page_number"))
         url = _url_with_page(url, page_number)
+        # Which mSearch channel found the hit: "sem", "key" or, in hybrid mode,
+        # "sem-key". Only the first two map onto a score field below, so the raw
+        # value is carried in metadata for the UI to name the channel — mSearch
+        # returns a single score per hit, never one per channel.
+        retrieval_channel = _string(item.get("source")) or None
 
         records.append(
             {
@@ -193,6 +198,7 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
                     "document_url": url,
                     "source_url": url,
                     "source_name": "mSearch",
+                    "retrieval_channel": retrieval_channel,
                 },
                 "score": score,
                 "dense_score": score if item.get("source") == "sem" else None,
