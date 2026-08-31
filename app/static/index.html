@@ -249,9 +249,14 @@
         </section>
       </section>
 
-      <aside class="sources-panel">
+      <aside class="sources-panel" id="sourcesPanel" hidden>
+        <button type="button" id="sourcesReopen" class="sources-reopen" hidden aria-expanded="false" aria-controls="sourcesBody">
+          Zdroje (<span id="sourcesReopenCount">0</span>)
+        </button>
+        <div id="sourcesBody" class="sources-body">
         <div class="sources-header">
-          <h2>Zdroje</h2>
+          <h2>Zdroje <span id="sourcesCount" class="sources-count"></span></h2>
+          <button type="button" id="sourcesCollapse" class="ghost-button sources-collapse" aria-expanded="true" aria-controls="sourcesBody">Sbalit</button>
           <p id="retrievalQueryInfo" class="query-used-info" hidden>Zdroje vyhledány pro dotaz: <strong id="retrievalQueryText"></strong></p>
           <p id="msearchRescoreNote" class="msearch-rescore-note" hidden>Pořadí přeřazeno přes mSearch (cross-encoder).</p>
           <button type="button" id="toggleBaseline" class="ghost-button" hidden aria-expanded="false">
@@ -267,6 +272,7 @@
             <h3 class="sources-column-title">Bez re-rankingu</h3>
             <div id="baselineSources" class="sources"></div>
           </div>
+        </div>
         </div>
       </aside>
     </main>

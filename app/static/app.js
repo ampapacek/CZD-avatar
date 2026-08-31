@@ -1,4 +1,5 @@
 const form = document.querySelector("#chatForm");
+const shellEl = document.querySelector(".shell");
 const question = document.querySelector("#question");
 const questionStatus = document.querySelector("#questionStatus");
 const placeholderControls = document.querySelector("#placeholderControls");
@@ -139,6 +140,12 @@ const answerWelcomeGuide = document.querySelector("#answerWelcomeGuide");
 const answerQuestionInfo = document.querySelector("#answerQuestionInfo");
 const answerQuestionText = document.querySelector("#answerQuestionText");
 const sourcesEl = document.querySelector("#sources");
+const sourcesPanel = document.querySelector("#sourcesPanel");
+const sourcesBody = document.querySelector("#sourcesBody");
+const sourcesCount = document.querySelector("#sourcesCount");
+const sourcesCollapseButton = document.querySelector("#sourcesCollapse");
+const sourcesReopenButton = document.querySelector("#sourcesReopen");
+const sourcesReopenCount = document.querySelector("#sourcesReopenCount");
 const answerActions = document.querySelector("#answerActions");
 const copyAnswerStatus = document.querySelector("#copyAnswerStatus");
 const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
@@ -1075,6 +1082,8 @@ async function runQuery(retrieveOnlyMode) {
   renderAnswer("");
   sourcesEl.innerHTML = "";
   baselineSourcesEl.innerHTML = "";
+  mainSourcesCollapsed = false;
+  updateMainSourcesPanel(null);
   renderBaselineComparison();
   stopRerankCountdown();
   loadingIndicator.hidden = false;
@@ -5070,6 +5079,50 @@ function withOmittedChunks(sources, chunks, omittedChunks) {
   };
 }
 
+function updateMainSourcesPanel(layout = lastMainSourcesLayout) {
+  lastMainSourcesLayout = layout;
+  const count = layout?.entries?.length || 0;
+  const presentation = Avatar.sourcePanelPresentation(count, mainSourcesCollapsed);
+  if (!presentation.hasSources) {
+    mainSourcesCollapsed = false;
+  }
+  if (sourcesPanel) {
+    sourcesPanel.hidden = presentation.panelHidden;
+  }
+  if (sourcesBody) {
+    sourcesBody.hidden = presentation.bodyHidden;
+  }
+  if (sourcesReopenButton) {
+    sourcesReopenButton.hidden = presentation.reopenHidden;
+    sourcesReopenButton.setAttribute("aria-expanded", presentation.isCollapsed ? "false" : "true");
+    sourcesReopenButton.setAttribute("aria-label", `Zobrazit ${presentation.label.toLowerCase()}`);
+  }
+  if (sourcesCollapseButton) {
+    sourcesCollapseButton.setAttribute("aria-expanded", presentation.isCollapsed ? "false" : "true");
+  }
+  if (sourcesCount) {
+    sourcesCount.textContent = presentation.hasSources ? `(${presentation.count})` : "";
+  }
+  if (sourcesReopenCount) {
+    sourcesReopenCount.textContent = String(presentation.count);
+  }
+  shellEl?.classList.toggle("has-sources", presentation.hasSources);
+  shellEl?.classList.toggle("sources-collapsed", presentation.isCollapsed);
+}
+
+function setMainSourcesCollapsed(collapsed) {
+  mainSourcesCollapsed = Boolean(collapsed);
+  updateMainSourcesPanel();
+  if (mainSourcesCollapsed) {
+    sourcesReopenButton?.focus();
+  } else {
+    sourcesCollapseButton?.focus();
+  }
+}
+
+sourcesCollapseButton?.addEventListener("click", () => setMainSourcesCollapsed(true));
+sourcesReopenButton?.addEventListener("click", () => setMainSourcesCollapsed(false));
+
 function renderSources(sources, chunks, answerText = streamedAnswerText) {
   renderQueryUsedInfo();
   const combined = withOmittedChunks(sources, chunks, currentOmittedChunks);
@@ -5077,6 +5130,7 @@ function renderSources(sources, chunks, answerText = streamedAnswerText) {
     orderedCitationIds: Avatar.extractOrderedCitationIds(answerText),
     omittedCitationIds: combined.omittedCitationIds,
   });
+  updateMainSourcesPanel(layout);
   renderSourceCards(
     sourcesEl,
     combined.sources,
