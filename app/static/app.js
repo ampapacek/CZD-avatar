@@ -187,6 +187,9 @@ const convPlaceholderControls = document.querySelector("#convPlaceholderControls
 const settingsButton = document.querySelector("#settingsButton");
 const settingsDialog = document.querySelector("#settingsDialog");
 const closeSettingsButton = document.querySelector("#closeSettingsButton");
+const settingsCategoryTabs = document.querySelector("#settingsCategoryTabs");
+const settingsCategoryButtons = Array.from(document.querySelectorAll("[role='tab'][data-settings-category]"));
+const settingsCategoryPanels = Array.from(document.querySelectorAll("[role='tabpanel'][data-settings-panel]"));
 const helpButton = document.querySelector("#helpButton");
 const helpDialog = document.querySelector("#helpDialog");
 const closeHelpButton = document.querySelector("#closeHelpButton");
@@ -1454,6 +1457,47 @@ helpDialog.addEventListener("click", (event) => {
   }
 });
 
+function selectSettingsCategory(category, { focus = false } = {}) {
+  const selectedButton = settingsCategoryButtons.find(
+    (button) => button.dataset.settingsCategory === category,
+  ) || settingsCategoryButtons[0];
+  if (!selectedButton) {
+    return;
+  }
+  for (const button of settingsCategoryButtons) {
+    const selected = button === selectedButton;
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of settingsCategoryPanels) {
+    panel.hidden = panel.dataset.settingsPanel !== selectedButton.dataset.settingsCategory;
+  }
+  if (focus) {
+    selectedButton.focus();
+  }
+}
+
+settingsCategoryTabs?.addEventListener("click", (event) => {
+  const button = event.target.closest("[role='tab'][data-settings-category]");
+  if (button) {
+    selectSettingsCategory(button.dataset.settingsCategory);
+  }
+});
+
+settingsCategoryTabs?.addEventListener("keydown", (event) => {
+  const current = event.target.closest("[role='tab'][data-settings-category]");
+  const currentIndex = settingsCategoryButtons.indexOf(current);
+  if (currentIndex < 0) {
+    return;
+  }
+  const nextIndex = Avatar.nextTabIndex(currentIndex, event.key, settingsCategoryButtons.length);
+  if (nextIndex === currentIndex && !["Home", "End"].includes(event.key)) {
+    return;
+  }
+  event.preventDefault();
+  selectSettingsCategory(settingsCategoryButtons[nextIndex].dataset.settingsCategory, { focus: true });
+});
+
 settingsButton.addEventListener("click", () => {
   renderProviderApiKeyFields();
   populateCustomProviderFields();
@@ -1462,6 +1506,7 @@ settingsButton.addEventListener("click", () => {
   renderGlobalPlaceholderDefs();
   renderInlinePlaceholderDefs();
   renderQueryTransformSettings();
+  selectSettingsCategory("profiles");
   settingsDialog.showModal();
 });
 closeSettingsButton.addEventListener("click", () => {

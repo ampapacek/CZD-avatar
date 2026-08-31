@@ -2512,6 +2512,49 @@ body[data-theme="dark"] .source-highlight {
   overflow: auto;
 }
 
+.settings-category-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.settings-category-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 9px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-category-tab[aria-selected="true"] {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.settings-category-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-admin-section {
+  border-left: 3px solid color-mix(in srgb, var(--warn) 60%, var(--line));
+}
+
+#deletePromptButton,
+#clearCustomProviderApiKeyButton {
+  color: var(--warn);
+}
+
 .query-transform-inline {
   grid-column: 1 / -1;
   display: grid;

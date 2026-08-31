@@ -328,6 +328,12 @@
           </button>
         </div>
         <div class="settings-body">
+          <div id="settingsCategoryTabs" class="settings-category-tabs" role="tablist" aria-label="Kategorie nastavení">
+            <button id="settingsProfilesTab" class="settings-category-tab" type="button" role="tab" aria-selected="true" aria-controls="settingsProfilesPanel" tabindex="0" data-settings-category="profiles">Profily a proměnné</button>
+            <button id="settingsModelsTab" class="settings-category-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsModelsPanel" tabindex="-1" data-settings-category="models">Modely a tokeny</button>
+            <button id="settingsAccessTab" class="settings-category-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsAccessPanel" tabindex="-1" data-settings-category="access">API a přístup</button>
+          </div>
+          <div id="settingsProfilesPanel" class="settings-category-panel" role="tabpanel" aria-labelledby="settingsProfilesTab" data-settings-panel="profiles">
           <section class="settings-section settings-wp-section">
             <label class="field">
               <span>Pracovní balíček (WP)</span>
@@ -450,7 +456,9 @@
               </div>
             </div>
           </section>
+          </div>
 
+          <div id="settingsModelsPanel" class="settings-category-panel" role="tabpanel" aria-labelledby="settingsModelsTab" data-settings-panel="models" hidden>
           <section class="settings-section">
             <h3>Tokenový rozpočet</h3>
             <div class="settings-grid">
@@ -485,8 +493,10 @@
             </div>
             <p class="field-note">Skutečný kompresní práh je nižší z nastaveného maxima a hodnoty 250 + 25 % dostupného vstupu. Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
           </section>
+          </div>
 
-          <section class="settings-section">
+          <div id="settingsAccessPanel" class="settings-category-panel" role="tabpanel" aria-labelledby="settingsAccessTab" data-settings-panel="access" hidden>
+          <section class="settings-section settings-admin-section">
             <h3>Admin přístup</h3>
             <p class="field-note">Admin heslo zpřístupní všechny modely a dovolí upravovat sdílené prompty a proměnné na serveru. Ukládá se jen v tomto prohlížeči.</p>
             <div class="inline-actions">
@@ -560,6 +570,7 @@
             </label>
             <p class="field-note">Vlastní poskytovatel se objeví v rozbalovacím seznamu `Poskytovatel` na hlavní stránce. U něj je volba `Jiný model` dostupná vždy.</p>
           </section>
+          </div>
         </div>
       </div>
     </dialog>
