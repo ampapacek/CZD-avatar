@@ -1,9 +1,37 @@
 export const CONVERSATION_SETTINGS_VERSION = 2;
 
+export const CONVERSATION_RETRIEVAL_SETTING_KEYS = [
+  "top_k",
+  "msearch_rescore",
+  "msearch_min_confidence",
+  "min_relative_score",
+];
+
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
 
 export function hasCurrentConversationSettings(settings) {
   return Number(settings?.settings_version) === CONVERSATION_SETTINGS_VERSION;
+}
+
+export function hasUsableConversationSettings(settings) {
+  return Boolean(settings && typeof settings === "object" && !Array.isArray(settings));
+}
+
+// Settings version 2 added four retrieval controls. Older conversations keep
+// every setting they already own and borrow only those missing values from the
+// current main-page snapshot. This is an effective request/view object; callers
+// must not persist it merely because the conversation was opened.
+export function effectiveConversationSettings(settings, fallbackSettings) {
+  if (!hasUsableConversationSettings(settings)) {
+    return null;
+  }
+  const effective = { ...settings };
+  for (const key of CONVERSATION_RETRIEVAL_SETTING_KEYS) {
+    if (effective[key] === undefined && fallbackSettings?.[key] !== undefined) {
+      effective[key] = fallbackSettings[key];
+    }
+  }
+  return effective;
 }
 
 function sameSettingValue(left, right) {

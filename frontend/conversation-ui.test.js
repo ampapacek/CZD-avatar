@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
-import { hasCurrentConversationSettings } from "./conversation-settings.js";
+import { effectiveConversationSettings } from "./conversation-settings.js";
 
 describe("conversation request UI", () => {
   it("starts loading the active WP's default question before prompt profiles finish", () => {
@@ -234,19 +234,13 @@ describe("conversation mode is a view, not a dialog", () => {
     expect(appSource).not.toContain("conversationRetrievalOverrides");
   });
 
-  it("keeps incompatible conversations readable and asks for a new conversation", () => {
+  it("warns that legacy conversations borrow missing retrieval settings", () => {
     const status = document.querySelector("#conversationCompatibilityStatus");
-    const appSource = readFileSync("app/static/app.js", "utf8");
 
     expect(status).not.toBeNull();
     expect(status.hasAttribute("hidden")).toBe(true);
     expect(status.textContent.replace(/\s+/g, " ").trim())
-      .toBe("Tato konverzace používá starší formát nastavení. Pro pokračování založte novou konverzaci.");
-    expect(appSource).toContain("Avatar.hasCurrentConversationSettings(conversation?.settings)");
-    expect(appSource).toContain(
-      'conversationChipPrompt, settings ? currentPromptPresetLabelFromSettings(settings) : "", "Profil", false',
-    );
-    expect(appSource).not.toMatch(/conversation\.settings\) \|\| currentMainSettings/);
+      .toBe("Tato konverzace používá starší formát nastavení. Chybějící hodnoty vyhledávání se převezmou z aktuálního nastavení.");
   });
 
   it("debounces Settings input propagation and preserves the owner prompt across WP excursions", () => {
@@ -340,9 +334,6 @@ describe("the assistant turn is prose, not a bubble", () => {
   });
 });
 
-// Every thread stored before settings_version 2 is "incompatible", and nothing
-// migrates one forward — so this is the path a returning user actually hits.
-// It has to render the banner and "—" chips, not throw on the way in.
 describe("chips for a conversation stored before the current settings version", () => {
   const appSource = readFileSync("app/static/app.js", "utf8");
   const chipSource = appSource.slice(
@@ -367,9 +358,10 @@ describe("chips for a conversation stored before the current settings version", 
       "conversationChipModel",
       "conversationChipWp",
       "conversationChipPrompt",
+      "currentMainSettings",
       `${chipSource}\nreturn updateConversationChips;`,
     )(
-      { hasCurrentConversationSettings },
+      { effectiveConversationSettings },
       (wpId) => (wpId === "wp1" ? { id: "wp1", label: "Oblast jedna" } : null),
       (settings) => settings.prompt_preset_name || settings.prompt_preset_id,
       (text) => String(text || ""),
@@ -377,6 +369,12 @@ describe("chips for a conversation stored before the current settings version", 
       chips.model,
       chips.wp,
       chips.prompt,
+      () => ({
+        top_k: 10,
+        msearch_rescore: true,
+        msearch_min_confidence: 0.2,
+        min_relative_score: 0.1,
+      }),
     );
 
     updateConversationChips(conversation);
@@ -385,15 +383,15 @@ describe("chips for a conversation stored before the current settings version", 
 
   const staleSettings = { model: "openai/gpt-4o", wp_id: "wp1", prompt_preset_id: "p1" };
 
-  it("renders placeholders instead of throwing on a version-less thread", () => {
+  it("renders the stored identity settings on a version-less thread", () => {
     expect(() => renderChips({ settings: staleSettings })).not.toThrow();
 
     const chips = renderChips({ settings: staleSettings });
 
-    expect(chips.model.textContent).toBe("—");
-    expect(chips.wp.textContent).toBe("—");
-    expect(chips.prompt.textContent).toBe("—");
-    expect(chips.model.title).toBe("Model: —");
+    expect(chips.model.textContent).toBe("openai/gpt-4o");
+    expect(chips.wp.textContent).toBe("Oblast jedna");
+    expect(chips.prompt.textContent).toBe("p1");
+    expect(chips.model.title).toBe("Model: openai/gpt-4o");
   });
 
   it("still renders the real values once the thread carries the current version", () => {

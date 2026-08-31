@@ -82,6 +82,9 @@ export function conversationSourcesBinding(messages, selectedIndex = null) {
   const isLatest = resolved === null || resolved === indexes[indexes.length - 1];
   const answerNumber = resolved === null ? 0 : indexes.indexOf(resolved) + 1;
   return {
+    // Keep the explicit selection separate from its resolved render target.
+    // In particular, null must remain null so the next answer is followed.
+    requestedIndex: indexes.includes(selectedIndex) ? selectedIndex : null,
     selectedIndex: resolved,
     message,
     isLatest,

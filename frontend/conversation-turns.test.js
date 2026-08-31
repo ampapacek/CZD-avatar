@@ -120,6 +120,25 @@ describe("conversationSourcesBinding", () => {
     expect(afterNewTurn.isLatest).toBe(true);
   });
 
+  it("keeps follow-latest state through the user-only render before a streamed answer", () => {
+    let requestedIndex = null;
+    const settledFirstTurn = thread.slice(0, 2);
+    const waitingForSecondAnswer = [...settledFirstTurn, { role: "user", content: "druhá" }];
+    const streamedSecondAnswer = [...waitingForSecondAnswer, thread[3]];
+
+    for (const messages of [settledFirstTurn, waitingForSecondAnswer, streamedSecondAnswer]) {
+      const binding = conversationSourcesBinding(messages, requestedIndex);
+      requestedIndex = binding.requestedIndex;
+    }
+
+    const finalBinding = conversationSourcesBinding(streamedSecondAnswer, requestedIndex);
+    expect(requestedIndex).toBeNull();
+    expect(finalBinding.selectedIndex).toBe(3);
+    expect(finalBinding.message.sources[0].title).toBe("Dokument B");
+    expect(finalBinding.isLatest).toBe(true);
+    expect(finalBinding.heading).toBe("Zdroje poslední odpovědi");
+  });
+
   it("reports an empty thread as the latest with no message", () => {
     const binding = conversationSourcesBinding([], null);
 
@@ -128,5 +147,12 @@ describe("conversationSourcesBinding", () => {
     expect(binding.answerCount).toBe(0);
     expect(binding.isLatest).toBe(true);
     expect(binding.heading).toBe("Zdroje poslední odpovědi");
+  });
+
+  it("turns a stale explicit selection back into follow-latest state", () => {
+    const binding = conversationSourcesBinding(thread, 42);
+
+    expect(binding.requestedIndex).toBeNull();
+    expect(binding.selectedIndex).toBe(5);
   });
 });

@@ -6458,10 +6458,11 @@ function updateConvModelContextWindowNote() {
 // conversation settings bar. Called only on selection changes (open, switch,
 // new), never during streaming re-renders.
 function applyConversationSettings(conversation) {
-  if (!Avatar.hasCurrentConversationSettings(conversation?.settings)) {
+  const settings = Avatar.effectiveConversationSettings(conversation?.settings, currentMainSettings());
+  if (!settings) {
     return;
   }
-  loadSettingsSession(conversation.settings, convPlaceholderControls);
+  loadSettingsSession(settings, convPlaceholderControls);
   syncConversationControlsFromMain({ refreshOptions: true });
   updateConvModelContextWindowNote();
 }
@@ -6480,7 +6481,7 @@ function persistActiveConversationSettings(snapshot = captureSettingsSnapshot())
   }
   const entries = getConversationEntries();
   const selected = entries.find((entry) => entry.id === selectedConversationId);
-  if (!Avatar.hasCurrentConversationSettings(selected?.settings)) {
+  if (!Avatar.hasUsableConversationSettings(selected?.settings)) {
     return;
   }
   const next = entries.map((entry) =>
@@ -6754,24 +6755,25 @@ conversationList?.addEventListener("click", (event) => {
 
 function renderConversationDetail(conversation) {
   const messages = conversation?.messages || [];
-  const settingsCompatible = Avatar.hasCurrentConversationSettings(conversation?.settings);
-  if (!settingsCompatible) {
+  const settingsUsable = Avatar.hasUsableConversationSettings(conversation?.settings);
+  const settingsCurrent = Avatar.hasCurrentConversationSettings(conversation?.settings);
+  if (!settingsUsable) {
     setConversationSettingsPopover(false);
   }
   if (conversationCompatibilityStatus) {
-    conversationCompatibilityStatus.hidden = settingsCompatible;
+    conversationCompatibilityStatus.hidden = settingsCurrent;
   }
   if (conversationQuestion) {
-    conversationQuestion.disabled = !settingsCompatible;
+    conversationQuestion.disabled = !settingsUsable;
   }
   if (conversationSubmitButton) {
-    conversationSubmitButton.disabled = !settingsCompatible || activeConversationController !== null;
+    conversationSubmitButton.disabled = !settingsUsable || activeConversationController !== null;
   }
   if (conversationSettingsToggle) {
-    conversationSettingsToggle.disabled = !settingsCompatible;
+    conversationSettingsToggle.disabled = !settingsUsable;
   }
   if (conversationRewriteQuery) {
-    conversationRewriteQuery.disabled = !settingsCompatible;
+    conversationRewriteQuery.disabled = !settingsUsable;
   }
   const assistantIndexes = Avatar.assistantMessageIndexes(messages);
   const latestAssistantIndex = assistantIndexes.length ? assistantIndexes[assistantIndexes.length - 1] : null;
@@ -6866,7 +6868,6 @@ function renderConversationSelectedTurn(conversation) {
     conversation?.messages || [],
     conversationSelectedAssistantIndex,
   );
-  conversationSelectedAssistantIndex = binding.selectedIndex;
   const selectedAssistant = binding.message || undefined;
   const selectedSources = selectedAssistant?.sources?.length
     ? selectedAssistant.sources
@@ -6938,9 +6939,7 @@ conversationMessages?.addEventListener("click", (event) => {
 // The composer answers "which settings apply?" where the question arises, so the
 // chips mirror the conversation's own settings rather than the main page's.
 function updateConversationChips(conversation) {
-  const settings = Avatar.hasCurrentConversationSettings(conversation?.settings)
-    ? conversation.settings
-    : null;
+  const settings = Avatar.effectiveConversationSettings(conversation?.settings, currentMainSettings());
   const chips = [
     [conversationChipModel, settings?.model, "Model", true],
     [conversationChipWp, getWpConfig(settings?.wp_id)?.label || settings?.wp_id, "Oblast", false],
@@ -7190,7 +7189,7 @@ async function submitConversationTurn() {
   }
   flushActiveConversationSettingsPersist();
   const storedConversation = ensureSelectedConversation();
-  if (!Avatar.hasCurrentConversationSettings(storedConversation?.settings)) {
+  if (!Avatar.hasUsableConversationSettings(storedConversation?.settings)) {
     renderConversationWorkspace();
     return;
   }
@@ -7302,9 +7301,9 @@ async function submitConversationTurn() {
   let latestSources = [];
   let latestChunks = [];
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
-  // Build the payload from the conversation's own settings rather than the live
-  // main-page controls, so each turn uses the settings this conversation owns.
-  const convSettings = conversation.settings;
+  // Build the payload from the conversation's own settings. Legacy threads
+  // borrow only retrieval fields that predate their saved settings shape.
+  const convSettings = Avatar.effectiveConversationSettings(conversation.settings, currentMainSettings());
   const compactedThrough = Number(conversation.conversation_compacted_through) || 0;
   const payload = buildRequestPayload({
     question: prompt,
