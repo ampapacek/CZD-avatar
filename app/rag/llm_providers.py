@@ -29,6 +29,16 @@ _EXCLUDED_MODEL_PATTERNS = (
     "openwebdocs",
     "openwebuidocs",
     "llm6-2xrtx5000.gemma3:12b-it-qat",
+    # Non-chat models (embedding / reranker / ASR) from e-infra's catalogue.
+    # Listed as exact ids on purpose: provider lists drift, and a substring or
+    # prefix rule would eventually swallow a real chat model with a similar name.
+    "multilingual-e5-large-instruct",
+    "mxbai-embed-large:latest",
+    "nomic-embed-text-v1.5",
+    "nomic-embed-text-v2-moe",
+    "qwen3-embedding-4b",
+    "qwen3-reranker-4b",
+    "whisper-large-v3",
 )
 _DEFAULT_MODELS_CACHE_TTL_SECONDS = 3600.0
 _PUBLIC_ALL_MODELS = "*"

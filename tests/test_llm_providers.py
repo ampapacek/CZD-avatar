@@ -60,6 +60,44 @@ class LLMProviderTests(unittest.TestCase):
         self.assertEqual(aiufal["public_models"], ["LLM1-A40.llama3.3:latest"])
         self.assertEqual(aiufal["model_presets"], ["LLM1-A40.llama3.3:latest"])
 
+    def test_einfra_non_chat_models_are_excluded_by_exact_id(self) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "data": [
+                {"id": "multilingual-e5-large-instruct"},
+                {"id": "qwen3-32b"},
+                {"id": "mxbai-embed-large:latest"},
+                {"id": "nomic-embed-text-v1.5"},
+                {"id": "nomic-embed-text-v2-moe"},
+                {"id": "qwen3-embedding-4b"},
+                {"id": "qwen3-reranker-4b"},
+                {"id": "whisper-large-v3"},
+                {"id": "llama-3.3-70b-instruct"},
+                # Near miss: merely contains an excluded id, so it must survive.
+                {"id": "my-whisper-large-v3-chat"},
+            ]
+        }
+        response.raise_for_status.return_value = None
+
+        with patch("app.rag.llm_providers.httpx.get", return_value=response):
+            providers = available_llm_providers(
+                {
+                    "LLM_PROVIDERS": "einfra",
+                    "LLM_PROVIDER_EINFRA_BASE_URL": "https://llm.e-infra.cz/v1",
+                    "LLM_PROVIDER_EINFRA_DEFAULT_MODEL": "qwen3-32b",
+                    "LLM_PROVIDER_EINFRA_PUBLIC_MODELS": "*",
+                    "LLM_PROVIDER_EINFRA_DISCOVER_MODELS": "true",
+                }
+            )
+
+        einfra = providers[0]
+
+        self.assertEqual(
+            einfra["model_presets"],
+            ["qwen3-32b", "llama-3.3-70b-instruct", "my-whisper-large-v3-chat"],
+        )
+        self.assertEqual(einfra["public_models"], einfra["model_presets"])
+
     def test_public_provider_dicts_do_not_expose_api_keys(self) -> None:
         providers = available_llm_providers(
             {
