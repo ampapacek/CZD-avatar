@@ -78,7 +78,8 @@
         "param": "reasoning_effort",
         "efforts": ["low", "medium", "high"],
         "mandatory": true,
-        "note": "e-infra. Probed 2026-08-23: low/medium/high are honoured and the trace grows with them. 'none' is accepted but does not disable — it returns the same trace as omitting the parameter — so no off switch is offered. minimal/xhigh/max are a 400."
+        "default": "medium",
+        "note": "e-infra. Probed 2026-08-23: low/medium/high are honoured and the trace grows with them. 'none' is accepted but does not disable — it returns the same trace as omitting the parameter — so no off switch is offered. minimal/xhigh/max are a 400. 'medium' is declared on purpose to overrule the derived default: a mandatory model would otherwise get the cheapest level it accepts, and 'low' thinks too little to ground an answer well. The extra tokens are a deliberate quality choice, not an oversight."
       }
     },
     "gpt-oss-120b": {
@@ -86,7 +87,8 @@
         "param": "reasoning_effort",
         "efforts": ["low", "medium", "high"],
         "mandatory": true,
-        "note": "e-infra. Same model and same behaviour as 'mini': 'none' is accepted and ignored, minimal/xhigh/max are a 400. Not to be confused with 'openai/gpt-oss-120b', which is the OpenRouter route to it and takes the nested 'reasoning' parameter."
+        "default": "medium",
+        "note": "e-infra. Same model and same behaviour as 'mini': 'none' is accepted and ignored, minimal/xhigh/max are a 400. Not to be confused with 'openai/gpt-oss-120b', which is the OpenRouter route to it and takes the nested 'reasoning' parameter. 'medium' is declared for the same reason as on 'mini': the derived cheapest level, 'low', is too thin to ground an answer well, so the default overrules it deliberately."
       }
     },
     "thinker": {
@@ -133,7 +135,8 @@
         "param": "chat_template_kwargs.reasoning_effort",
         "efforts": ["low", "medium", "high"],
         "mandatory": true,
-        "note": "ai.ufal. Probed 2026-08-30: the gateway drops top-level reasoning_effort and nested reasoning.effort, but its llama.cpp/GGUF route honours chat_template_kwargs.reasoning_effort. At temperature 0 on one controlled prompt, low/medium/high produced 393/735/2712 reasoning words and 694/1212/3873 completion tokens. The model reasons at all levels; 'none' did not disable it, so no off switch is offered."
+        "default": "medium",
+        "note": "ai.ufal. Probed 2026-08-30: the gateway drops top-level reasoning_effort and nested reasoning.effort, but its llama.cpp/GGUF route honours chat_template_kwargs.reasoning_effort. At temperature 0 on one controlled prompt, low/medium/high produced 393/735/2712 reasoning words and 694/1212/3873 completion tokens. The model reasons at all levels; 'none' did not disable it, so no off switch is offered. 'medium' is declared on purpose to overrule the derived cheapest level 'low', knowing from those very numbers that medium costs roughly twice low; the better-grounded answer is worth it."
       }
     },
     "LLM7.unsloth/gemma-4-12b-it-GGUF:UD-Q8_K_XL": {
@@ -169,6 +172,15 @@
     },
     "LLM1-MI210.llama3.3:latest": {
       "context_window": 20000
+    },
+    "openai/gpt-oss-120b": {
+      "reasoning": {
+        "param": "reasoning",
+        "efforts": ["low", "medium", "high"],
+        "mandatory": true,
+        "default": "medium",
+        "note": "OpenRouter route to the same GPT-OSS model e-infra serves as 'gpt-oss-120b'; it takes the nested 'reasoning' parameter, not the flat one. The catalogue already describes it and is read at startup — re-checked live 2026-08-31, which returned reasoning.mandatory true, supported_efforts high/medium/low, 'reasoning' among supported_parameters, and default_effort 'medium' that discovery deliberately ignores. This entry is written by hand only to declare that default: 'medium' overrules the cheapest level a mandatory model would otherwise derive, because 'low' is too thin to ground an answer well. Never list 'none' here — OpenRouter answers it with '400 Reasoning is mandatory for this endpoint and cannot be disabled', which once broke every answer from this model. No context_window on purpose: the catalogue's 131072 is discovered and clamped to the OpenRouter provider default."
+      }
     }
   },
   "provider_defaults": {

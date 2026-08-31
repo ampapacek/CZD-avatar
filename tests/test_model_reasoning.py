@@ -71,6 +71,21 @@ class ReasoningPayloadTests(unittest.TestCase):
         support = ReasoningSupport(param="reasoning", efforts=("low",))
         self.assertEqual(support.payload(None), {})
 
+    def test_a_mandatory_model_without_a_default_still_derives_its_cheapest_effort(self) -> None:
+        # The global rule, unchanged: several shipped models now declare
+        # "medium" on purpose, and declaring one must stay an override rather
+        # than a new baseline. A model that says nothing gets the cheapest
+        # level it accepts — read off the effort order, not off the list order.
+        support = ReasoningSupport(
+            param="reasoning_effort", efforts=("high", "medium", "low"), mandatory=True
+        )
+        self.assertEqual(support.effective_default, "low")
+        self.assertEqual(support.payload(None), {"reasoning_effort": "low"})
+        # And an optional one is still left alone entirely.
+        optional = ReasoningSupport(param="reasoning_effort", efforts=("none", "low", "high"))
+        self.assertIsNone(optional.effective_default)
+        self.assertEqual(optional.payload(None), {})
+
     def test_an_undeclared_effort_is_dropped_not_forwarded(self) -> None:
         # A stale client must not be able to put an arbitrary value upstream.
         support = ReasoningSupport(param="reasoning", efforts=("low",), default=None)

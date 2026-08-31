@@ -217,10 +217,40 @@ class ShippedMetadataTests(unittest.TestCase):
         support = metadata.reasoning["LLM3.unsloth/gpt-oss-120b-GGUF:UD-Q8_K_XL"]
         self.assertEqual(support.param, "chat_template_kwargs.reasoning_effort")
         self.assertEqual(support.efforts, ("low", "medium", "high"))
+        # It declares "medium", so that is what an untouched selector sends —
+        # not the "low" the mandatory rule would otherwise derive.
         self.assertEqual(
             support.payload(None),
-            {"chat_template_kwargs": {"reasoning_effort": "low"}},
+            {"chat_template_kwargs": {"reasoning_effort": "medium"}},
         )
+
+    def test_the_steerable_mandatory_models_ask_for_medium_on_purpose(self) -> None:
+        # Four models reason whether or not they are asked and accept
+        # low/medium/high. The derived default would be "low" for all of them;
+        # each declares "medium" instead, because the cheapest level thinks too
+        # little to ground an answer well. This pins the choice against a
+        # silent regression to the derived value.
+        reasoning = load_model_metadata(Path("data/models.json")).reasoning
+        for name in (
+            "mini",
+            "gpt-oss-120b",
+            "LLM3.unsloth/gpt-oss-120b-GGUF:UD-Q8_K_XL",
+            "openai/gpt-oss-120b",
+        ):
+            with self.subTest(model=name):
+                support = reasoning[name]
+                self.assertTrue(support.mandatory)
+                self.assertEqual(support.efforts, ("low", "medium", "high"))
+                self.assertEqual(support.default, "medium")
+                self.assertEqual(support.effective_default, "medium")
+
+    def test_the_openrouter_gpt_oss_entry_overrides_discovery_with_the_nested_param(self) -> None:
+        # OpenRouter's catalogue describes this model correctly, but discovery
+        # never sets a default, and a hand-written entry is what beats it. The
+        # nested "reasoning" form is the one that route takes.
+        support = load_model_metadata(Path("data/models.json")).reasoning["openai/gpt-oss-120b"]
+        self.assertEqual(support.param, "reasoning")
+        self.assertEqual(support.payload(None), {"reasoning": {"effort": "medium"}})
 
 
 if __name__ == "__main__":
