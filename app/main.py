@@ -109,9 +109,8 @@ from app.rag.wp_config import (
 )
 
 
-log_path = configure_logging("api")
 logger = logging.getLogger(__name__)
-logger.info("Starting API; log file: %s", log_path)
+
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
     seen: set[str] = set()
@@ -140,10 +139,11 @@ default_model = ""
 # practice the names are provider-qualified (`openai/gpt-oss-120b` on OpenRouter
 # against `gpt-oss-120b` on e-infra), so they do not collide.
 model_reasoning: dict[str, ReasoningSupport] = {}
+_provider_state_ready = False
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
-    global model_metadata, model_reasoning
+    global model_metadata, model_reasoning, _provider_state_ready
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
     model_metadata = load_model_metadata(settings.model_metadata_path)
     provider_configs = load_provider_configs(
@@ -166,6 +166,29 @@ def _refresh_provider_state(force_model_refresh: bool = False) -> None:
     )
     default_model = provider_default_model(default_provider, provider_presets)
     all_llm_models = _dedupe_preserve_order(provider_model_presets)
+    _provider_state_ready = True
+    logger.info(
+        "Loaded settings: provider=%s model=%s providers=%s admin_password=%s",
+        default_provider,
+        default_model,
+        [provider["id"] for provider in provider_presets],
+        "set" if settings.admin_password else "missing",
+    )
+
+
+def _ensure_provider_state() -> None:
+    """Lazily trigger the first provider-state refresh on demand.
+
+    Discovery is deliberately not run at import/startup time: it involves a
+    slow network round-trip (AI Ufal's catalogue endpoint), and running it at
+    import time means uvicorn's --reload doubles the cost (its validation
+    import in the parent process and the real import in the spawned worker
+    both trigger it). Deferring it to the first request that needs it means
+    it happens at most once per worker process, whenever it's actually used.
+    """
+
+    if not _provider_state_ready:
+        _refresh_provider_state()
 
 
 def _reasoning_payload(model: str | None, provider_id: str | None, effort: str | None) -> dict[str, object]:
@@ -216,20 +239,14 @@ def _llm_settings_payload() -> dict[str, object]:
     }
 
 
-_refresh_provider_state()
-logger.info(
-    "Loaded settings: provider=%s model=%s providers=%s admin_password=%s",
-    default_provider,
-    default_model,
-    [provider["id"] for provider in provider_presets],
-    "set" if settings.admin_password else "missing",
-)
 pipeline = RAGPipeline(settings)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global analytics
+    log_path = configure_logging("api")
+    logger.info("Starting API; log file: %s", log_path)
     analytics = configure_analytics(
         settings.analytics_enabled,
         settings.analytics_dir,
@@ -290,6 +307,7 @@ def _enforce_retrieval_backend_policy(wp_id: str | None, retrieval_backend: str 
 
 
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, str | None]:
+    _ensure_provider_state()
     resolved_provider = resolve_llm_provider(request.llm_provider, provider_presets, request.llm_base_url)
     provider_config = provider_preset(resolved_provider, provider_presets, request.llm_base_url)
     resolved_model = request.model or provider_config["default_model"] or (
