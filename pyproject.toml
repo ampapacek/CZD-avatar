@@ -17,6 +17,17 @@ dependencies = [
     "tiktoken>=0.8.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+# `tests/test_analytics.py` imports `scripts`, which lives at the repository
+# root and is not an installed package.
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.uv]
 package = false
 

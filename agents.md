@@ -57,6 +57,8 @@ Local retrieval: `RETRIEVAL_BACKEND=local`, add docs under `data/raw/`, then `uv
 
 CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 
+Tests: `uv run pytest` (Python; the `dev` dependency group and `pythonpath`/`testpaths` come from `pyproject.toml`) and `npm test` (frontend vitest).
+
 ## WP config, prompts, placeholders
 
 - WPs are typed dataclasses in `wp_config.py` (not env/JSON): `WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`. WP1 holds the history prompts (`Učitel`/`Historik`/`Laik`); WP2–WP4 ship neutral starters.
