@@ -9,6 +9,23 @@
     <link rel="stylesheet" href="static/styles.css?v=conversation-mode-2" />
   </head>
   <body>
+    <script id="themeBoot">
+      // Paint the saved theme before the first frame. app.js only restores it
+      // after /settings resolves, which is long enough for a dark-theme user to
+      // see a light flash. Site data can be blocked, so never throw here.
+      (function () {
+        var saved = "light";
+        try {
+          var stored = localStorage.getItem("theme");
+          if (stored === "dark" || stored === "light") {
+            saved = stored;
+          }
+        } catch (err) {
+          /* localStorage unavailable — keep the default theme. */
+        }
+        document.body.dataset.theme = saved;
+      })();
+    </script>
     <main class="shell">
       <header class="topbar">
         <div class="brand-block">
