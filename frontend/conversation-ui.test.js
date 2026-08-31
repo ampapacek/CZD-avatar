@@ -240,7 +240,7 @@ describe("conversation mode is a view, not a dialog", () => {
     expect(status).not.toBeNull();
     expect(status.hasAttribute("hidden")).toBe(true);
     expect(status.textContent.replace(/\s+/g, " ").trim())
-      .toBe("Tato konverzace používá starší formát nastavení. Chybějící hodnoty vyhledávání se převezmou z aktuálního nastavení.");
+      .toBe("Tato konverzace používá starší formát nastavení. Chybějící hodnoty vyhledávání se převezmou z aktuálního nastavení. Pro nejspolehlivější chování doporučujeme začít novou konverzaci.");
   });
 
   it("debounces Settings input propagation and preserves the owner prompt across WP excursions", () => {

@@ -22,6 +22,17 @@ describe("conversation settings format", () => {
     expect(hasUsableConversationSettings([])).toBe(false);
   });
 
+  it("lets settings-less legacy conversations borrow the live fallback", () => {
+    const fallback = {
+      settings_version: CONVERSATION_SETTINGS_VERSION,
+      model: "live-model",
+      prompt_preset_id: "wp1-default",
+    };
+
+    expect(effectiveConversationSettings(null, fallback)).toEqual(fallback);
+    expect(effectiveConversationSettings(null, fallback)).not.toBe(fallback);
+  });
+
   it("fills only missing version-2 retrieval settings from the live fallback", () => {
     const legacy = {
       model: "legacy-model",

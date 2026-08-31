@@ -6552,7 +6552,7 @@ function persistActiveConversationSettings(snapshot = captureSettingsSnapshot())
   }
   const entries = getConversationEntries();
   const selected = entries.find((entry) => entry.id === selectedConversationId);
-  if (!Avatar.hasUsableConversationSettings(selected?.settings)) {
+  if (!selected) {
     return;
   }
   const next = entries.map((entry) =>
@@ -6826,7 +6826,9 @@ conversationList?.addEventListener("click", (event) => {
 
 function renderConversationDetail(conversation) {
   const messages = conversation?.messages || [];
-  const settingsUsable = Avatar.hasUsableConversationSettings(conversation?.settings);
+  const settingsUsable = Boolean(
+    Avatar.effectiveConversationSettings(conversation?.settings, currentMainSettings()),
+  );
   const settingsCurrent = Avatar.hasCurrentConversationSettings(conversation?.settings);
   if (!settingsUsable) {
     setConversationSettingsPopover(false);
@@ -7260,7 +7262,8 @@ async function submitConversationTurn() {
   }
   flushActiveConversationSettingsPersist();
   const storedConversation = ensureSelectedConversation();
-  if (!Avatar.hasUsableConversationSettings(storedConversation?.settings)) {
+  const convSettings = Avatar.effectiveConversationSettings(storedConversation?.settings, currentMainSettings());
+  if (!convSettings) {
     renderConversationWorkspace();
     return;
   }
@@ -7293,6 +7296,9 @@ async function submitConversationTurn() {
   };
   const workingConversation = {
     ...conversation,
+    // A settings-less legacy thread borrows the current settings until the
+    // user continues it; that first new turn makes the borrowed snapshot its own.
+    settings: convSettings,
     title: conversation.messages.length ? conversation.title : shortenText(prompt, 64),
     updatedAt: new Date().toISOString(),
     rewrite_query_for_retrieval: rewriteQueryForRetrieval,
@@ -7374,7 +7380,6 @@ async function submitConversationTurn() {
   let latestRetrievalInfo = retrievalInfoFromEvent({}, prompt);
   // Build the payload from the conversation's own settings. Legacy threads
   // borrow only retrieval fields that predate their saved settings shape.
-  const convSettings = Avatar.effectiveConversationSettings(conversation.settings, currentMainSettings());
   const compactedThrough = Number(conversation.conversation_compacted_through) || 0;
   const payload = buildRequestPayload({
     question: prompt,

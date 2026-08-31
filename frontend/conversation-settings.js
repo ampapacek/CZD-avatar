@@ -23,7 +23,7 @@ export function hasUsableConversationSettings(settings) {
 // must not persist it merely because the conversation was opened.
 export function effectiveConversationSettings(settings, fallbackSettings) {
   if (!hasUsableConversationSettings(settings)) {
-    return null;
+    return hasUsableConversationSettings(fallbackSettings) ? { ...fallbackSettings } : null;
   }
   const effective = { ...settings };
   for (const key of CONVERSATION_RETRIEVAL_SETTING_KEYS) {
