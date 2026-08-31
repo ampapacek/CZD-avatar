@@ -258,65 +258,57 @@
           </button>
         </div>
         <div class="help-body">
-          <div class="help-card">
-            <h3>Jak aplikace odpovídá</h3>
-            <p>Aplikace nejdřív vyhledá relevantní úryvky dokumentů (snippets) a potom z nich složí odpověď pomocí vybraného jazykového modelu. Citace v odpovědi odkazují na zdroje zobrazené v pravém panelu. Pokud chceš samotné vyhledávání bez generování odpovědi, klikni na tlačítko <code>Pouze vyhledat zdroje</code>.</p>
-          </div>
-          <div class="help-card">
-            <h3>Úprava dotazu</h3>
-            <p>Pokud ji vybraný prompt nabízí, transformace se před vyhledáváním provede automaticky. V <code>Pokročilém nastavení</code> ji lze pro aktuální dotaz vypnout, vybrat jinou transformaci nebo ji spustit předem a výsledný dotaz ručně upravit. Profil také určuje, zda se má upravený dotaz použít jen pro vyhledání zdrojů, nebo i pro vygenerování odpovědi.</p>
-          </div>
-          <div class="help-card">
+          <section class="help-start">
+            <h3>Jak začít</h3>
+            <ol class="help-steps">
+              <li><strong>Zeptej se.</strong> Vyber oblast a podobu odpovědi, napiš otázku a klikni na <code>Odpovědět</code>. Můžeš také použít náhodnou nebo připravenou otázku.</li>
+              <li><strong>Přečti si odpověď.</strong> Avatar nejdřív najde odpovídající pasáže a potom z nich sestaví odpověď. Horní indexy v textu odkazují na použité podklady.</li>
+              <li><strong>Ověř ji ve zdrojích.</strong> Kliknutím na citaci přejdeš ke kartě zdroje; kliknutím na citovanou kartu zvýrazníš odpovídající místa v textu. Zvýraznění zrušíš dalším kliknutím nebo klávesou <code>Esc</code>.</li>
+            </ol>
+          </section>
+
+          <aside class="help-verification">
+            <strong>Odpovědi ověřuj.</strong> Aplikace je v beta fázi a jazykové modely mohou chybovat. U důležitých odpovědí vždy otevři zdroje a zkontroluj, zda citace skutečně podporují tvrzení v textu.
+          </aside>
+
+          <section class="help-section">
             <h3>Zdroje a kolekce</h3>
-            <p>Vybraný pracovní balíček (WP) určuje dostupné kolekce dokumentů. Kolekce vybírá konkrétní sadu podkladů, ve které aplikace hledá relevantní úryvky. Počet dokumentů, minimální confidence, relativní skóre a re-ranking ovlivňují, které úryvky se použijí jako podklad pro odpověď.</p>
-            <p>Citace propojují odpověď se zdroji v obou směrech: kliknutím na horní index v odpovědi se zvýrazní příslušná karta zdroje, kliknutím na kartu citovaného zdroje se v odpovědi zvýrazní všechna místa, kde je citován. Zvýraznění zrušíš dalším kliknutím na stejnou kartu nebo klávesou <code>Esc</code>.</p>
-          </div>
-          <div class="help-card">
-            <h3>Model</h3>
-            <p>V sekci <code>Model</code> lze vybrat poskytovatele, jazykový model a context window. Context window ovlivňuje, kolik nalezených zdrojů se připojí do promptu a zda se před odesláním zkrátí. Nejde o skutečný limit vybraného modelu.</p>
-          </div>
-          <div class="help-card">
-            <h3>Prompty a {proměnné}</h3>
-            <p>Prompt může obsahovat proměnné ve tvaru <code>{length}</code>, <code>{custom_instructions}</code> nebo jiné vlastní proměnné (placeholdery). Aplikace z nich vytvoří ovládací prvky na hlavní stránce. Globální proměnné platí pro více promptů, vlastní proměnné promptu patří jen ke konkrétnímu promptu. Pokud existuje globální i promptová proměnná se stejným názvem, promptová verze má přednost.</p>
-          </div>
-          <div class="help-card">
-            <h3>Lokální a sdílené úpravy</h3>
-            <p>Prompty a proměnné se dají uložit jen v tomto prohlížeči nebo sdíleně na serveru. Lokální úpravy jsou vhodné pro experimenty. Sdílené úpravy uvidí i ostatní uživatelé. Vlastník může svůj sdílený obsah upravovat nebo smazat; admin přístup umožňuje spravovat také obsah ostatních.</p>
-          </div>
-          <div class="help-card">
-            <h3>Zamčeno a admin přístup</h3>
-            <p>Bez admin přístupu jsou dostupné jen veřejně povolené modely a běžné lokální úpravy. Admin přístup zpřístupní všechny načtené modely, vlastní model a úpravy sdílených promptů nebo proměnných na serveru. Tlačítkem <code>Odhlásit admina</code> lze stav vrátit zpět a otestovat běžný zamčený režim.</p>
-          </div>
-          <div class="help-card">
-            <h3>Tokeny a délka kontextu</h3>
-            <p>Do modelu se posílá systémový prompt, uživatelský prompt, vybrané hodnoty proměnných (vložené na daná místa v promptu), případná historie konverzace (v konverzačním režimu) a nalezené zdroje. To vše spotřebovává tokeny. Pokud je kontext příliš dlouhý, aplikace musí zdroje zkrátit nebo některé vynechat, aby zůstalo místo na odpověď.</p>
-            <p>Jako první se odstraní nejméně relevantní dokumenty. Pokud to nestačí, snippets se zkracují. Pokud ani to nestačí, systém zahlásí chybu.</p>
-          </div>
-          <div class="help-card">
-            <h3>Konverzace a historie</h3>
-            <p>Konverzace slouží pro navazující otázky, ale v beta verzi může být méně spolehlivá než samostatný dotaz. Osobní historie ukládá předchozí odpovědi, zdroje a nastavení v tomto prohlížeči. Vybrané položky historie lze sdílet na serveru s ostatními uživateli.</p>
-          </div>
-          <div class="help-card">
-            <h3>Nastavení</h3>
-            <p>Tlačítko <code>Nastavení</code> otevírá správu věcí, které se obvykle nemění u každé otázky. Lze tam uložit API klíče, zadat nebo odhlásit admin přístup, nastavit tokenový rozpočet, přidat vlastního LLM poskytovatele a upravovat prompty, proměnné nebo transformace dotazu. Lze tam také obnovit seznam dostupných modelů a kolekcí. Lokálně uložené změny platí pouze pro tento prohlížeč; sdílené změny mohou používat i ostatní.</p>
-          </div>
-          <div class="help-card">
-            <h3>Pokročilé nastavení</h3>
-            <p><code>Pokročilé nastavení</code> na hlavní stránce ovlivňuje transformaci a vyhledávání zdrojů pro aktuální dotaz. Nastavuje použitou transformaci, počet dokumentů, minimální confidence, relativní skóre vůči nejlepšímu výsledku a re-ranking. Přísnější filtry mohou vrátit méně dokumentů, než určuje zvolený počet.</p>
-          </div>
-          <div class="help-card">
-            <h3>Re-ranking</h3>
-            <p>Re-ranking je volitelný druhý krok po vyhledávání. Nalezené úryvky se znovu ohodnotí podle relevance k otázce, aby se nejvhodnější zdroje dostaly výše. Může zlepšit pořadí výsledků, ale vyhledávání může trvat o něco déle.</p>
-            <p>Při zapnutém re-rankingu mohou být skóre na jiné škále. Pokud se vrací příliš málo zdrojů, zkontroluj zejména nastavení <code>Min. vůči nejlepšímu</code>.</p>
-          </div>
-          <div class="help-card">
-            <h3>Soukromí a kontrola</h3>
-            <p>API klíče, lokální prompty, lokální proměnné, osobní historie a konverzace se ukládají v tomto prohlížeči. Sdílené prompty, proměnné a položky historie se ukládají na serveru. U důležitých odpovědí vždy otevři zdroje a ověř, jestli citace opravdu podporují tvrzení v textu.</p>
-          </div>
-          <div class="help-card">
-            <h3>Upozornění</h3>
-            <p>Tato aplikace je v beta testovací fázi a stále ve vývoji. Výsledky je potřeba ověřovat, LLMs mohou dělat chyby.</p>
-          </div>
+            <p>Oblast určuje dostupné kolekce dokumentů. Kolekce vybírá konkrétní sadu podkladů. Během generování jsou zdroje řazené podle relevance; po dokončení se mohou seřadit podle citací a necitované zdroje lze skrýt nebo znovu zobrazit.</p>
+            <p>Sloupec Zdroje můžeš sbalit. Kompaktní ovládací prvek <code>Zdroje (n)</code> ukazuje počet nalezených podkladů a sloupec kdykoli znovu otevře.</p>
+          </section>
+
+          <section class="help-section">
+            <h3>Profil</h3>
+            <p>Profil je uložené nastavení promptu, které určuje způsob odpovědi a případnou úpravu dotazu před vyhledáváním. Profily a jejich proměnné lze spravovat v <code>Nastavení</code>.</p>
+          </section>
+
+          <h3 class="help-advanced-title">Pokročilé a technické</h3>
+          <p class="help-advanced-note">Tyto možnosti nejsou nutné pro běžné položení otázky a ověření odpovědi.</p>
+
+          <details class="help-details">
+            <summary>Pouze vyhledat zdroje</summary>
+            <p>Tlačítko <code>Pouze vyhledat zdroje</code> spustí vyhledávání bez generování odpovědi. Hodí se pro kontrolu obsahu kolekce nebo nastavení vyhledávání.</p>
+          </details>
+          <details class="help-details">
+            <summary>Úprava dotazu před vyhledáváním</summary>
+            <p>Pokud ji vybraný profil nabízí, transformace se provede automaticky. V <code>Pokročilém nastavení</code> ji lze pro aktuální dotaz vypnout, změnit nebo spustit předem a výsledek ručně upravit.</p>
+          </details>
+          <details class="help-details">
+            <summary>Vyhledávání a re-ranking</summary>
+            <p>Počet dokumentů, minimální confidence a relativní skóre určují, které pasáže se použijí. Re-ranking může zpřesnit jejich pořadí, ale prodlouží vyhledávání a pracuje s jinou škálou skóre.</p>
+          </details>
+          <details class="help-details">
+            <summary>Model, context window a tokeny</summary>
+            <p>V části <code>Model</code> vybereš poskytovatele, model a context window. Context window zde řídí balení promptu a zdrojů; nejde o skutečný limit modelu. Při nedostatku místa se nejméně relevantní zdroje vynechají nebo zkrátí.</p>
+          </details>
+          <details class="help-details">
+            <summary>Prompty, proměnné a sdílení</summary>
+            <p>Prompt může používat proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>. Lokální profily a proměnné zůstávají v tomto prohlížeči; sdílené položky jsou uložené na serveru a řídí se stávajícím vlastnictvím a admin přístupem.</p>
+          </details>
+          <details class="help-details">
+            <summary>Konverzace, historie a soukromí</summary>
+            <p>Konverzace slouží pro navazující otázky. Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči; vybrané položky lze sdílet. API klíče, lokální profily a osobní konverzace zůstávají v prohlížeči.</p>
+          </details>
         </div>
       </div>
     </dialog>

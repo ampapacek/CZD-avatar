@@ -2431,6 +2431,70 @@ body[data-theme="dark"] .source-highlight {
   padding-right: 4px;
 }
 
+.help-start,
+.help-section {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-start h3,
+.help-section h3,
+.help-advanced-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.help-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.help-steps strong,
+.help-verification strong {
+  color: var(--text);
+}
+
+.help-verification {
+  padding: 12px 14px;
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface-3));
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.help-advanced-title {
+  margin-top: 4px;
+}
+
+.help-advanced-note {
+  margin-top: -8px !important;
+  font-size: 13px;
+}
+
+.help-details {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-details summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.help-details p {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
 .help-body p {
   color: var(--muted);
   line-height: 1.55;
@@ -2438,24 +2502,6 @@ body[data-theme="dark"] .source-highlight {
 
 .help-body > p {
   margin: 0;
-}
-
-.help-card {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-3);
-}
-
-.help-card h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.help-card p {
-  font-size: 14px;
 }
 
 .settings-body {
