@@ -77,31 +77,31 @@
         </header>
 
         <form id="chatForm" class="composer">
-          <div class="controls">
+          <div class="controls topic-controls">
             <label class="field wp-control">
-              <span>WP</span>
+              <span>Oblast</span>
               <select id="wpSelect"></select>
             </label>
-            <label class="field prompt-control">
-              <span>Prompt</span>
-              <select id="activePromptPreset"></select>
-            </label>
-            <label class="field collection-control">
-              <span>Kolekce</span>
-              <select id="msearchCollection"></select>
-            </label>
+          </div>
+
+          <div id="answerWelcome" class="answer-welcome">
+            <h2 class="answer-welcome-title">Polož otázku k tématu <span id="answerWelcomeWp">…</span>.</h2>
           </div>
 
           <label class="field question-field">
             <span>Otázka</span>
             <textarea id="question" rows="3" required></textarea>
           </label>
+          <div id="answerWelcomeExamples" class="answer-welcome-examples" hidden>
+            <p class="answer-welcome-label">Zkus například</p>
+            <ul id="answerWelcomeList"></ul>
+          </div>
           <div class="question-actions">
-            <button id="randomQuestionButton" class="secondary" type="button" title="Vybere náhodnou otázku pro aktuální WP a vloží ji do pole.">
+            <button id="randomQuestionButton" class="secondary" type="button" title="Vybere náhodnou otázku pro aktuální oblast a vloží ji do pole.">
               Náhodná otázka
             </button>
             <div id="predefinedQuestionWrap" class="predefined-question-control">
-              <button id="predefinedQuestionButton" class="secondary" type="button" aria-haspopup="listbox" aria-expanded="false" title="Vyber z připravených otázek pro aktuální WP.">
+              <button id="predefinedQuestionButton" class="secondary" type="button" aria-haspopup="listbox" aria-expanded="false" title="Vyber z připravených otázek pro aktuální oblast.">
                 Připravené otázky ▾
               </button>
               <ul id="predefinedQuestionList" class="predefined-question-list" role="listbox" aria-label="Připravené otázky" hidden></ul>
@@ -114,6 +114,28 @@
               <button id="cancelButton" class="secondary danger-lite" type="button" hidden title="Zruší probíhající vyhledávání, re-ranking i generování odpovědi.">Zrušit</button>
             </div>
           </div>
+
+          <div id="questionStatus" class="status" role="status" aria-live="polite" hidden></div>
+
+          <p id="answerWelcomeGuide" class="answer-welcome-guide">
+            Vyber <strong>Oblast</strong>, na kterou se chceš ptát, polož otázku a náš avatar vyhledá relevantní zdroje a odpoví na jejich
+            základě. Pro upřesnění profilu, délky či dalších instrukcí použij sekci <strong>Podoba odpovědi</strong>. Poskytovatele a model
+            vybereš v části <strong>Model</strong>; kolekci a způsob vyhledávání v části <strong>Pokročilé nastavení</strong>. Pro navazující
+            otázky otevři <strong>Konverzaci</strong>. Další možnosti jsou v <strong>Nastavení</strong>. Více informací se dozvíš v sekci
+            <strong>Nápověda</strong>.
+          </p>
+
+          <details class="advanced response-settings">
+            <summary>Podoba odpovědi</summary>
+            <div class="response-bundle-grid">
+              <label class="field prompt-control">
+                <span>Profil</span>
+                <select id="activePromptPreset"></select>
+              </label>
+              <div id="placeholderControls" class="placeholder-controls response-placeholder-controls"></div>
+            </div>
+          </details>
+
           <details class="advanced model-settings">
             <summary>Model</summary>
             <div class="model-grid">
@@ -147,7 +169,10 @@
           <details class="advanced">
             <summary>Pokročilé nastavení</summary>
             <div class="advanced-grid">
-              <div id="placeholderControls" class="placeholder-controls advanced-placeholder-controls"></div>
+              <label class="field collection-control">
+                <span>Kolekce</span>
+                <select id="msearchCollection"></select>
+              </label>
               <div class="retrieval-sliders">
                 <label class="field">
                   <span>Dokumentů: <output id="topKValue">10</output></span>
@@ -191,8 +216,8 @@
 
         </form>
 
-        <section class="answer-panel" aria-live="polite">
-          <div id="status" class="status">Připraveno.</div>
+        <section id="answerPanel" class="answer-panel" aria-live="polite" hidden>
+          <div id="status" class="status" hidden></div>
           <div id="loadingIndicator" class="loading-indicator" hidden>
             <span class="spinner" aria-hidden="true"></span>
             <span class="loading-copy">

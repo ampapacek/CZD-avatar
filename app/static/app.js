@@ -1,5 +1,6 @@
 const form = document.querySelector("#chatForm");
 const question = document.querySelector("#question");
+const questionStatus = document.querySelector("#questionStatus");
 const placeholderControls = document.querySelector("#placeholderControls");
 const llmProvider = document.querySelector("#llmProvider");
 const model = document.querySelector("#model");
@@ -128,7 +129,13 @@ const loadingIndicator = document.querySelector("#loadingIndicator");
 const rerankProgressEl = document.querySelector("#rerankProgress");
 const rerankProgressFill = document.querySelector("#rerankProgressFill");
 const rerankProgressLabel = document.querySelector("#rerankProgressLabel");
+const answerPanel = document.querySelector("#answerPanel");
 const answerEl = document.querySelector("#answer");
+const answerWelcome = document.querySelector("#answerWelcome");
+const answerWelcomeWp = document.querySelector("#answerWelcomeWp");
+const answerWelcomeExamples = document.querySelector("#answerWelcomeExamples");
+const answerWelcomeList = document.querySelector("#answerWelcomeList");
+const answerWelcomeGuide = document.querySelector("#answerWelcomeGuide");
 const answerQuestionInfo = document.querySelector("#answerQuestionInfo");
 const answerQuestionText = document.querySelector("#answerQuestionText");
 const sourcesEl = document.querySelector("#sources");
@@ -288,6 +295,11 @@ let currentReasoning = "";
 // passed into renderSourceCards rather than read from it, so the main panel,
 // conversation mode and history cannot desync.
 let mainSourcesView = Avatar.createSourcesView();
+// The main Sources column is a session view only. A new request starts open;
+// hiding the column never mutates the ordering/citation view above.
+let mainSourcesCollapsed = false;
+let lastMainSourcesLayout = null;
+let welcomeDismissed = false;
 // null means "not decided yet" — the panel derives the settled view from the
 // stored answer on first render, and keeps whatever the user toggles after that.
 let conversationSourcesView = null;
@@ -1036,6 +1048,9 @@ async function runQuery(retrieveOnlyMode) {
   setQueryTransformSectionBusy(true);
   cancelButton.hidden = false;
   cancelButton.disabled = false;
+  dismissWelcome();
+  questionStatus.hidden = true;
+  statusEl.hidden = false;
   statusEl.className = "status";
   statusEl.textContent = retrieveOnlyMode
     ? "Vyhledávám zdroje..."
@@ -1261,6 +1276,7 @@ question.addEventListener("input", () => {
   questionEditRevision += 1;
   managedQuestion = null;
   clearAppliedQueryTransform();
+  questionStatus.hidden = true;
 });
 
 cancelButton.addEventListener("click", () => {
@@ -1272,8 +1288,9 @@ cancelButton.addEventListener("click", () => {
 
 randomQuestionButton.addEventListener("click", async () => {
   randomQuestionButton.disabled = true;
-  statusEl.className = "status";
-  statusEl.textContent = "Vybírám náhodnou otázku...";
+  questionStatus.hidden = false;
+  questionStatus.className = "status";
+  questionStatus.textContent = "Vybírám náhodnou otázku...";
   const requestedWpId = activeWpId;
   const questionRevisionSnapshot = questionEditRevision;
   try {
@@ -1284,8 +1301,8 @@ randomQuestionButton.addEventListener("click", async () => {
       throw new Error(data.detail || "Nepodařilo se vybrat náhodnou otázku.");
     }
     if (activeWpId !== requestedWpId || questionEditRevision !== questionRevisionSnapshot) {
-      statusEl.className = "status";
-      statusEl.textContent = "";
+      questionStatus.hidden = true;
+      questionStatus.textContent = "";
       return;
     }
     question.value = data.question || "";
@@ -1293,10 +1310,10 @@ randomQuestionButton.addEventListener("click", async () => {
     managedQuestion = { wpId: requestedWpId, value: question.value };
     clearAppliedQueryTransform();
     question.focus();
-    statusEl.textContent = "Náhodná otázka je vložená. Spusť odpověď tlačítkem Odpovědět.";
+    questionStatus.textContent = "Náhodná otázka je vložená. Spusť odpověď tlačítkem Odpovědět.";
   } catch (error) {
-    statusEl.className = "status error";
-    statusEl.textContent = error.message;
+    questionStatus.className = "status error";
+    questionStatus.textContent = error.message;
   } finally {
     randomQuestionButton.disabled = false;
   }
@@ -1409,7 +1426,63 @@ async function loadPredefinedQuestions(
     managedQuestion = { wpId, value: question.value };
     clearAppliedQueryTransform();
   }
+  renderWelcomeState(wpId, destination.error ? [] : destination.questions);
 }
+
+const WELCOME_EXAMPLE_COUNT = 3;
+
+function dismissWelcome() {
+  welcomeDismissed = true;
+  if (answerWelcome) {
+    answerWelcome.hidden = true;
+  }
+  if (answerWelcomeExamples) {
+    answerWelcomeExamples.hidden = true;
+  }
+  if (answerWelcomeGuide) {
+    answerWelcomeGuide.hidden = true;
+  }
+  if (answerPanel) {
+    answerPanel.hidden = false;
+  }
+}
+
+function renderWelcomeState(wpId, preparedQuestions = []) {
+  if (!answerWelcome || welcomeDismissed) {
+    return;
+  }
+  answerWelcome.hidden = false;
+  if (answerWelcomeGuide) {
+    answerWelcomeGuide.hidden = false;
+  }
+  if (answerWelcomeWp) {
+    answerWelcomeWp.textContent = Avatar.wpTopicLabel(getWpConfig(wpId)?.label);
+  }
+  const currentQuestion = question.value.trim();
+  const examples = preparedQuestions
+    .filter((item) => item.trim() && item.trim() !== currentQuestion)
+    .slice(0, WELCOME_EXAMPLE_COUNT);
+  if (answerWelcomeExamples) {
+    answerWelcomeExamples.hidden = examples.length === 0;
+  }
+  if (answerWelcomeList) {
+    answerWelcomeList.innerHTML = examples
+      .map((item) => `<li><button type="button" class="answer-welcome-example">${escapeHtml(item)}</button></li>`)
+      .join("");
+  }
+}
+
+answerWelcomeList?.addEventListener("click", (event) => {
+  const button = event.target.closest(".answer-welcome-example");
+  if (!button) {
+    return;
+  }
+  question.value = button.textContent || "";
+  questionEditRevision += 1;
+  managedQuestion = { wpId: activeWpId, value: question.value };
+  clearAppliedQueryTransform();
+  form.requestSubmit(submitButton);
+});
 
 predefinedQuestionButton?.addEventListener("click", () => {
   if (predefinedQuestionList?.hidden) {
@@ -1428,6 +1501,7 @@ predefinedQuestionList?.addEventListener("click", (event) => {
   questionEditRevision += 1;
   managedQuestion = { wpId: activeWpId, value: question.value };
   clearAppliedQueryTransform();
+  questionStatus.hidden = true;
   closePredefinedQuestions();
   question.focus();
 });
@@ -7561,6 +7635,7 @@ function applyHistoryEntryToForm(entry) {
 // reviewed full-screen. Graceful for older / retrieve-only entries with missing
 // fields. Works for both local entries and shared items (same shape).
 function restoreAnswerFromHistoryEntry(entry) {
+  dismissWelcome();
   const restoredChunks = entry.retrieved_chunks || [];
   const restoredSources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(restoredChunks)) || [];
   streamedAnswerText = entry.answer || "";
@@ -7600,6 +7675,7 @@ function formatHistoryTime(timestamp) {
 }
 
 loadSettings().catch((error) => {
+  statusEl.hidden = false;
   statusEl.className = "status error";
   statusEl.textContent = error.message;
 });

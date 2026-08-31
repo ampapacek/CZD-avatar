@@ -406,8 +406,12 @@ select:focus {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
   gap: 14px;
+}
+
+.topic-controls .wp-control {
+  grid-column: 1;
 }
 
 /* Data-driven parameter placeholder controls (length, custom_instructions, ...)
@@ -421,6 +425,22 @@ select:focus {
 
 .placeholder-controls:empty {
   display: none;
+}
+
+.response-bundle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.response-placeholder-controls {
+  display: contents;
+}
+
+.response-settings .placeholder-control-field:has(textarea) {
+  grid-column: 1 / -1;
 }
 
 .placeholder-defs-list {
@@ -577,10 +597,6 @@ select:focus {
 
 .advanced-grid [hidden] {
   display: none;
-}
-
-.advanced-placeholder-controls {
-  grid-column: 1 / -1;
 }
 
 .context-window-main-field {
@@ -783,6 +799,15 @@ button:hover {
   min-width: 0;
 }
 
+#randomQuestionButton,
+#predefinedQuestionButton,
+#retrieveButton {
+  min-width: 0;
+  padding: 8px 11px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
 #queryTransformSection.is-applied h3 {
   color: var(--accent);
 }
@@ -889,7 +914,73 @@ button:hover {
 }
 
 .answer-panel {
-  padding: 16px 18px 22px;
+  min-height: 240px;
+  padding: 18px 20px 24px;
+}
+
+.answer-welcome {
+  display: grid;
+  padding-top: 6px;
+}
+
+.answer-welcome-title {
+  font-family: var(--font-reading);
+  font-size: clamp(24px, 2.4vw, 34px);
+  font-weight: 550;
+  line-height: 1.22;
+}
+
+.answer-welcome-examples {
+  display: grid;
+  gap: 8px;
+}
+
+.answer-welcome-label {
+  color: var(--muted);
+  font-family: var(--font-utility);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.answer-welcome-examples ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.answer-welcome-example {
+  width: 100%;
+  height: 100%;
+  padding: 10px 12px;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-reading);
+  line-height: 1.4;
+  text-align: left;
+}
+
+.answer-welcome-example:hover {
+  background: var(--surface-2);
+}
+
+.answer-welcome-guide {
+  max-width: none;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.answer-welcome-guide strong {
+  color: var(--text);
+  font-weight: 650;
 }
 
 .history-list {
@@ -2823,6 +2914,7 @@ body[data-theme="dark"] .source-highlight {
   .controls,
   .advanced-grid,
   .model-grid,
+  .response-bundle-grid,
   .retrieval-sliders,
   .prompt-controls,
   .provider-key-list,
@@ -2837,6 +2929,10 @@ body[data-theme="dark"] .source-highlight {
 
   .prompt-actions button {
     flex: 1 1 0;
+  }
+
+  .topic-controls .wp-control {
+    grid-column: auto;
   }
 
   .prompt-save-row {
