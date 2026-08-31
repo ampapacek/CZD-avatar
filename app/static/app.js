@@ -5416,7 +5416,10 @@ function tokenBudgetRow(label, value, { kind = "" } = {}) {
   return `<tr${className}><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(formatTokenCount(value))}</td></tr>`;
 }
 
-function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", foldedMessages = 0, className = "" } = {}) {
+function renderTokenBudgetDetails(
+  tokenBudget,
+  { conversationSummary = "", foldedMessages = 0, className = "", showCompactionThreshold = false } = {},
+) {
   const view = Avatar.tokenBudgetView(tokenBudget, { conversationSummary, foldedMessages });
   if (!view) {
     return "";
@@ -5445,7 +5448,7 @@ function renderTokenBudgetDetails(tokenBudget, { conversationSummary = "", folde
   const historyCounts = view.historyMessages
     ? `<p class="budget-note-line">Historie: ${escapeHtml(view.usedHistoryMessages)} z ${escapeHtml(view.historyMessages)} zpráv v promptu${view.omittedHistoryMessages ? ` · ${escapeHtml(view.omittedHistoryMessages)} vynecháno` : ""}.</p>`
     : "";
-  const compactionThreshold = view.effectiveCompactionTrigger !== null
+  const compactionThreshold = showCompactionThreshold && view.effectiveCompactionTrigger !== null
     ? `<p class="budget-note-line">Efektivní kompresní práh: ${escapeHtml(formatTokenCount(view.effectiveCompactionTrigger))} tokenů nebo více než ${escapeHtml(view.compactionMessageTrigger)} zpráv.</p>`
     : "";
   const summaryBlock = view.conversationSummary
@@ -6446,6 +6449,7 @@ function renderConversationContextStatus(message, conversationSummary = "") {
     conversationSummary: summary,
     foldedMessages,
     className: "conversation-context-details",
+    showCompactionThreshold: true,
   });
 
   return `
