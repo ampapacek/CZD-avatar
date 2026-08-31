@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import hmac
 import random
+import threading
 import time
 import httpx
 from pathlib import Path
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -140,9 +142,19 @@ default_model = ""
 # against `gpt-oss-120b` on e-infra), so they do not collide.
 model_reasoning: dict[str, ReasoningSupport] = {}
 _provider_state_ready = False
+# One refresh at a time. The startup prewarm below runs in a worker thread while
+# requests are served from other threadpool threads, and a refresh rebuilds
+# several module globals in place — two of them running at once could leave a
+# request reading a half-replaced set.
+_provider_state_lock = threading.Lock()
 
 
 def _refresh_provider_state(force_model_refresh: bool = False) -> None:
+    with _provider_state_lock:
+        _refresh_provider_state_locked(force_model_refresh)
+
+
+def _refresh_provider_state_locked(force_model_refresh: bool) -> None:
     global model_metadata, model_reasoning, _provider_state_ready
     global provider_presets, default_provider, default_provider_preset, all_llm_models, default_model
     model_metadata = load_model_metadata(settings.model_metadata_path)
@@ -179,12 +191,13 @@ def _refresh_provider_state(force_model_refresh: bool = False) -> None:
 def _ensure_provider_state() -> None:
     """Lazily trigger the first provider-state refresh on demand.
 
-    Discovery is deliberately not run at import/startup time: it involves a
-    slow network round-trip (AI Ufal's catalogue endpoint), and running it at
-    import time means uvicorn's --reload doubles the cost (its validation
-    import in the parent process and the real import in the spawned worker
-    both trigger it). Deferring it to the first request that needs it means
-    it happens at most once per worker process, whenever it's actually used.
+    Discovery is deliberately not run at *import* time: it involves slow
+    network round-trips, and running it on import means uvicorn's --reload
+    doubles the cost (its validation import in the parent process and the real
+    import in the spawned worker both trigger it). The lifespan prewarm below
+    starts it in the worker process only, off the request path; this remains
+    the fallback for anything that reaches a route before that finishes, and
+    for tests and scripts that never run the lifespan at all.
     """
 
     if not _provider_state_ready:
@@ -242,6 +255,37 @@ def _llm_settings_payload() -> dict[str, object]:
 pipeline = RAGPipeline(settings)
 
 
+async def _prewarm_discovery() -> None:
+    """Fill the discovery caches at startup instead of on the first request.
+
+    `/settings` needs the provider catalogues and the live mSearch collection
+    list, and both were fetched by whichever request asked for them first —
+    measured at roughly 4.8s and 0.6s on a cold worker, which is exactly the
+    delay before the WP, prompt and collection controls can be populated. Both
+    results are cached (TTL from `LLM_MODELS_CACHE_TTL_SECONDS`, 1h for the
+    collections), so warming them here means the browser's first `/settings`
+    usually finds them ready.
+
+    This does not make `/settings` non-blocking: a request that arrives before
+    the prewarm finishes still waits, now on the same work already in flight.
+    Failures are logged and left to the request path to retry.
+    """
+
+    for label, work in (
+        ("provider discovery", _refresh_provider_state),
+        ("mSearch collection discovery", pipeline.msearch_retriever.live_collections_by_prefix),
+    ):
+        started = time.perf_counter()
+        try:
+            await asyncio.to_thread(work)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Startup %s failed; it will be retried on demand", label)
+        else:
+            logger.info("Startup %s finished in %.2fs", label, time.perf_counter() - started)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global analytics
@@ -252,8 +296,12 @@ async def lifespan(app: FastAPI):
         settings.analytics_dir,
         settings.analytics_instance_id,
     )
+    prewarm = asyncio.create_task(_prewarm_discovery())
     yield
     logger.info("Shutting down API")
+    prewarm.cancel()
+    with suppress(asyncio.CancelledError):
+        await prewarm
     pipeline.close()
 
 
