@@ -148,6 +148,7 @@ const sourcesReopenButton = document.querySelector("#sourcesReopen");
 const sourcesReopenCount = document.querySelector("#sourcesReopenCount");
 const answerActions = document.querySelector("#answerActions");
 const copyAnswerStatus = document.querySelector("#copyAnswerStatus");
+const continueInConversationButton = document.querySelector("#continueInConversationButton");
 const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
 const retrievalQueryText = document.querySelector("#retrievalQueryText");
 const baselineSourcesEl = document.querySelector("#baselineSources");
@@ -355,6 +356,10 @@ let currentMsearchRescoreUsed = false;
 let currentBudgetWarnings = [];
 let currentTokenBudget = null;
 let currentConversationSummary = "";
+// Everything a finished single-turn answer needs to become the first turn of a
+// conversation, captured when the answer lands. Null while none is offered:
+// before the first answer, during a stream, and after a retrieve-only run.
+let currentAnswerContinuation = null;
 // Source card the user clicked to light up its citation markers in the answer,
 // as { scope, citationId }. Kept outside the DOM because both the answer and the
 // source cards are re-rendered from scratch (on every streamed token, even), so
@@ -1155,6 +1160,10 @@ async function runQuery(retrieveOnlyMode) {
   currentTokenBudget = null;
   currentConversationSummary = "";
   currentReasoning = "";
+  currentAnswerContinuation = null;
+  // The settings as they are right now are the ones this answer is produced
+  // with; the controls may have moved on by the time it is continued.
+  const settingsSnapshot = captureSettingsSnapshot();
   renderReasoning("");
   // `Pouze vyhledat zdroje` produces no answer, so there is nothing to reorder by.
   mainSourcesView = Avatar.createSourcesView({ canFlip: !retrieveOnlyMode });
@@ -1300,6 +1309,31 @@ async function runQuery(retrieveOnlyMode) {
       currentReasoning = data.reasoning || currentReasoning;
       renderReasoning(currentReasoning);
       completeMainSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
+      const askedQuestion = question.value;
+      currentAnswerContinuation = {
+        title: shortenText(askedQuestion, 64),
+        question: askedQuestion,
+        answer: data.answer || streamedAnswerText,
+        settings: settingsSnapshot,
+        requestSettings: sanitizeHistorySettings({ ...payload, ...promptsUsed }),
+        retrievalInfo: {
+          original_question: data.original_question || askedQuestion,
+          retrieval_query: currentRetrievalQuery,
+          retrieval_query_was_rewritten: data.retrieval_query_was_rewritten === true,
+          retrieval_query_rewrite_attempted: data.retrieval_query_rewrite_attempted === true,
+          retrieval_query_rewrite_skip_reason: data.retrieval_query_rewrite_skip_reason ?? null,
+        },
+        sources: data.sources || currentAnswerSources,
+        retrievedChunks: data.retrieved_chunks || currentRetrievedChunks,
+        omittedChunks: data.omitted_chunks || [],
+        tokenBudget: data.token_budget || null,
+        chunkBudgetWarnings: data.chunk_budget_warnings || [],
+        reasoning: data.reasoning || currentReasoning,
+        modelUsed: data.model || model.value,
+        upstreamModel: data.upstream_model || null,
+        responseTimeSeconds: data.response_time_seconds ?? null,
+      };
+      updateAnswerActions();
       saveHistoryEntry({
         question: question.value,
         mode: "chat",
@@ -5339,6 +5373,10 @@ historyDetail?.addEventListener("click", (event) => {
   });
 });
 
+continueInConversationButton?.addEventListener("click", () => {
+  continueInConversation();
+});
+
 answerActions?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-copy-scope='main']");
   if (!button) {
@@ -5387,10 +5425,15 @@ async function copyAnswerText(answerText, sources, { includeSources, statusEl })
   }
 }
 
-// The main panel's buttons appear only once there is an answer to copy.
+// The main panel's buttons appear only once there is an answer to copy. The
+// copy buttons work on a half-streamed answer; continuing into a conversation
+// does not, so that one waits for the finished turn to be captured.
 function updateAnswerActions() {
   if (answerActions) {
     answerActions.hidden = !streamedAnswerText.trim();
+  }
+  if (continueInConversationButton) {
+    continueInConversationButton.hidden = currentAnswerContinuation === null;
   }
 }
 
@@ -5984,8 +6027,20 @@ function setConversationEntries(entries) {
   );
 }
 
-function createConversation() {
+// Puts a freshly built conversation at the top of the list and selects it.
+// Returns whether storage actually kept it: the selection falls back to what
+// survived, so a quota-trimmed save cannot leave the workspace pointing at a
+// thread that is no longer there.
+function storeNewConversation(conversation) {
   const conversations = getConversationEntries();
+  conversations.unshift(conversation);
+  const savedConversations = setConversationEntries(conversations);
+  const stored = savedConversations.some((entry) => entry.id === conversation.id);
+  selectedConversationId = stored ? conversation.id : savedConversations[0]?.id ?? conversation.id;
+  return stored;
+}
+
+function createConversation() {
   const conversation = {
     id: Date.now(),
     title: "Nová konverzace",
@@ -6001,12 +6056,28 @@ function createConversation() {
     settings: currentMainSettings(),
     messages: [],
   };
-  conversations.unshift(conversation);
-  const savedConversations = setConversationEntries(conversations);
-  selectedConversationId = savedConversations.some((entry) => entry.id === conversation.id)
-    ? conversation.id
-    : savedConversations[0]?.id ?? conversation.id;
+  storeNewConversation(conversation);
   return conversation;
+}
+
+// The bridge out of single-turn mode: the question and answer on screen become
+// a conversation's first complete turn, under the settings that produced them
+// rather than whatever the controls say now.
+function continueInConversation() {
+  const conversation = Avatar.conversationFromSingleTurn(currentAnswerContinuation, { id: Date.now() });
+  if (!conversation) {
+    showCopyStatus(copyAnswerStatus, "Není co převést do konverzace.", true);
+    return;
+  }
+  if (!storeNewConversation(conversation)) {
+    refreshConversationStorageStatus();
+    showCopyStatus(copyAnswerStatus, "Konverzaci se nepodařilo uložit.", true);
+    return;
+  }
+  // A seeded thread is opened on its own turn, with the panel settling itself.
+  conversationSelectedAssistantIndex = null;
+  conversationSourcesView = null;
+  setAppMode(APP_MODE_CONVERSATION);
 }
 
 function ensureSelectedConversation() {
@@ -8426,6 +8497,10 @@ function restoreAnswerFromHistoryEntry(entry) {
   currentTokenBudget = entry.token_budget || null;
   currentConversationSummary = entry.conversation_summary || "";
   currentReasoning = entry.reasoning || "";
+  // A restored answer cannot be continued: history stores sources without their
+  // snippet text, so the seeded turn would carry sources the model could not be
+  // shown again. The offer belongs to the live answer only.
+  currentAnswerContinuation = null;
   renderReasoning(currentReasoning);
   // Stored entries have no baseline / rescore comparison to show.
   currentBaselineChunks = [];
