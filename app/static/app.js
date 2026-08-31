@@ -986,7 +986,15 @@ function syncSettingsWp(wpId) {
   // shared editor. Keep the loaded prompt if it already belongs to this WP.
   const keepCurrent = presetWpId(getPromptPresetById(activePromptPresetId)) === settingsWpId;
   if (keepCurrent) {
-    renderPromptPresets(activePromptPresetId);
+    // In a conversation the editor already holds that thread's prompt text, so
+    // only re-render the options; reloading the preset would discard its
+    // overrides. On the main page opening Settings still reloads the stored
+    // text over local edits, exactly as it always has.
+    if (conversationSettingsActive) {
+      renderPromptPresets(activePromptPresetId);
+    } else {
+      applyPromptPresetById(activePromptPresetId);
+    }
     return;
   }
   applyPromptPresetById(defaultPromptPresetId(settingsWpId));
@@ -2401,6 +2409,10 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     refreshModelOptions(appSettings);
     if (conversationSettingsActive) {
       syncConversationControlsFromMain({ refreshOptions: true });
+      // Locking can drop the selected model from the list and move model.value;
+      // the thread's stored settings must follow, or the next turn silently runs
+      // on a model the user no longer sees selected.
+      persistActiveConversationSettings();
     }
     updatePromptActionButtonStates(promptPreset.value);
     renderQueryTransformSettings();
@@ -2424,6 +2436,10 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     refreshModelOptions(appSettings);
     if (conversationSettingsActive) {
       syncConversationControlsFromMain({ refreshOptions: true });
+      // Locking can drop the selected model from the list and move model.value;
+      // the thread's stored settings must follow, or the next turn silently runs
+      // on a model the user no longer sees selected.
+      persistActiveConversationSettings();
     }
     updatePromptActionButtonStates(promptPreset.value);
     renderQueryTransformSettings();
@@ -2452,6 +2468,7 @@ function logoutAdminAccess() {
   statusEl.textContent = "Admin přístup byl odhlášen.";
   if (conversationSettingsActive) {
     syncConversationControlsFromMain({ refreshOptions: true });
+    persistActiveConversationSettings();
   }
 }
 
@@ -6927,7 +6944,7 @@ function updateConversationChips(conversation) {
   const chips = [
     [conversationChipModel, settings?.model, "Model", true],
     [conversationChipWp, getWpConfig(settings?.wp_id)?.label || settings?.wp_id, "Oblast", false],
-    [conversationChipPrompt, settings ? promptPresetLabelFromSettings(settings) : "", "Profil", false],
+    [conversationChipPrompt, settings ? currentPromptPresetLabelFromSettings(settings) : "", "Profil", false],
   ];
   for (const [element, value, label, compactModel] of chips) {
     if (!element) {
@@ -8262,10 +8279,18 @@ function renderPlaceholderSettings(settings) {
     .join("");
 }
 
+// History records what an answer actually ran with, so the name stored at the
+// time wins: renaming a profile today must not rewrite yesterday's entries.
 function promptPresetLabelFromSettings(settings) {
   const presetId = promptPresetIdFromSettings(settings);
-  const preset = getPromptPresetById(presetId);
-  return preset?.name || settings?.prompt_preset_name || presetId;
+  return settings?.prompt_preset_name || getPromptPresetById(presetId)?.name || presetId;
+}
+
+// The conversation chip describes settings that are still editable, so it
+// follows the profile's current name rather than the one stored with the thread.
+function currentPromptPresetLabelFromSettings(settings) {
+  const presetId = promptPresetIdFromSettings(settings);
+  return getPromptPresetById(presetId)?.name || settings?.prompt_preset_name || presetId;
 }
 
 function wpLabelFromSettings(settings) {

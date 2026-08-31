@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
+import { hasCurrentConversationSettings } from "./conversation-settings.js";
+
 describe("conversation request UI", () => {
   it("starts loading the active WP's default question before prompt profiles finish", () => {
     const appSource = readFileSync("app/static/app.js", "utf8");
@@ -165,13 +167,27 @@ describe("conversation mode is a view, not a dialog", () => {
   it("enlarges the collapsed settings chips and resolves current profile names first", () => {
     const css = readFileSync("app/static/styles.css", "utf8");
     const appSource = readFileSync("app/static/app.js", "utf8");
-    const labelBody = appSource.slice(
+    const historyBody = appSource.slice(
       appSource.indexOf("function promptPresetLabelFromSettings(settings)"),
+      appSource.indexOf("function currentPromptPresetLabelFromSettings(settings)"),
+    );
+    const chipBody = appSource.slice(
+      appSource.indexOf("function currentPromptPresetLabelFromSettings(settings)"),
       appSource.indexOf("function wpLabelFromSettings(settings)"),
     );
 
     expect(css).toMatch(/\.conversation-chips\[aria-expanded="false"\] \.conversation-chip/);
-    expect(labelBody).toContain("preset?.name || settings?.prompt_preset_name");
+    // The chip describes still-editable settings, so it follows the live name;
+    // history is the record of what an answer ran with, so it keeps the stored
+    // one and survives a later rename of the profile.
+    expect(chipBody).toContain("getPromptPresetById(presetId)?.name || settings?.prompt_preset_name");
+    expect(historyBody).toContain("settings?.prompt_preset_name || getPromptPresetById(presetId)?.name");
+    expect(appSource).toContain(
+      'currentPromptPresetLabelFromSettings(settings) : "", "Profil", false',
+    );
+    expect(appSource).toContain(
+      '${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}',
+    );
   });
 
   it("places the turn rail outside the sources panel", () => {
@@ -228,7 +244,7 @@ describe("conversation mode is a view, not a dialog", () => {
       .toBe("Tato konverzace používá starší formát nastavení. Pro pokračování založte novou konverzaci.");
     expect(appSource).toContain("Avatar.hasCurrentConversationSettings(conversation?.settings)");
     expect(appSource).toContain(
-      'conversationChipPrompt, settings ? promptPresetLabelFromSettings(settings) : "", "Profil", false',
+      'conversationChipPrompt, settings ? currentPromptPresetLabelFromSettings(settings) : "", "Profil", false',
     );
     expect(appSource).not.toMatch(/conversation\.settings\) \|\| currentMainSettings/);
   });
@@ -321,5 +337,70 @@ describe("the assistant turn is prose, not a bubble", () => {
     expect(ruleBody(".conversation-message")).not.toMatch(/\bborder:/);
     expect(ruleBody(".conversation-message")).not.toMatch(/\bbackground:/);
     expect(ruleBody(".conversation-message.user")).toMatch(/border: 1px solid/);
+  });
+});
+
+// Every thread stored before settings_version 2 is "incompatible", and nothing
+// migrates one forward — so this is the path a returning user actually hits.
+// It has to render the banner and "—" chips, not throw on the way in.
+describe("chips for a conversation stored before the current settings version", () => {
+  const appSource = readFileSync("app/static/app.js", "utf8");
+  const chipSource = appSource.slice(
+    appSource.indexOf("function updateConversationChips(conversation) {"),
+    appSource.indexOf("function conversationModelDisplayName(rawModel) {"),
+  );
+
+  function renderChips(conversation) {
+    const dom = new JSDOM(readFileSync("app/static/index.html", "utf8"));
+    const document = dom.window.document;
+    const chips = {
+      model: document.querySelector("#conversationChipModel"),
+      wp: document.querySelector("#conversationChipWp"),
+      prompt: document.querySelector("#conversationChipPrompt"),
+    };
+    const updateConversationChips = new Function(
+      "Avatar",
+      "getWpConfig",
+      "currentPromptPresetLabelFromSettings",
+      "shortenText",
+      "conversationModelDisplayName",
+      "conversationChipModel",
+      "conversationChipWp",
+      "conversationChipPrompt",
+      `${chipSource}\nreturn updateConversationChips;`,
+    )(
+      { hasCurrentConversationSettings },
+      (wpId) => (wpId === "wp1" ? { id: "wp1", label: "Oblast jedna" } : null),
+      (settings) => settings.prompt_preset_name || settings.prompt_preset_id,
+      (text) => String(text || ""),
+      (raw) => String(raw || ""),
+      chips.model,
+      chips.wp,
+      chips.prompt,
+    );
+
+    updateConversationChips(conversation);
+    return chips;
+  }
+
+  const staleSettings = { model: "openai/gpt-4o", wp_id: "wp1", prompt_preset_id: "p1" };
+
+  it("renders placeholders instead of throwing on a version-less thread", () => {
+    expect(() => renderChips({ settings: staleSettings })).not.toThrow();
+
+    const chips = renderChips({ settings: staleSettings });
+
+    expect(chips.model.textContent).toBe("—");
+    expect(chips.wp.textContent).toBe("—");
+    expect(chips.prompt.textContent).toBe("—");
+    expect(chips.model.title).toBe("Model: —");
+  });
+
+  it("still renders the real values once the thread carries the current version", () => {
+    const chips = renderChips({ settings: { ...staleSettings, settings_version: 2 } });
+
+    expect(chips.model.textContent).toBe("openai/gpt-4o");
+    expect(chips.wp.textContent).toBe("Oblast jedna");
+    expect(chips.prompt.textContent).toBe("p1");
   });
 });
