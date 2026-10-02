@@ -182,6 +182,40 @@ class SharedHistoryEndpointTests(unittest.TestCase):
         invalid = self.client.patch(url, json={"visibility": "secret", "owner_id": "owner-a"})
         self.assertEqual(invalid.status_code, 422)
 
+    def test_owner_can_edit_note_and_edit_is_stamped(self) -> None:
+        created = self._create("Mine", owner_id="owner-a")
+        self.assertIsNone(created["note_edited_at"])
+        url = f"/shared-history/{created['id']}"
+        response = self.client.patch(url, json={"note": "better note", "owner_id": "owner-a"})
+        self.assertEqual(response.status_code, 200, response.text)
+        edited = response.json()
+        self.assertEqual(edited["note"], "better note")
+        self.assertTrue(edited["note_edited_at"])
+        # The visibility is untouched and no previous text is kept anywhere.
+        self.assertEqual(edited["visibility"], "listed")
+        self.assertNotIn('"note": "note"', self.path.read_text(encoding="utf-8"))
+        self.assertEqual(self.client.get(url).json()["note"], "better note")
+
+    def test_unchanged_note_does_not_stamp_an_edit(self) -> None:
+        created = self._create("Mine", owner_id="owner-a")
+        url = f"/shared-history/{created['id']}"
+        same = self.client.patch(url, json={"note": "note", "owner_id": "owner-a"}).json()
+        self.assertIsNone(same["note_edited_at"])
+        # A visibility-only change does not count as a note edit either.
+        moved = self.client.patch(url, json={"visibility": "link", "owner_id": "owner-a"}).json()
+        self.assertEqual(moved["note"], "note")
+        self.assertIsNone(moved["note_edited_at"])
+
+    def test_note_edit_requires_owner_or_password(self) -> None:
+        created = self._create("Theirs", owner_id="owner-a")
+        url = f"/shared-history/{created['id']}"
+        blocked = self.client.patch(url, json={"note": "hijack", "owner_id": "owner-b"})
+        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(self.client.get(url).json()["note"], "note")
+        admin = self.client.patch(url, json={"note": "fixed", "owner_id": "owner-b", "admin_password": "s3cret"})
+        self.assertEqual(admin.status_code, 200, admin.text)
+        self.assertEqual(admin.json()["note"], "fixed")
+
 
 if __name__ == "__main__":
     unittest.main()

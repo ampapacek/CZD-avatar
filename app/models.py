@@ -178,6 +178,7 @@ class SharedHistoryItem(BaseModel):
     response_time_seconds: float | None = None
     token_budget: dict[str, Any] | None = None
     visibility: Literal["listed", "link"] = "listed"
+    note_edited_at: str | None = None
 
 
 class SharedHistorySaveRequest(BaseModel):
@@ -199,8 +200,10 @@ class SharedHistorySaveRequest(BaseModel):
     visibility: Literal["listed", "link"] = "listed"
 
 
-class SharedHistoryVisibilityRequest(BaseModel):
-    visibility: Literal["listed", "link"]
+class SharedHistoryUpdateRequest(BaseModel):
+    # Omitted fields are left unchanged.
+    visibility: Literal["listed", "link"] | None = None
+    note: str | None = None
     owner_id: str = ""
     admin_password: str = ""
 

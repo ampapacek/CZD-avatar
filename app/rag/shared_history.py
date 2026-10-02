@@ -76,19 +76,36 @@ def save_shared_history_item(
         "response_time_seconds": _coerce_float(response_time_seconds),
         "token_budget": token_budget if isinstance(token_budget, dict) else None,
         "visibility": normalize_visibility(visibility),
+        "note_edited_at": None,
     }
     next_items = [record, *items]
     _write_items(path, next_items)
     return record
 
 
-def set_shared_history_visibility(path: Path, item_id: str, visibility: str) -> dict[str, Any] | None:
+def update_shared_history_item(
+    path: Path,
+    item_id: str,
+    *,
+    visibility: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any] | None:
+    """Apply the given changes; None leaves a field as it is.
+
+    A note change stamps `note_edited_at`. Only the current text is kept, so the
+    stamp says that the note changed after sharing, not what it said before.
+    """
     items = load_shared_history(path)
     for item in items:
-        if item["id"] == item_id:
+        if item["id"] != item_id:
+            continue
+        if visibility is not None:
             item["visibility"] = normalize_visibility(visibility)
-            _write_items(path, items)
-            return item
+        if note is not None and note != item["note"]:
+            item["note"] = note
+            item["note_edited_at"] = datetime.now(timezone.utc).isoformat()
+        _write_items(path, items)
+        return item
     return None
 
 
@@ -131,6 +148,7 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
         "response_time_seconds": _coerce_float(item.get("response_time_seconds")),
         "token_budget": item.get("token_budget") if isinstance(item.get("token_budget"), dict) else None,
         "visibility": normalize_visibility(item.get("visibility")),
+        "note_edited_at": str(item.get("note_edited_at") or "") or None,
     }
 
 
