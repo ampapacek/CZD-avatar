@@ -6,6 +6,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+# "listed" items appear in the shared list; "link" items are reachable only by
+# their (unguessable) id, like an unlisted video. Not access control.
+VISIBILITIES = ("listed", "link")
+DEFAULT_VISIBILITY = "listed"
+
+
+def normalize_visibility(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in VISIBILITIES else DEFAULT_VISIBILITY
+
 
 def load_shared_history(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
@@ -38,6 +48,11 @@ def save_shared_history_item(
     retrieved_chunks: list[Any] | None = None,
     source_count: Any = 0,
     created_at: str = "",
+    model_used: str | None = None,
+    upstream_model: str | None = None,
+    response_time_seconds: float | None = None,
+    token_budget: dict[str, Any] | None = None,
+    visibility: str = DEFAULT_VISIBILITY,
 ) -> dict[str, Any]:
     items = load_shared_history(path)
     record = {
@@ -56,10 +71,25 @@ def save_shared_history_item(
         "source_count": _coerce_int(source_count),
         "created_at": created_at or "",
         "shared_at": datetime.now(timezone.utc).isoformat(),
+        "model_used": model_used or None,
+        "upstream_model": upstream_model or None,
+        "response_time_seconds": _coerce_float(response_time_seconds),
+        "token_budget": token_budget if isinstance(token_budget, dict) else None,
+        "visibility": normalize_visibility(visibility),
     }
     next_items = [record, *items]
     _write_items(path, next_items)
     return record
+
+
+def set_shared_history_visibility(path: Path, item_id: str, visibility: str) -> dict[str, Any] | None:
+    items = load_shared_history(path)
+    for item in items:
+        if item["id"] == item_id:
+            item["visibility"] = normalize_visibility(visibility)
+            _write_items(path, items)
+            return item
+    return None
 
 
 def delete_shared_history_item(path: Path, item_id: str) -> bool:
@@ -95,7 +125,20 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
         "source_count": _coerce_int(item.get("source_count")),
         "created_at": str(item.get("created_at") or ""),
         "shared_at": str(item.get("shared_at") or ""),
+        # Absent on items shared before these were recorded.
+        "model_used": str(item.get("model_used") or "") or None,
+        "upstream_model": str(item.get("upstream_model") or "") or None,
+        "response_time_seconds": _coerce_float(item.get("response_time_seconds")),
+        "token_budget": item.get("token_budget") if isinstance(item.get("token_budget"), dict) else None,
+        "visibility": normalize_visibility(item.get("visibility")),
     }
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _coerce_int(value: Any) -> int:

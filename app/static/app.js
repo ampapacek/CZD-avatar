@@ -172,6 +172,8 @@ const historyAuthorName = document.querySelector("#historyAuthorName");
 const historyAuthorNameLabel = document.querySelector("#historyAuthorNameLabel");
 const historyShareStatus = document.querySelector("#historyShareStatus");
 const shareSelectedButton = document.querySelector("#shareSelectedButton");
+const shareLinkOnly = document.querySelector("#shareLinkOnly");
+const shareLinkOnlyLabel = document.querySelector("#shareLinkOnlyLabel");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
@@ -1750,6 +1752,7 @@ historyButton.addEventListener("click", () => {
 closeHistoryButton.addEventListener("click", () => {
   historyDialog.close();
 });
+historyDialog.addEventListener("close", clearSharedItemLinkFromUrl);
 historyDialog.addEventListener("click", (event) => {
   if (event.target === historyDialog) {
     historyDialog.close();
@@ -7917,6 +7920,9 @@ function setHistoryTab(tab) {
   historyTabShared.setAttribute("aria-selected", mine ? "false" : "true");
   // Local-only affordances: multi-select share + per-item / clear deletion.
   shareSelectedButton.hidden = !mine;
+  if (shareLinkOnlyLabel) {
+    shareLinkOnlyLabel.hidden = !mine;
+  }
   deleteHistoryItemButton.hidden = !mine;
   clearHistoryButton.hidden = !mine;
   setHistoryShareStatus("");
@@ -7928,7 +7934,9 @@ function setHistoryTab(tab) {
 }
 
 async function fetchSharedHistory() {
-  const response = await fetch("shared-history");
+  // The owner id brings back this browser's own link-only items too.
+  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
+  const response = await fetch(`shared-history?${params.toString()}`);
   if (!response.ok) {
     throw new Error("Nepodařilo se načíst sdílenou historii.");
   }
@@ -7945,7 +7953,7 @@ async function loadSharedHistory() {
     historyList.innerHTML = `<p class="history-empty">Načítám sdílené položky…</p>`;
   }
   try {
-    sharedHistoryItems = await fetchSharedHistory();
+    sharedHistoryItems = withLinkedSharedItem(await fetchSharedHistory());
   } catch (error) {
     sharedHistoryItems = [];
     if (activeHistoryTab === "shared") {
@@ -7974,7 +7982,7 @@ function renderSharedHistory() {
         <div class="history-row">
           <button class="history-item ${item.id === selectedSharedId ? "active" : ""}" type="button" data-shared-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.question)}</strong>
-            <span>${escapeHtml(item.author_name || "Anonym")} · ${item.mode === "retrieve" ? "Pouze zdroje" : "Odpověď"} · ${item.source_count} zdrojů</span>
+            <span>${escapeHtml(item.author_name || "Anonym")} · ${item.mode === "retrieve" ? "Pouze zdroje" : "Odpověď"} · ${item.source_count} zdrojů${item.visibility === "link" ? ` · <span class="history-shared-badge">Jen odkazem</span>` : ""}</span>
             <span>${formatHistoryTime(item.shared_at)}</span>
           </button>
         </div>
@@ -8021,6 +8029,22 @@ function renderSharedHistoryDetail(item) {
       ${item.note ? `<p class="history-shared-note">${escapeHtml(item.note)}</p>` : ""}
     </section>
     <section class="history-block">
+      <h4>Odkaz${item.visibility === "link" ? ` <span class="history-shared-badge">Jen odkazem</span>` : ""}</h4>
+      ${renderSharedLinkRow(item.id)}
+      <p class="field-note">${
+        item.visibility === "link"
+          ? "Položka se nezobrazuje v seznamu Sdílené, otevře ji jen ten, kdo má odkaz."
+          : "Položka je vidět v seznamu Sdílené pro všechny."
+      }</p>
+      ${
+        canManage
+          ? `<button id="toggleVisibilityButton" type="button" class="ghost-button">${
+              item.visibility === "link" ? "Zobrazit v seznamu Sdílené" : "Skrýt ze seznamu (jen odkazem)"
+            }</button>`
+          : ""
+      }
+    </section>
+    <section class="history-block">
       <h4>Otázka</h4>
       <p class="history-question">${escapeHtml(item.question)}</p>
     </section>
@@ -8036,8 +8060,143 @@ function renderSharedHistoryDetail(item) {
   historyDetail.querySelector("#unshareButton")?.addEventListener("click", () => {
     unshareSharedItem(item);
   });
+  historyDetail.querySelector("#toggleVisibilityButton")?.addEventListener("click", () => {
+    setSharedItemVisibility(item, item.visibility === "link" ? "listed" : "link");
+  });
+  bindSharedLinkRow(historyDetail);
 
   mountHistoryDetailSources(item);
+}
+
+// --- Shared item links ---------------------------------------------------------
+// `?shared=<id>` opens the history dialog on that item. Link-only items are not
+// in the fetched list, so the one opened by link is kept and merged back in.
+const SHARED_ITEM_URL_PARAM = "shared";
+let linkedSharedItem = null;
+
+function sharedItemUrl(sharedId) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set(SHARED_ITEM_URL_PARAM, sharedId);
+  return url.toString();
+}
+
+function withLinkedSharedItem(items) {
+  if (!linkedSharedItem || items.some((item) => item.id === linkedSharedItem.id)) {
+    return items;
+  }
+  return [...items, linkedSharedItem].sort((a, b) =>
+    String(b.shared_at || "").localeCompare(String(a.shared_at || "")),
+  );
+}
+
+// A read-only field holds the URL so it can still be selected by hand where the
+// clipboard API is unavailable (plain-HTTP deployments).
+function renderSharedLinkRow(sharedId) {
+  return `
+    <div class="history-link-row">
+      <input type="text" class="history-link-input" readonly value="${escapeHtml(sharedItemUrl(sharedId))}" aria-label="Odkaz na sdílenou položku" />
+      <button type="button" class="ghost-button" data-copy-shared-link>Kopírovat odkaz</button>
+      <span class="copy-status" role="status" aria-live="polite"></span>
+    </div>
+  `;
+}
+
+function bindSharedLinkRow(container) {
+  const row = container.querySelector(".history-link-row");
+  if (!row) {
+    return;
+  }
+  const input = row.querySelector(".history-link-input");
+  const status = row.querySelector(".copy-status");
+  input.addEventListener("focus", () => input.select());
+  row.querySelector("[data-copy-shared-link]").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showCopyStatus(status, "Odkaz zkopírován.");
+    } catch {
+      input.focus();
+      input.select();
+      showCopyStatus(status, "Zkopíruj odkaz ručně (Ctrl+C).", true);
+    }
+  });
+}
+
+async function setSharedItemVisibility(item, visibility) {
+  setHistoryShareStatus("Ukládám…");
+  try {
+    const response = await fetch(`shared-history/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        visibility,
+        owner_id: getBrowserOwnerId(),
+        admin_password: llmUnlockPassword.value.trim(),
+      }),
+    });
+    const data = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(data.detail || "Změna viditelnosti selhala.");
+    }
+    if (linkedSharedItem?.id === item.id) {
+      linkedSharedItem = data;
+    }
+    setHistoryShareStatus(
+      visibility === "link" ? "Položka je teď dostupná jen přes odkaz." : "Položka je teď vidět v seznamu.",
+      "success",
+    );
+    await loadSharedHistory();
+  } catch (error) {
+    setHistoryShareStatus(error.message, "error");
+  }
+}
+
+function clearSharedItemLinkFromUrl() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(SHARED_ITEM_URL_PARAM)) {
+    return;
+  }
+  url.searchParams.delete(SHARED_ITEM_URL_PARAM);
+  window.history.replaceState(null, "", url.toString());
+}
+
+async function openSharedItemFromUrl() {
+  const sharedId = new URLSearchParams(window.location.search).get(SHARED_ITEM_URL_PARAM);
+  if (!sharedId) {
+    return;
+  }
+  renderAuthorName();
+  historyDialog.showModal();
+  let item;
+  try {
+    const response = await fetch(`shared-history/${encodeURIComponent(sharedId)}`);
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? "Sdílená položka z odkazu neexistuje (možná bylo sdílení zrušeno)."
+          : "Sdílenou položku z odkazu se nepodařilo načíst.",
+      );
+    }
+    item = await response.json();
+  } catch (error) {
+    setHistoryTab("shared");
+    setHistoryShareStatus(error.message, "error");
+    return;
+  }
+  linkedSharedItem = item;
+  selectedSharedId = item.id;
+  const itemWpId = item.settings?.wp_id;
+  const switchWp = itemWpId && resolveWpId(itemWpId) === itemWpId && itemWpId !== activeWpId;
+  if (switchWp) {
+    selectWp(itemWpId);
+  }
+  setHistoryTab("shared");
+  if (switchWp) {
+    setHistoryShareStatus(
+      `Položka je z oblasti ${getWpConfig(itemWpId)?.label || itemWpId}, oblast byla přepnuta.`,
+    );
+  }
 }
 
 async function shareHistoryEntry(entry, authorName) {
@@ -8053,6 +8212,11 @@ async function shareHistoryEntry(entry, authorName) {
     retrieved_chunks: entry.retrieved_chunks || [],
     source_count: entry.sourceCount || 0,
     created_at: entry.createdAt || "",
+    model_used: entry.model_used || null,
+    upstream_model: entry.upstream_model || null,
+    response_time_seconds: entry.response_time_seconds ?? null,
+    token_budget: entry.token_budget || null,
+    visibility: shareLinkOnly?.checked ? "link" : "listed",
   };
   const response = await fetch("shared-history", {
     method: "POST",
@@ -8121,6 +8285,9 @@ async function unshareSharedItem(item) {
       throw new Error(data.detail || "Zrušení sdílení selhalo.");
     }
     clearLocalSharedMarker(item.id);
+    if (linkedSharedItem?.id === item.id) {
+      linkedSharedItem = null;
+    }
     setHistoryShareStatus("Sdílení bylo zrušeno.", "success");
     await loadSharedHistory();
   } catch (error) {
@@ -8144,6 +8311,14 @@ function renderHistoryDetail(entry) {
       </div>
       <button id="reuseHistoryButton" type="button">Načíst do formuláře</button>
     </div>
+    ${
+      entry.shared_id
+        ? `<section class="history-block">
+            <h4>Odkaz na sdílenou položku</h4>
+            ${renderSharedLinkRow(entry.shared_id)}
+          </section>`
+        : ""
+    }
     <section class="history-block">
       <h4>Otázka</h4>
       <p class="history-question">${escapeHtml(entry.question)}</p>
@@ -8155,6 +8330,8 @@ function renderHistoryDetail(entry) {
     </section>
     ${renderHistorySettingsAndAnswer(entry)}
   `;
+
+  bindSharedLinkRow(historyDetail);
 
   const reuseButton = historyDetail.querySelector("#reuseHistoryButton");
   reuseButton?.addEventListener("click", () => {
@@ -8560,7 +8737,7 @@ function formatHistoryTime(timestamp) {
   }
 }
 
-loadSettings().catch((error) => {
+loadSettings().then(openSharedItemFromUrl).catch((error) => {
   statusEl.hidden = false;
   statusEl.className = "status error";
   statusEl.textContent = error.message;

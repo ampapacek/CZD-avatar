@@ -48,6 +48,7 @@ from app.models import (
     RetrieveResponse,
     SharedHistoryItem,
     SharedHistorySaveRequest,
+    SharedHistoryVisibilityRequest,
     UnlockRequest,
     UnlockResponse,
 )
@@ -73,6 +74,7 @@ from app.rag.shared_history import (
     delete_shared_history_item,
     load_shared_history,
     save_shared_history_item,
+    set_shared_history_visibility,
 )
 from app.rag.placeholders import (
     DEFAULT_PLACEHOLDERS,
@@ -967,8 +969,39 @@ def _can_modify_shared_history_item(
 
 
 @app.get("/shared-history", response_model=list[SharedHistoryItem])
-def get_shared_history() -> list[SharedHistoryItem]:
-    return [SharedHistoryItem(**item) for item in load_shared_history(settings.shared_history_path)]
+def get_shared_history(owner_id: str | None = None) -> list[SharedHistoryItem]:
+    # Link-only items stay out of the list, except for the browser that owns them.
+    requester = (owner_id or "").strip()
+    return [
+        SharedHistoryItem(**item)
+        for item in load_shared_history(settings.shared_history_path)
+        if item["visibility"] == "listed"
+        or (requester and _secure_eq(str(item.get("owner_id") or ""), requester))
+    ]
+
+
+@app.get("/shared-history/{item_id}", response_model=SharedHistoryItem)
+def get_shared_history_item(item_id: str) -> SharedHistoryItem:
+    item = _find_shared_history_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
+    return SharedHistoryItem(**item)
+
+
+@app.patch("/shared-history/{item_id}", response_model=SharedHistoryItem)
+def patch_shared_history_item(item_id: str, request: SharedHistoryVisibilityRequest) -> SharedHistoryItem:
+    existing = _find_shared_history_item(item_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
+    if not _can_modify_shared_history_item(existing, request.owner_id, request.admin_password):
+        raise HTTPException(
+            status_code=403,
+            detail="Tento sdílený záznam patří jinému prohlížeči. Odemkni ho sdíleným heslem, abys ho mohl změnit.",
+        )
+    updated = set_shared_history_visibility(settings.shared_history_path, item_id, request.visibility)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
+    return SharedHistoryItem(**updated)
 
 
 @app.post("/shared-history", response_model=SharedHistoryItem)
@@ -986,6 +1019,11 @@ def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
         retrieved_chunks=request.retrieved_chunks,
         source_count=request.source_count,
         created_at=request.created_at,
+        model_used=request.model_used,
+        upstream_model=request.upstream_model,
+        response_time_seconds=request.response_time_seconds,
+        token_budget=request.token_budget,
+        visibility=request.visibility,
     )
     return SharedHistoryItem(**item)
 

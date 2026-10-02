@@ -1550,6 +1550,28 @@ button:hover {
   flex-wrap: wrap;
 }
 
+.history-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-link-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.history-link-only-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .history-shared-meta {
   padding: 12px 14px;
   border: 1px solid var(--line);

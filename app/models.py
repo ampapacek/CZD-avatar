@@ -173,6 +173,11 @@ class SharedHistoryItem(BaseModel):
     source_count: int = 0
     created_at: str = ""
     shared_at: str = ""
+    model_used: str | None = None
+    upstream_model: str | None = None
+    response_time_seconds: float | None = None
+    token_budget: dict[str, Any] | None = None
+    visibility: Literal["listed", "link"] = "listed"
 
 
 class SharedHistorySaveRequest(BaseModel):
@@ -187,6 +192,17 @@ class SharedHistorySaveRequest(BaseModel):
     retrieved_chunks: list[Any] = Field(default_factory=list)
     source_count: int = 0
     created_at: str = ""
+    model_used: str | None = None
+    upstream_model: str | None = None
+    response_time_seconds: float | None = None
+    token_budget: dict[str, Any] | None = None
+    visibility: Literal["listed", "link"] = "listed"
+
+
+class SharedHistoryVisibilityRequest(BaseModel):
+    visibility: Literal["listed", "link"]
+    owner_id: str = ""
+    admin_password: str = ""
 
 
 class Placeholder(BaseModel):
