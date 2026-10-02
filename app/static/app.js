@@ -3147,7 +3147,11 @@ function providerLabelForId(providerId) {
 
 function populateModels(presets, currentModel, allowCustom = false) {
   const uniqueModels = Array.from(new Set(presets.filter(Boolean)));
-  const options = uniqueModels.map((modelName) => `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`);
+  // Compact labels as in conversation mode; the raw id stays as the value and tooltip.
+  const labels = Avatar.modelDisplayLabels(uniqueModels);
+  const options = uniqueModels.map((modelName, index) => (
+    `<option value="${escapeHtml(modelName)}" title="${escapeHtml(modelName)}">${escapeHtml(labels[index] || modelName)}</option>`
+  ));
   if (allowCustom) {
     options.push(`<option value="${escapeHtml(CUSTOM_MODEL_VALUE)}">Jiný</option>`);
   }
@@ -5219,6 +5223,8 @@ function saveEntryListSafely(key, entries, compactEntry, label, options = {}) {
 }
 
 function updateCustomModelVisibility(unlocked) {
+  // The options show compact names, so the exact id goes in the tooltip.
+  model.title = model.value === CUSTOM_MODEL_VALUE ? "" : model.value;
   if (!customModelField) {
     return;
   }
