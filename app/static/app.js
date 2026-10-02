@@ -173,6 +173,14 @@ const historyAuthorNameLabel = document.querySelector("#historyAuthorNameLabel")
 const historyShareStatus = document.querySelector("#historyShareStatus");
 const shareSelectedButton = document.querySelector("#shareSelectedButton");
 const shareLinkOnly = document.querySelector("#shareLinkOnly");
+const historyFilterWp = document.querySelector("#historyFilterWp");
+const historyFilterText = document.querySelector("#historyFilterText");
+const historyFilterAuthor = document.querySelector("#historyFilterAuthor");
+const historyFilterPrompt = document.querySelector("#historyFilterPrompt");
+const historyFilterModel = document.querySelector("#historyFilterModel");
+const historyFilterPeriod = document.querySelector("#historyFilterPeriod");
+const historyFilterGroup = document.querySelector("#historyFilterGroup");
+const historyFilterCount = document.querySelector("#historyFilterCount");
 const shareLinkOnlyLabel = document.querySelector("#shareLinkOnlyLabel");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
@@ -296,7 +304,9 @@ const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
-const MAX_STORED_HISTORY_ENTRIES = 40;
+// Local history is capped per WP so a busy WP cannot push the others out. A
+// full localStorage evicts further (see saveHistoryEntriesSafely).
+const MAX_HISTORY_ENTRIES_PER_WP = 100;
 const COMPACT_STORED_CHUNK_TEXT_LIMIT = 1200;
 // System placeholders are filled by the server and never warned about; the two
 // parameter placeholders shipped in the code floor (length, custom_instructions)
@@ -1746,6 +1756,7 @@ settingsDialog.addEventListener("change", () => queueMicrotask(flushSettingsDial
 
 historyButton.addEventListener("click", () => {
   renderAuthorName();
+  historyFilters.wp = activeWpId;
   setHistoryTab("mine");
   historyDialog.showModal();
 });
@@ -1757,6 +1768,23 @@ historyDialog.addEventListener("click", (event) => {
   if (event.target === historyDialog) {
     historyDialog.close();
   }
+});
+for (const [element, field] of [
+  [historyFilterWp, "wp"],
+  [historyFilterAuthor, "author"],
+  [historyFilterPrompt, "prompt"],
+  [historyFilterModel, "model"],
+  [historyFilterPeriod, "period"],
+  [historyFilterGroup, "groupBy"],
+]) {
+  element?.addEventListener("change", () => {
+    historyFilters[field] = element.value;
+    rerenderHistoryTab();
+  });
+}
+historyFilterText?.addEventListener("input", () => {
+  historyFilters.text = historyFilterText.value;
+  rerenderHistoryTab();
 });
 historyTabMine.addEventListener("click", () => setHistoryTab("mine"));
 historyTabShared.addEventListener("click", () => setHistoryTab("shared"));
@@ -1864,8 +1892,14 @@ if (conversationSubmitShortcut) {
   conversationSubmitShortcut.textContent = isMacPlatform() ? "\u2318" : "Ctrl";
 }
 
+// Deletes only what the filter shows, so other WPs' history survives.
 clearHistoryButton.addEventListener("click", () => {
-  localStorage.removeItem(HISTORY_STORAGE_KEY);
+  const history = getHistoryEntries();
+  const shownIds = new Set(applyHistoryFilters(history).filtered.map((entry) => entry.id));
+  if (!shownIds.size || !window.confirm(`Smazat ${shownIds.size} zobrazených položek historie?`)) {
+    return;
+  }
+  saveHistoryEntriesSafely(history.filter((entry) => !shownIds.has(entry.id)));
   selectedHistoryId = null;
   renderHistory();
 });
@@ -1875,13 +1909,8 @@ deleteHistoryItemButton.addEventListener("click", () => {
     return;
   }
   const remainingHistory = getHistoryEntries().filter((entry) => entry.id !== selectedHistoryId);
-  saveEntryListSafely(
-    HISTORY_STORAGE_KEY,
-    remainingHistory,
-    compactStoredHistoryEntry,
-    "history entries",
-  );
-  selectedHistoryId = remainingHistory[0]?.id ?? null;
+  saveHistoryEntriesSafely(remainingHistory);
+  selectedHistoryId = applyHistoryFilters(remainingHistory).filtered[0]?.id ?? null;
   renderHistory();
 });
 
@@ -5158,14 +5187,26 @@ function compactStoredHistoryEntry(entry) {
   };
 }
 
+function historyEntryWp(entry) {
+  return resolveWpId(entry?.settings?.wp_id);
+}
+
+// The per-WP cap is a ceiling; when localStorage fills up first, the oldest
+// entries of the largest WP make room instead of the new entry being lost.
+function saveHistoryEntriesSafely(entries) {
+  return saveEntryListSafely(HISTORY_STORAGE_KEY, entries, compactStoredHistoryEntry, "history entries", {
+    evict: (list) => Avatar.evictOldestFromLargestWp(list, historyEntryWp),
+  });
+}
+
 function compactStoredConversation(entry) {
   return Avatar.compactConversationForStorage(entry, {
     chunkTextLimit: COMPACT_STORED_CHUNK_TEXT_LIMIT,
   });
 }
 
-function saveEntryListSafely(key, entries, compactEntry, label) {
-  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry);
+function saveEntryListSafely(key, entries, compactEntry, label, options = {}) {
+  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry, options);
   if (result.saved) {
     storageSaveSucceeded.set(key, true);
     clearStorageSaveFailure(key);
@@ -7639,13 +7680,8 @@ function saveHistoryEntry(entry) {
     response_time_seconds: entry.response_time_seconds ?? null,
     createdAt: new Date().toISOString(),
   });
-  const trimmed = history.slice(0, MAX_STORED_HISTORY_ENTRIES);
-  const savedHistory = saveEntryListSafely(
-    HISTORY_STORAGE_KEY,
-    trimmed,
-    compactStoredHistoryEntry,
-    "history entries",
-  );
+  const trimmed = Avatar.trimHistoryPerWp(history, MAX_HISTORY_ENTRIES_PER_WP, historyEntryWp);
+  const savedHistory = saveHistoryEntriesSafely(trimmed);
   selectedHistoryId = savedHistory[0]?.id ?? null;
   renderHistory();
 }
@@ -7737,6 +7773,135 @@ function formatTimingLabel(doneData, modelLabel) {
   return label;
 }
 
+// --- History filter bar --------------------------------------------------------
+// One filter state serves both tabs. The WP filter is reset to the active WP each
+// time the dialog opens; "" in any field means "any".
+const historyFilters = { wp: "", text: "", author: "", prompt: "", model: "", period: "all", groupBy: "none" };
+const collapsedHistoryGroups = new Set();
+const HISTORY_GROUP_LABELS = { none: "Neseskupovat", day: "Podle dne", author: "Podle autora", prompt: "Podle promptu", model: "Podle modelu" };
+const HISTORY_PERIOD_LABELS = { all: "Kdykoli", today: "Dnes", "7d": "Posledních 7 dní", "30d": "Posledních 30 dní" };
+
+// Shared items are dated (and sorted) by share time, local ones by generation.
+function historyFacets(entry) {
+  return {
+    wp: historyEntryWp(entry),
+    author: activeHistoryTab === "shared" ? entry.author_name || "Anonym" : "",
+    prompt: promptPresetLabelFromSettings(entry.settings) || "",
+    model: modelDisplayName(entry.model_used || entry.settings?.model),
+    time: activeHistoryTab === "shared" ? entry.shared_at || "" : entry.createdAt || "",
+    text: [entry.question, entry.answer, entry.note, entry.author_name].join("\n"),
+  };
+}
+
+function historyDayLabel(timestamp) {
+  const date = new Date(timestamp || "");
+  return Number.isNaN(date.getTime())
+    ? "Bez data"
+    : date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric", year: "numeric" });
+}
+
+function fillHistoryFilterSelect(select, values, allLabel, field) {
+  if (!select) {
+    return;
+  }
+  if (historyFilters[field] && !values.includes(historyFilters[field])) {
+    historyFilters[field] = "";
+  }
+  select.innerHTML = [`<option value="">${escapeHtml(allLabel)}</option>`]
+    .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+    .join("");
+  select.value = historyFilters[field];
+}
+
+// Rebuilds the bar's options from the current tab's items (author/prompt/model
+// offer only values present in the selected WP), then filters and groups.
+function applyHistoryFilters(items) {
+  const shared = activeHistoryTab === "shared";
+  if (historyFilterWp) {
+    historyFilterWp.innerHTML = getWpConfigs()
+      .map((wp) => `<option value="${escapeHtml(wp.id)}">${escapeHtml(wp.label || wp.id)}</option>`)
+      .concat(`<option value="">Všechny oblasti</option>`)
+      .join("");
+    historyFilterWp.value = historyFilters.wp;
+  }
+  const inWp = Avatar.filterHistory(items, historyFacets, { wp: historyFilters.wp });
+  fillHistoryFilterSelect(historyFilterAuthor, Avatar.facetOptions(inWp, historyFacets, "author"), "Všichni autoři", "author");
+  fillHistoryFilterSelect(historyFilterPrompt, Avatar.facetOptions(inWp, historyFacets, "prompt"), "Všechny prompty", "prompt");
+  fillHistoryFilterSelect(historyFilterModel, Avatar.facetOptions(inWp, historyFacets, "model"), "Všechny modely", "model");
+  if (historyFilterAuthor) {
+    historyFilterAuthor.hidden = !shared;
+  }
+  if (!shared && historyFilters.groupBy === "author") {
+    historyFilters.groupBy = "none";
+  }
+  if (historyFilterGroup) {
+    historyFilterGroup.innerHTML = Avatar.HISTORY_GROUPINGS
+      .filter((key) => shared || key !== "author")
+      .map((key) => `<option value="${key}">${escapeHtml(HISTORY_GROUP_LABELS[key])}</option>`)
+      .join("");
+    historyFilterGroup.value = historyFilters.groupBy;
+  }
+  if (historyFilterPeriod && !historyFilterPeriod.options.length) {
+    historyFilterPeriod.innerHTML = Avatar.HISTORY_PERIODS
+      .map((key) => `<option value="${key}">${escapeHtml(HISTORY_PERIOD_LABELS[key])}</option>`)
+      .join("");
+  }
+  if (historyFilterPeriod) {
+    historyFilterPeriod.value = historyFilters.period;
+  }
+  if (historyFilterText && historyFilterText.value !== historyFilters.text) {
+    historyFilterText.value = historyFilters.text;
+  }
+
+  const filtered = Avatar.filterHistory(items, historyFacets, historyFilters);
+  if (historyFilterCount) {
+    historyFilterCount.textContent = `${filtered.length} z ${items.length}`;
+  }
+  const groups = Avatar.groupHistory(filtered, historyFacets, historyFilters.groupBy, {
+    emptyLabel: "—",
+    dayLabel: historyDayLabel,
+  });
+  return { filtered, groups };
+}
+
+function renderHistoryGroups(groups, rowHtml) {
+  if (groups.length === 1 && !groups[0].label) {
+    return groups[0].items.map(rowHtml).join("");
+  }
+  return groups
+    .map((group) => {
+      const key = `${historyFilters.groupBy}:${group.key}`;
+      return `
+        <details class="history-group" data-group-key="${escapeHtml(key)}" ${collapsedHistoryGroups.has(key) ? "" : "open"}>
+          <summary>${escapeHtml(group.label)} <span class="history-group-count">${group.items.length}</span></summary>
+          <div class="history-group-items">${group.items.map(rowHtml).join("")}</div>
+        </details>
+      `;
+    })
+    .join("");
+}
+
+// Collapsed groups stay collapsed across the re-render a row click causes.
+function bindHistoryGroupToggles() {
+  for (const details of historyList.querySelectorAll(".history-group")) {
+    details.addEventListener("toggle", () => {
+      if (details.open) {
+        collapsedHistoryGroups.delete(details.dataset.groupKey);
+      } else {
+        collapsedHistoryGroups.add(details.dataset.groupKey);
+      }
+    });
+  }
+}
+
+function rerenderHistoryTab() {
+  if (activeHistoryTab === "shared") {
+    renderSharedHistory();
+  } else {
+    renderHistory();
+  }
+}
+
 function renderHistory() {
   const history = getHistoryEntries();
   // Drop selections whose entry no longer exists (deleted/cleared).
@@ -7746,10 +7911,13 @@ function renderHistory() {
     }
   }
   updateShareSelectedButton();
-  if (!history.length) {
+  const { filtered, groups } = applyHistoryFilters(history);
+  if (!filtered.length) {
     deleteHistoryItemButton.disabled = true;
     clearHistoryButton.disabled = true;
-    historyList.innerHTML = `<p class="history-empty">Zatím tu nejsou žádné uložené dotazy.</p>`;
+    historyList.innerHTML = history.length
+      ? `<p class="history-empty">Filtru neodpovídá žádná položka.</p>`
+      : `<p class="history-empty">Zatím tu nejsou žádné uložené dotazy.</p>`;
     historyDetail.innerHTML = `<p class="history-empty">Vyber položku z historie.</p>`;
     return;
   }
@@ -7757,15 +7925,15 @@ function renderHistory() {
   deleteHistoryItemButton.disabled = false;
   clearHistoryButton.disabled = false;
 
-  if (!history.some((entry) => entry.id === selectedHistoryId)) {
-    selectedHistoryId = history[0].id;
+  if (!filtered.some((entry) => entry.id === selectedHistoryId)) {
+    selectedHistoryId = filtered[0].id;
   }
 
   // Each row is a wrapper holding the share checkbox as a SIBLING of the clickable
   // button (a checkbox must never be nested inside a <button>).
-  historyList.innerHTML = history
-    .map(
-      (entry) => `
+  historyList.innerHTML = renderHistoryGroups(
+    groups,
+    (entry) => `
         <div class="history-row">
           <input type="checkbox" class="history-select" data-history-id="${entry.id}" ${selectedShareIds.has(entry.id) ? "checked" : ""} aria-label="Vybrat ke sdílení" />
           <button class="history-item ${entry.id === selectedHistoryId ? "active" : ""}" type="button" data-history-id="${entry.id}">
@@ -7775,8 +7943,8 @@ function renderHistory() {
           </button>
         </div>
       `,
-    )
-    .join("");
+  );
+  bindHistoryGroupToggles();
 
   for (const item of historyList.querySelectorAll(".history-item")) {
     item.addEventListener("click", () => {
@@ -7797,7 +7965,7 @@ function renderHistory() {
     });
   }
 
-  const selectedEntry = history.find((entry) => entry.id === selectedHistoryId) || history[0];
+  const selectedEntry = filtered.find((entry) => entry.id === selectedHistoryId) || filtered[0];
   renderHistoryDetail(selectedEntry);
 }
 
@@ -7870,12 +8038,7 @@ function mutateLocalHistoryEntry(id, mutate) {
     return;
   }
   mutate(entry);
-  saveEntryListSafely(
-    HISTORY_STORAGE_KEY,
-    history,
-    compactStoredHistoryEntry,
-    "history entries",
-  );
+  saveHistoryEntriesSafely(history);
 }
 
 function updateLocalHistoryEntryNote(id, note) {
@@ -7902,12 +8065,7 @@ function clearLocalSharedMarker(sharedId) {
     }
   }
   if (changed) {
-    saveEntryListSafely(
-      HISTORY_STORAGE_KEY,
-      history,
-      compactStoredHistoryEntry,
-      "history entries",
-    );
+    saveHistoryEntriesSafely(history);
   }
 }
 
@@ -7968,17 +8126,20 @@ async function loadSharedHistory() {
 }
 
 function renderSharedHistory() {
-  if (!sharedHistoryItems.length) {
-    historyList.innerHTML = `<p class="history-empty">Zatím nikdo nic nesdílel.</p>`;
+  const { filtered, groups } = applyHistoryFilters(sharedHistoryItems);
+  if (!filtered.length) {
+    historyList.innerHTML = sharedHistoryItems.length
+      ? `<p class="history-empty">Filtru neodpovídá žádná položka.</p>`
+      : `<p class="history-empty">Zatím nikdo nic nesdílel.</p>`;
     historyDetail.innerHTML = `<p class="history-empty">Zatím tu nejsou žádné sdílené položky.</p>`;
     return;
   }
-  if (!sharedHistoryItems.some((item) => item.id === selectedSharedId)) {
-    selectedSharedId = sharedHistoryItems[0].id;
+  if (!filtered.some((item) => item.id === selectedSharedId)) {
+    selectedSharedId = filtered[0].id;
   }
-  historyList.innerHTML = sharedHistoryItems
-    .map(
-      (item) => `
+  historyList.innerHTML = renderHistoryGroups(
+    groups,
+    (item) => `
         <div class="history-row">
           <button class="history-item ${item.id === selectedSharedId ? "active" : ""}" type="button" data-shared-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.question)}</strong>
@@ -7987,8 +8148,8 @@ function renderSharedHistory() {
           </button>
         </div>
       `,
-    )
-    .join("");
+  );
+  bindHistoryGroupToggles();
 
   for (const button of historyList.querySelectorAll(".history-item")) {
     button.addEventListener("click", () => {
@@ -7997,7 +8158,7 @@ function renderSharedHistory() {
     });
   }
 
-  const selected = sharedHistoryItems.find((item) => item.id === selectedSharedId) || sharedHistoryItems[0];
+  const selected = filtered.find((item) => item.id === selectedSharedId) || filtered[0];
   renderSharedHistoryDetail(selected);
 }
 
@@ -8180,6 +8341,7 @@ async function openSharedItemFromUrl() {
     }
     item = await response.json();
   } catch (error) {
+    historyFilters.wp = activeWpId;
     setHistoryTab("shared");
     setHistoryShareStatus(error.message, "error");
     return;
@@ -8191,6 +8353,7 @@ async function openSharedItemFromUrl() {
   if (switchWp) {
     selectWp(itemWpId);
   }
+  historyFilters.wp = activeWpId;
   setHistoryTab("shared");
   if (switchWp) {
     setHistoryShareStatus(

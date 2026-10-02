@@ -957,7 +957,7 @@
             </label>
             <button id="shareSelectedButton" type="button" disabled>Sdílet vybrané (0)</button>
             <button id="deleteHistoryItemButton" type="button">Smazat položku</button>
-            <button id="clearHistoryButton" type="button">Smazat vše</button>
+            <button id="clearHistoryButton" type="button" title="Smaže položky, které odpovídají filtru">Smazat zobrazené</button>
             <button id="closeHistoryButton" class="icon-button help-close" type="button" aria-label="Zavřít historii" title="Zavřít">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <path d="M6 6l12 12"></path>
@@ -965,6 +965,16 @@
               </svg>
             </button>
           </div>
+        </div>
+        <div id="historyFilters" class="history-filters">
+          <select id="historyFilterWp" aria-label="Oblast"></select>
+          <input id="historyFilterText" type="search" placeholder="Hledat v otázce, odpovědi, poznámce…" aria-label="Hledat v historii" />
+          <select id="historyFilterAuthor" aria-label="Autor"></select>
+          <select id="historyFilterPrompt" aria-label="Prompt"></select>
+          <select id="historyFilterModel" aria-label="Model"></select>
+          <select id="historyFilterPeriod" aria-label="Období"></select>
+          <select id="historyFilterGroup" aria-label="Seskupit"></select>
+          <span id="historyFilterCount" class="history-filter-count" aria-live="polite"></span>
         </div>
         <div class="history-dialog-body">
           <aside id="historyList" class="history-list history-list-panel"></aside>
