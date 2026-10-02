@@ -14,6 +14,10 @@ describe("shortenModelName", () => {
     expect(shortenModelName("MAC2.mlx-community--NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-MXFP4"))
       .toBe("NVIDIA-Nemotron-3-Nano-30B-A3B");
     expect(shortenModelName("MAC9.mlx-comunity--Example-7B-MLX-int4")).toBe("Example-7B");
+    expect(shortenModelName("MAC3.Qwen3-30B-A3B-MLX-4bit")).toBe("Qwen3-30B-A3B");
+    expect(shortenModelName("MAC.unsloth/gpt-oss-20b-GGUF:Q4_K_M")).toBe("gpt-oss-20b");
+    expect(shortenModelName("LLM3.unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF:IQ4_XS"))
+      .toBe("Llama-4-Scout-17B-16E-Instruct");
   });
 
   it("keeps size and variant markers", () => {

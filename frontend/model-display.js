@@ -13,8 +13,10 @@ export function shortenModelName(modelName) {
     return MODEL_DISPLAY_OVERRIDES.get(raw);
   }
   const label = raw
-    .replace(/^MAC.*?mlx-com{1,2}unity--/i, "")
+    // Host prefixes: "MAC2.", "LLM3.", "LLM1-A40." ...
+    .replace(/^MAC\d*\./i, "")
     .replace(/^LLM[^.]*\./i, "")
+    .replace(/^mlx-com{1,2}unity--/i, "")
     .replace(/^(?:unsloth|mlx-community|openai|meta-llama|google|anthropic|mistralai)\//i, "")
     .replace(/(?:-GGUF.*|-MLX.*|:UD-Q8_K_XL|:latest|-int4)$/i, "")
     .trim();

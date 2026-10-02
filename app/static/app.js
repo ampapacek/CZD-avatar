@@ -1283,6 +1283,7 @@ async function runQuery(retrieveOnlyMode) {
           currentAnswerQuestion = doneData.answer_question || currentAnswerQuestion;
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
           statusEl.textContent = formatTimingLabel(doneData, modelLabel);
+          statusEl.title = rawModelUsageLabel(doneData.model, doneData.upstream_model);
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
           currentBaselineChunks = doneData.baseline_chunks || currentBaselineChunks;
@@ -7023,13 +7024,15 @@ function updateConversationChips(conversation) {
       continue;
     }
     const text = String(value || "").trim();
-    const display = compactModel ? conversationModelDisplayName(text) : text;
+    const display = compactModel ? modelDisplayName(text) : text;
     element.textContent = display ? shortenText(display, 28) : "—";
     element.title = `${label}: ${text || "—"}`;
   }
 }
 
-function conversationModelDisplayName(rawModel) {
+// Compact model label for display; the raw id stays available as a tooltip.
+// Uses the select's collision-aware labels when the model is offered there.
+function modelDisplayName(rawModel) {
   const raw = String(rawModel || "").trim();
   return conversationModelLabelMap().get(raw) || Avatar.shortenModelName(raw);
 }
@@ -7144,7 +7147,9 @@ function renderConversationMessage(message, index = 0, conversationSummary = "")
       : `<p>${escapeHtml(message.content || "")}</p>`;
   const metaParts = [];
   if (message.role === "assistant" && message.model_used) {
-    metaParts.push(escapeHtml(formatModelUsageLabel(message.model_used, message.upstream_model)));
+    metaParts.push(
+      `<span title="${escapeHtml(rawModelUsageLabel(message.model_used, message.upstream_model))}">${escapeHtml(formatModelUsageLabel(message.model_used, message.upstream_model))}</span>`,
+    );
   }
   if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
@@ -7650,6 +7655,16 @@ function sanitizeHistorySettings(settings) {
 }
 
 function formatModelUsageLabel(requestedModel, upstreamModel) {
+  const requested = modelDisplayName(requestedModel);
+  const upstream = modelDisplayName(upstreamModel);
+  if (requested && upstream && requested !== upstream) {
+    return `${requested} · ${upstream}`;
+  }
+  return requested || upstream || "";
+}
+
+// The untouched ids behind formatModelUsageLabel, for a tooltip.
+function rawModelUsageLabel(requestedModel, upstreamModel) {
   const requested = String(requestedModel || "").trim();
   const upstream = String(upstreamModel || "").trim();
   if (requested && upstream && requested !== upstream) {
@@ -7993,7 +8008,7 @@ function renderSharedHistoryDetail(item) {
     <div class="history-detail-header">
       <div>
         <h3>${escapeHtml(item.question)}</h3>
-        <p>${item.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · sdíleno ${formatHistoryTime(item.shared_at)}</p>
+        <p>${item.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · ${item.created_at ? `vygenerováno ${formatHistoryTime(item.created_at)} · ` : ""}sdíleno ${formatHistoryTime(item.shared_at)}</p>
       </div>
       <div class="history-detail-actions">
         <button id="reuseSharedButton" type="button">Načíst do formuláře</button>
@@ -8186,6 +8201,10 @@ function renderHistoryQueryTransform(entry) {
 // mountHistoryDetailSources after innerHTML is set).
 function renderHistorySettingsAndAnswer(entry) {
   const chunks = entry.retrieved_chunks || [];
+  const modelId = entry.model_used || entry.settings?.model;
+  // Local entries say createdAt, shared ones created_at; both mark when the
+  // answer was generated, as opposed to shared_at.
+  const generatedAt = entry.createdAt || entry.created_at || "";
   const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
   return `
     <section class="history-block">
@@ -8196,19 +8215,27 @@ function renderHistorySettingsAndAnswer(entry) {
         ${renderPromptNoteSetting(entry.settings)}
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
-        ${renderSetting("Model", formatModelUsageLabel(entry.model_used || entry.settings?.model, entry.upstream_model))}
-        ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
-        ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
-        ${renderSetting("Top-k", entry.settings?.top_k)}
-        ${renderSetting("Context window", entry.token_budget?.context_window_tokens || entry.settings?.context_window_tokens)}
-        ${renderSetting("Tokenů ve zdrojích", entry.token_budget?.estimated_source_tokens)}
-        ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
-        ${renderSetting("Váha BM25", entry.settings?.bm25_weight)}
-        ${renderSetting("Min. confidence mSearch", entry.settings?.msearch_min_confidence)}
-        ${renderSetting("Min. skóre", entry.settings?.min_score)}
-        ${renderSetting("Min. vůči nejlepšímu", entry.settings?.min_relative_score)}
+        ${renderSetting("Model", formatModelUsageLabel(modelId, entry.upstream_model), rawModelUsageLabel(modelId, entry.upstream_model))}
         ${renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
+        ${renderSetting("Vygenerováno", generatedAt ? formatHistoryTime(generatedAt) : null)}
+        ${entry.shared_at ? renderSetting("Sdíleno", formatHistoryTime(entry.shared_at)) : ""}
       </div>
+      <details class="history-technical">
+        <summary>Technická nastavení</summary>
+        <div class="settings-grid">
+          ${renderSetting("Model (přesný název)", rawModelUsageLabel(modelId, entry.upstream_model))}
+          ${renderSetting("LLM endpoint", entry.settings?.llm_base_url)}
+          ${renderSetting("Pouze zdroje", entry.mode === "retrieve" ? "ano" : "ne")}
+          ${renderSetting("Top-k", entry.settings?.top_k)}
+          ${renderSetting("Context window", entry.token_budget?.context_window_tokens || entry.settings?.context_window_tokens)}
+          ${renderSetting("Tokenů ve zdrojích", entry.token_budget?.estimated_source_tokens)}
+          ${renderSetting("Váha embeddingů", entry.settings?.dense_weight)}
+          ${renderSetting("Váha BM25", entry.settings?.bm25_weight)}
+          ${renderSetting("Min. confidence mSearch", entry.settings?.msearch_min_confidence)}
+          ${renderSetting("Min. skóre", entry.settings?.min_score)}
+          ${renderSetting("Min. vůči nejlepšímu", entry.settings?.min_relative_score)}
+        </div>
+      </details>
       ${renderVerbatimPromptDetails(entry.settings)}
     </section>
     ${
@@ -8321,10 +8348,10 @@ function mountHistoryDetailSources(entry) {
   );
 }
 
-function renderSetting(label, value) {
+function renderSetting(label, value, title = "") {
   const displayValue = label === "Poskytovatel" ? providerLabelForId(value) : value;
   return `
-    <div class="setting-card">
+    <div class="setting-card"${title ? ` title="${escapeHtml(title)}"` : ""}>
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(displayValue ?? "—")}</strong>
     </div>

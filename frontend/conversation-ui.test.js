@@ -338,7 +338,7 @@ describe("chips for a conversation stored before the current settings version", 
   const appSource = readFileSync("app/static/app.js", "utf8");
   const chipSource = appSource.slice(
     appSource.indexOf("function updateConversationChips(conversation) {"),
-    appSource.indexOf("function conversationModelDisplayName(rawModel) {"),
+    appSource.indexOf("function modelDisplayName(rawModel) {"),
   );
 
   function renderChips(conversation) {
@@ -354,7 +354,7 @@ describe("chips for a conversation stored before the current settings version", 
       "getWpConfig",
       "currentPromptPresetLabelFromSettings",
       "shortenText",
-      "conversationModelDisplayName",
+      "modelDisplayName",
       "conversationChipModel",
       "conversationChipWp",
       "conversationChipPrompt",
