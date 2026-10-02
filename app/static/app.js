@@ -149,6 +149,8 @@ const sourcesReopenCount = document.querySelector("#sourcesReopenCount");
 const answerActions = document.querySelector("#answerActions");
 const copyAnswerStatus = document.querySelector("#copyAnswerStatus");
 const continueInConversationButton = document.querySelector("#continueInConversationButton");
+const shareAnswerButton = document.querySelector("#shareAnswerButton");
+const answerSharePanel = document.querySelector("#answerSharePanel");
 const retrievalQueryInfo = document.querySelector("#retrievalQueryInfo");
 const retrievalQueryText = document.querySelector("#retrievalQueryText");
 const baselineSourcesEl = document.querySelector("#baselineSources");
@@ -163,7 +165,6 @@ const historyButton = document.querySelector("#historyButton");
 const historyDialog = document.querySelector("#historyDialog");
 const historyList = document.querySelector("#historyList");
 const historyDetail = document.querySelector("#historyDetail");
-const deleteHistoryItemButton = document.querySelector("#deleteHistoryItemButton");
 const clearHistoryButton = document.querySelector("#clearHistoryButton");
 const closeHistoryButton = document.querySelector("#closeHistoryButton");
 const historyTabMine = document.querySelector("#historyTabMine");
@@ -171,8 +172,13 @@ const historyTabShared = document.querySelector("#historyTabShared");
 const historyAuthorName = document.querySelector("#historyAuthorName");
 const historyAuthorNameLabel = document.querySelector("#historyAuthorNameLabel");
 const historyShareStatus = document.querySelector("#historyShareStatus");
-const shareSelectedButton = document.querySelector("#shareSelectedButton");
-const shareLinkOnly = document.querySelector("#shareLinkOnly");
+const historyBatchToggle = document.querySelector("#historyBatchToggle");
+const historyBatchBar = document.querySelector("#historyBatchBar");
+const historyBatchCount = document.querySelector("#historyBatchCount");
+const historySelectShownButton = document.querySelector("#historySelectShownButton");
+const shareSelectedListedButton = document.querySelector("#shareSelectedListedButton");
+const shareSelectedLinkButton = document.querySelector("#shareSelectedLinkButton");
+const deleteSelectedButton = document.querySelector("#deleteSelectedButton");
 const historyFilterWp = document.querySelector("#historyFilterWp");
 const historyFilterText = document.querySelector("#historyFilterText");
 const historyFilterAuthor = document.querySelector("#historyFilterAuthor");
@@ -181,7 +187,6 @@ const historyFilterModel = document.querySelector("#historyFilterModel");
 const historyFilterPeriod = document.querySelector("#historyFilterPeriod");
 const historyFilterGroup = document.querySelector("#historyFilterGroup");
 const historyFilterCount = document.querySelector("#historyFilterCount");
-const shareLinkOnlyLabel = document.querySelector("#shareLinkOnlyLabel");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
@@ -331,6 +336,9 @@ let selectedConversationId = null;
 let activeHistoryTab = "mine";
 let selectedSharedId = null;
 let sharedHistoryItems = [];
+// Batch mode shows the row checkboxes and the batch bar; off by default, since
+// most sharing is one item at a time from its detail.
+let historyBatchMode = false;
 const selectedShareIds = new Set();
 let streamedAnswerText = "";
 let currentAnswerSources = [];
@@ -372,6 +380,10 @@ let currentConversationSummary = "";
 // conversation, captured when the answer lands. Null while none is offered:
 // before the first answer, during a stream, and after a retrieve-only run.
 let currentAnswerContinuation = null;
+// The local history entry behind the answer on the main page, for its share
+// panel; null while streaming or when the answer was not saved.
+let currentAnswerHistoryId = null;
+let answerSharePanelOpen = false;
 // Source card the user clicked to light up its citation markers in the answer,
 // as { scope, citationId }. Kept outside the DOM because both the answer and the
 // source cards are re-rendered from scratch (on every streamed token, even), so
@@ -1173,6 +1185,9 @@ async function runQuery(retrieveOnlyMode) {
   currentConversationSummary = "";
   currentReasoning = "";
   currentAnswerContinuation = null;
+  currentAnswerHistoryId = null;
+  answerSharePanelOpen = false;
+  renderAnswerShare();
   // The settings as they are right now are the ones this answer is produced
   // with; the controls may have moved on by the time it is continued.
   const settingsSnapshot = captureSettingsSnapshot();
@@ -1228,7 +1243,7 @@ async function runQuery(retrieveOnlyMode) {
       currentBaselineChunks = data.baseline_chunks || [];
       currentAnswerSources = data.sources || chunksToSources(currentRetrievedChunks);
       completeMainSources(currentAnswerSources, currentRetrievedChunks, "");
-      saveHistoryEntry({
+      currentAnswerHistoryId = saveHistoryEntry({
         question: question.value,
         mode: "retrieve",
         answer: "Zobrazuji pouze nalezené dokumenty. Generování odpovědi bylo vypnuté.",
@@ -1238,6 +1253,7 @@ async function runQuery(retrieveOnlyMode) {
         retrieved_chunks: currentRetrievedChunks,
         sources: currentAnswerSources,
       });
+      renderAnswerShare();
     } else {
       const payload = buildRequestPayload();
       currentRetrievalQuery = payload.retrieval_query || payload.question;
@@ -1347,7 +1363,7 @@ async function runQuery(retrieveOnlyMode) {
         responseTimeSeconds: data.response_time_seconds ?? null,
       };
       updateAnswerActions();
-      saveHistoryEntry({
+      currentAnswerHistoryId = saveHistoryEntry({
         question: question.value,
         mode: "chat",
         answer: data.answer || streamedAnswerText,
@@ -1367,6 +1383,7 @@ async function runQuery(retrieveOnlyMode) {
         rerank_time_seconds: data.rerank_time_seconds ?? null,
         generation_time_seconds: data.generation_time_seconds ?? null,
       });
+      renderAnswerShare();
     }
   } catch (error) {
     if (error.name === "AbortError") {
@@ -1755,6 +1772,7 @@ settingsDialog.addEventListener("input", scheduleSettingsDialogSync);
 settingsDialog.addEventListener("change", () => queueMicrotask(flushSettingsDialogEdits));
 
 historyButton.addEventListener("click", () => {
+  syncedSharedIds.clear();
   renderAuthorName();
   historyFilters.wp = activeWpId;
   setHistoryTab("mine");
@@ -1764,6 +1782,8 @@ closeHistoryButton.addEventListener("click", () => {
   historyDialog.close();
 });
 historyDialog.addEventListener("close", clearSharedItemLinkFromUrl);
+// Notes and share state may have changed in the dialog.
+historyDialog.addEventListener("close", () => renderAnswerShare());
 historyDialog.addEventListener("click", (event) => {
   if (event.target === historyDialog) {
     historyDialog.close();
@@ -1795,8 +1815,37 @@ historyAuthorName.addEventListener("click", () => {
     renderAuthorName();
   }
 });
-shareSelectedButton.addEventListener("click", () => {
-  shareSelectedEntries();
+historyBatchToggle?.addEventListener("click", () => {
+  setHistoryBatchMode(!historyBatchMode);
+});
+shareSelectedListedButton?.addEventListener("click", () => shareSelectedEntries("listed"));
+shareSelectedLinkButton?.addEventListener("click", () => shareSelectedEntries("link"));
+historySelectShownButton?.addEventListener("click", () => {
+  const shownIds = applyHistoryFilters(getHistoryEntries()).filtered.map((entry) => entry.id);
+  const allSelected = shownIds.length > 0 && shownIds.every((id) => selectedShareIds.has(id));
+  for (const id of shownIds) {
+    if (allSelected) {
+      selectedShareIds.delete(id);
+    } else {
+      selectedShareIds.add(id);
+    }
+  }
+  renderHistory();
+});
+deleteSelectedButton?.addEventListener("click", () => {
+  const history = getHistoryEntries();
+  const selected = history.filter((entry) => selectedShareIds.has(entry.id));
+  if (!selected.length) {
+    return;
+  }
+  const sharedCount = selected.filter((entry) => entry.shared_id).length;
+  const warning = sharedCount ? `\n\n${sharedCount} z nich je sdílených; ty zůstanou sdílené, dokud nezrušíš sdílení.` : "";
+  if (!window.confirm(`Smazat ${selected.length} vybraných položek z historie?${warning}`)) {
+    return;
+  }
+  saveHistoryEntriesSafely(history.filter((entry) => !selectedShareIds.has(entry.id)));
+  selectedShareIds.clear();
+  renderHistory();
 });
 
 modeSingleButton?.addEventListener("click", () => {
@@ -1904,15 +1953,6 @@ clearHistoryButton.addEventListener("click", () => {
   renderHistory();
 });
 
-deleteHistoryItemButton.addEventListener("click", () => {
-  if (selectedHistoryId === null) {
-    return;
-  }
-  const remainingHistory = getHistoryEntries().filter((entry) => entry.id !== selectedHistoryId);
-  saveHistoryEntriesSafely(remainingHistory);
-  selectedHistoryId = applyHistoryFilters(remainingHistory).filtered[0]?.id ?? null;
-  renderHistory();
-});
 
 topK.addEventListener("input", () => {
   topKValue.value = topK.value;
@@ -5428,6 +5468,14 @@ continueInConversationButton?.addEventListener("click", () => {
   continueInConversation();
 });
 
+shareAnswerButton?.addEventListener("click", () => {
+  answerSharePanelOpen = !answerSharePanelOpen;
+  renderAnswerShare();
+  if (answerSharePanelOpen) {
+    answerSharePanel?.querySelector("[data-note-input]")?.focus();
+  }
+});
+
 answerActions?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-copy-scope='main']");
   if (!button) {
@@ -5486,6 +5534,55 @@ function updateAnswerActions() {
   if (continueInConversationButton) {
     continueInConversationButton.hidden = currentAnswerContinuation === null;
   }
+  if (shareAnswerButton) {
+    shareAnswerButton.hidden = currentAnswerHistoryId === null;
+  }
+}
+
+// Share panel under the main answer: the note and the same share controls as the
+// history detail, so a fresh answer can be shared without opening the dialog.
+function renderAnswerShare() {
+  const entry = currentAnswerHistoryId === null ? null : findHistoryEntry(currentAnswerHistoryId);
+  if (shareAnswerButton) {
+    shareAnswerButton.hidden = !entry;
+    shareAnswerButton.textContent = entry?.shared_id
+      ? entry.shared_visibility === "link" ? "Sdíleno odkazem" : "Sdíleno"
+      : "Sdílet";
+    shareAnswerButton.classList.toggle("is-shared", Boolean(entry?.shared_id));
+    shareAnswerButton.setAttribute("aria-expanded", entry && answerSharePanelOpen ? "true" : "false");
+  }
+  if (!answerSharePanel) {
+    return;
+  }
+  answerSharePanel.hidden = !entry || !answerSharePanelOpen;
+  if (answerSharePanel.hidden) {
+    answerSharePanel.innerHTML = "";
+    return;
+  }
+  answerSharePanel.innerHTML = `
+    <div class="answer-share-note">
+      <h4>Poznámka</h4>
+      ${renderNoteField(entry.note, entry.note_edited_at, "Volitelná poznámka, sdílí se s odpovědí…")}
+    </div>
+    ${
+      entry.shared_id
+        ? renderShareState(entry.shared_id, entry.shared_visibility)
+        : `<div class="answer-share-actions">${renderShareButtons()}</div>
+           <p class="field-note">${SHARE_VISIBILITY_HINT}</p>`
+    }
+    <p class="share-status" data-share-status role="status" aria-live="polite"></p>
+  `;
+  const status = () => answerSharePanel.querySelector("[data-share-status]");
+  bindNoteField(answerSharePanel, (note) => saveHistoryEntryNote(entry.id, note));
+  bindSharedLinkRow(answerSharePanel);
+  bindShareActions(answerSharePanel, {
+    entryId: entry.id,
+    setStatus: (message) => setInlineStatus(status(), message),
+    onChange: (message, isError) => {
+      renderAnswerShare();
+      setInlineStatus(status(), message, isError);
+    },
+  });
 }
 
 function renderAnswer(text) {
@@ -7690,6 +7787,7 @@ function saveHistoryEntry(entry) {
   const savedHistory = saveHistoryEntriesSafely(trimmed);
   selectedHistoryId = savedHistory[0]?.id ?? null;
   renderHistory();
+  return selectedHistoryId;
 }
 
 function sanitizeHistorySettings(settings) {
@@ -7916,11 +8014,9 @@ function renderHistory() {
       selectedShareIds.delete(id);
     }
   }
-  updateShareSelectedButton();
   const { filtered, groups } = applyHistoryFilters(history);
+  updateHistoryBatchBar(filtered);
   if (!filtered.length) {
-    deleteHistoryItemButton.disabled = true;
-    clearHistoryButton.disabled = true;
     historyList.innerHTML = history.length
       ? `<p class="history-empty">Filtru neodpovídá žádná položka.</p>`
       : `<p class="history-empty">Zatím tu nejsou žádné uložené dotazy.</p>`;
@@ -7928,23 +8024,25 @@ function renderHistory() {
     return;
   }
 
-  deleteHistoryItemButton.disabled = false;
-  clearHistoryButton.disabled = false;
-
   if (!filtered.some((entry) => entry.id === selectedHistoryId)) {
     selectedHistoryId = filtered[0].id;
   }
 
-  // Each row is a wrapper holding the share checkbox as a SIBLING of the clickable
+  // Each row is a wrapper holding the batch checkbox as a SIBLING of the clickable
   // button (a checkbox must never be nested inside a <button>).
   historyList.innerHTML = renderHistoryGroups(
     groups,
     (entry) => `
         <div class="history-row">
-          <input type="checkbox" class="history-select" data-history-id="${entry.id}" ${selectedShareIds.has(entry.id) ? "checked" : ""} aria-label="Vybrat ke sdílení" />
+          ${
+            historyBatchMode
+              ? `<input type="checkbox" class="history-select" data-history-id="${entry.id}" ${selectedShareIds.has(entry.id) ? "checked" : ""} aria-label="Vybrat" />`
+              : ""
+          }
           <button class="history-item ${entry.id === selectedHistoryId ? "active" : ""}" type="button" data-history-id="${entry.id}">
             <strong>${escapeHtml(entry.question)}</strong>
-            <span>${entry.mode === "retrieve" ? "Pouze zdroje" : "Odpověď"} · ${entry.sourceCount} zdrojů${entry.shared_id ? ` · <span class="history-shared-badge">Sdíleno ✓</span>` : ""}</span>
+            <span>${entry.mode === "retrieve" ? "Pouze zdroje" : "Odpověď"} · ${entry.sourceCount} zdrojů${entry.shared_id ? ` · <span class="history-shared-badge">${entry.shared_visibility === "link" ? "Sdíleno odkazem" : "Sdíleno"}</span>` : ""}</span>
+            ${renderHistoryRowNote(entry.note)}
             <span>${formatHistoryTime(entry.createdAt)}</span>
           </button>
         </div>
@@ -7967,7 +8065,7 @@ function renderHistory() {
       } else {
         selectedShareIds.delete(id);
       }
-      updateShareSelectedButton();
+      updateHistoryBatchBar();
     });
   }
 
@@ -7975,13 +8073,39 @@ function renderHistory() {
   renderHistoryDetail(selectedEntry);
 }
 
-function updateShareSelectedButton() {
-  if (!shareSelectedButton) {
+function renderHistoryRowNote(note) {
+  const text = String(note || "").trim();
+  return text ? `<span class="history-row-note">${escapeHtml(shortenText(text, 90))}</span>` : "";
+}
+
+function setHistoryBatchMode(enabled) {
+  historyBatchMode = Boolean(enabled);
+  if (!historyBatchMode) {
+    selectedShareIds.clear();
+  }
+  historyBatchToggle?.setAttribute("aria-pressed", historyBatchMode ? "true" : "false");
+  historyBatchToggle?.classList.toggle("active", historyBatchMode);
+  renderHistory();
+}
+
+function updateHistoryBatchBar(filtered = null) {
+  if (!historyBatchBar) {
     return;
   }
+  historyBatchBar.hidden = !historyBatchMode || activeHistoryTab !== "mine";
+  if (historyBatchBar.hidden) {
+    return;
+  }
+  filtered ??= applyHistoryFilters(getHistoryEntries()).filtered;
   const count = selectedShareIds.size;
-  shareSelectedButton.textContent = `Sdílet vybrané (${count})`;
-  shareSelectedButton.disabled = count === 0;
+  historyBatchCount.textContent = `Vybráno ${count}`;
+  shareSelectedListedButton.disabled = count === 0;
+  shareSelectedLinkButton.disabled = count === 0;
+  deleteSelectedButton.disabled = count === 0;
+  clearHistoryButton.disabled = filtered.length === 0;
+  const allSelected = filtered.length > 0 && filtered.every((entry) => selectedShareIds.has(entry.id));
+  historySelectShownButton.textContent = allSelected ? "Zrušit výběr" : "Vybrat zobrazené";
+  historySelectShownButton.disabled = filtered.length === 0;
 }
 
 // --- Feature 3: shared history -------------------------------------------------
@@ -8047,26 +8171,63 @@ function mutateLocalHistoryEntry(id, mutate) {
   saveHistoryEntriesSafely(history);
 }
 
+function findHistoryEntry(id) {
+  return getHistoryEntries().find((entry) => entry.id === id) || null;
+}
+
 function updateLocalHistoryEntryNote(id, note) {
   mutateLocalHistoryEntry(id, (entry) => {
     entry.note = String(note || "");
   });
 }
 
-function updateLocalHistoryEntryShared(id, sharedId) {
+// The local entry records what the server holds, so its detail and the main
+// page can show the share state without a round trip.
+function markLocalEntryShared(id, item) {
   mutateLocalHistoryEntry(id, (entry) => {
-    entry.shared_id = sharedId;
+    entry.shared_id = item.id;
+    entry.shared_visibility = item.visibility;
+    entry.note_edited_at = item.note_edited_at || null;
   });
 }
 
-// When a shared item is unshared, drop the "Sdíleno ✓" marker from any local
-// entry that referenced it.
+// A shared entry has one note: the local entry mirrors the item it was shared
+// as. Returns whether any local entry changed.
+function syncLocalEntriesFromSharedItem(item) {
+  const history = getHistoryEntries();
+  let changed = false;
+  for (const entry of history) {
+    if (entry.shared_id !== item.id) {
+      continue;
+    }
+    const next = {
+      note: item.note || "",
+      note_edited_at: item.note_edited_at || null,
+      shared_visibility: item.visibility,
+    };
+    for (const [key, value] of Object.entries(next)) {
+      if ((entry[key] ?? null) !== value) {
+        entry[key] = value;
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    saveHistoryEntriesSafely(history);
+  }
+  return changed;
+}
+
+// When a shared item is unshared, drop the share marker from any local entry
+// that referenced it. The note stays: it is the entry's own note too.
 function clearLocalSharedMarker(sharedId) {
   const history = getHistoryEntries();
   let changed = false;
   for (const entry of history) {
     if (entry.shared_id === sharedId) {
       delete entry.shared_id;
+      delete entry.shared_visibility;
+      delete entry.note_edited_at;
       changed = true;
     }
   }
@@ -8082,13 +8243,11 @@ function setHistoryTab(tab) {
   historyTabShared.classList.toggle("active", !mine);
   historyTabMine.setAttribute("aria-selected", mine ? "true" : "false");
   historyTabShared.setAttribute("aria-selected", mine ? "false" : "true");
-  // Local-only affordances: multi-select share + per-item / clear deletion.
-  shareSelectedButton.hidden = !mine;
-  if (shareLinkOnlyLabel) {
-    shareLinkOnlyLabel.hidden = !mine;
+  // Batch sharing and deletion only apply to the local history.
+  if (historyBatchToggle) {
+    historyBatchToggle.hidden = !mine;
   }
-  deleteHistoryItemButton.hidden = !mine;
-  clearHistoryButton.hidden = !mine;
+  updateHistoryBatchBar();
   setHistoryShareStatus("");
   if (mine) {
     renderHistory();
@@ -8150,6 +8309,7 @@ function renderSharedHistory() {
           <button class="history-item ${item.id === selectedSharedId ? "active" : ""}" type="button" data-shared-id="${escapeHtml(item.id)}">
             <strong>${escapeHtml(item.question)}</strong>
             <span>${escapeHtml(item.author_name || "Anonym")} · ${item.mode === "retrieve" ? "Pouze zdroje" : "Odpověď"} · ${item.source_count} zdrojů${item.visibility === "link" ? ` · <span class="history-shared-badge">Jen odkazem</span>` : ""}</span>
+            ${renderHistoryRowNote(item.note)}
             <span>${formatHistoryTime(item.shared_at)}</span>
           </button>
         </div>
@@ -8179,6 +8339,7 @@ function sharedItemManageable(item) {
 
 function renderSharedHistoryDetail(item) {
   const canManage = sharedItemManageable(item);
+  const note = String(item.note || "");
   historyDetail.innerHTML = `
     <div class="history-detail-header">
       <div>
@@ -8187,29 +8348,22 @@ function renderSharedHistoryDetail(item) {
       </div>
       <div class="history-detail-actions">
         <button id="reuseSharedButton" type="button">Načíst do formuláře</button>
-        ${canManage ? `<button id="unshareButton" type="button" class="history-unshare">Zrušit sdílení</button>` : ""}
       </div>
     </div>
     <section class="history-block history-shared-meta">
       <h4>Sdílel(a)</h4>
       <p class="history-shared-author">${escapeHtml(item.author_name || "Anonym")}</p>
-      ${item.note ? `<p class="history-shared-note">${escapeHtml(item.note)}</p>` : ""}
-    </section>
-    <section class="history-block">
-      <h4>Odkaz${item.visibility === "link" ? ` <span class="history-shared-badge">Jen odkazem</span>` : ""}</h4>
-      ${renderSharedLinkRow(item.id)}
-      <p class="field-note">${
-        item.visibility === "link"
-          ? "Položka se nezobrazuje v seznamu Sdílené, otevře ji jen ten, kdo má odkaz."
-          : "Položka je vidět v seznamu Sdílené pro všechny."
-      }</p>
       ${
         canManage
-          ? `<button id="toggleVisibilityButton" type="button" class="ghost-button">${
-              item.visibility === "link" ? "Zobrazit v seznamu Sdílené" : "Skrýt ze seznamu (jen odkazem)"
-            }</button>`
-          : ""
+          ? `<div class="history-shared-note-edit">${renderNoteField(note, item.note_edited_at, "Poznámka ke sdílené položce…")}</div>`
+          : note
+            ? `<p class="history-shared-note">${escapeHtml(note)}</p>${item.note_edited_at ? `<p class="note-meta">${renderNoteEdited(item.note_edited_at)}</p>` : ""}`
+            : ""
       }
+    </section>
+    <section class="history-block">
+      <h4>Odkaz</h4>
+      ${renderShareState(item.id, item.visibility, { manage: canManage })}
     </section>
     <section class="history-block">
       <h4>Otázka</h4>
@@ -8224,13 +8378,23 @@ function renderSharedHistoryDetail(item) {
     applyHistoryEntryToForm(item);
     historyDialog.close();
   });
-  historyDetail.querySelector("#unshareButton")?.addEventListener("click", () => {
-    unshareSharedItem(item);
-  });
-  historyDetail.querySelector("#toggleVisibilityButton")?.addEventListener("click", () => {
-    setSharedItemVisibility(item, item.visibility === "link" ? "listed" : "link");
-  });
   bindSharedLinkRow(historyDetail);
+  bindShareActions(historyDetail, {
+    sharedId: item.id,
+    setStatus: (message) => setHistoryShareStatus(message),
+    onChange: (message, isError) => {
+      setHistoryShareStatus(message, isError ? "error" : "success");
+      renderSharedHistory();
+    },
+  });
+  bindNoteField(historyDetail, async (value) => {
+    try {
+      const updated = await updateSharedItem(item.id, { note: value });
+      return { message: "Uloženo.", noteEditedAt: updated.note_edited_at };
+    } catch (error) {
+      return { message: error.message, error: true, noteEditedAt: item.note_edited_at };
+    }
+  });
 
   mountHistoryDetailSources(item);
 }
@@ -8290,35 +8454,6 @@ function bindSharedLinkRow(container) {
   });
 }
 
-async function setSharedItemVisibility(item, visibility) {
-  setHistoryShareStatus("Ukládám…");
-  try {
-    const response = await fetch(`shared-history/${encodeURIComponent(item.id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        visibility,
-        owner_id: getBrowserOwnerId(),
-        admin_password: llmUnlockPassword.value.trim(),
-      }),
-    });
-    const data = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(data.detail || "Změna viditelnosti selhala.");
-    }
-    if (linkedSharedItem?.id === item.id) {
-      linkedSharedItem = data;
-    }
-    setHistoryShareStatus(
-      visibility === "link" ? "Položka je teď dostupná jen přes odkaz." : "Položka je teď vidět v seznamu.",
-      "success",
-    );
-    await loadSharedHistory();
-  } catch (error) {
-    setHistoryShareStatus(error.message, "error");
-  }
-}
-
 function clearSharedItemLinkFromUrl() {
   const url = new URL(window.location.href);
   if (!url.searchParams.has(SHARED_ITEM_URL_PARAM)) {
@@ -8368,7 +8503,7 @@ async function openSharedItemFromUrl() {
   }
 }
 
-async function shareHistoryEntry(entry, authorName) {
+async function shareHistoryEntry(entry, authorName, visibility) {
   const payload = {
     owner_id: getBrowserOwnerId(),
     author_name: authorName,
@@ -8385,7 +8520,7 @@ async function shareHistoryEntry(entry, authorName) {
     upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
     token_budget: entry.token_budget || null,
-    visibility: shareLinkOnly?.checked ? "link" : "listed",
+    visibility: visibility === "link" ? "link" : "listed",
   };
   const response = await fetch("shared-history", {
     method: "POST",
@@ -8399,36 +8534,118 @@ async function shareHistoryEntry(entry, authorName) {
   return data;
 }
 
-async function shareSelectedEntries() {
-  if (!selectedShareIds.size) {
-    return;
-  }
+function requireAuthorName() {
   const authorName = ensureAuthorName();
+  renderAuthorName();
   if (!authorName) {
-    setHistoryShareStatus("Pro sdílení je potřeba zadat jméno.", "error");
+    throw new Error("Pro sdílení je potřeba zadat jméno.");
+  }
+  return authorName;
+}
+
+// Shares one local entry and records the result on it. The Shared-tab cache is
+// refreshed in the background.
+async function shareLocalEntry(entryId, visibility) {
+  const entry = findHistoryEntry(entryId);
+  if (!entry) {
+    throw new Error("Položka už v historii není.");
+  }
+  if (entry.shared_id) {
+    return null;
+  }
+  const stored = await shareHistoryEntry(entry, requireAuthorName(), visibility);
+  markLocalEntryShared(entry.id, stored);
+  loadSharedHistory();
+  return stored;
+}
+
+// PATCH a shared item (visibility and/or note) and mirror the result into the
+// local entries, the Shared-tab cache and the item opened by link.
+async function updateSharedItem(sharedId, changes) {
+  const response = await fetch(`shared-history/${encodeURIComponent(sharedId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...changes,
+      owner_id: getBrowserOwnerId(),
+      admin_password: llmUnlockPassword.value.trim(),
+    }),
+  });
+  const data = await safeJson(response);
+  if (response.status === 404) {
+    clearLocalSharedMarker(sharedId);
+    throw new Error("Sdílená položka už neexistuje (sdílení bylo zrušeno).");
+  }
+  if (!response.ok) {
+    throw new Error(data.detail || "Uložení sdílené položky selhalo.");
+  }
+  syncLocalEntriesFromSharedItem(data);
+  if (linkedSharedItem?.id === data.id) {
+    linkedSharedItem = data;
+  }
+  sharedHistoryItems = sharedHistoryItems.map((item) => (item.id === data.id ? data : item));
+  return data;
+}
+
+async function deleteSharedItem(sharedId) {
+  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
+  const adminPassword = llmUnlockPassword.value.trim();
+  if (adminPassword) {
+    params.set("admin_password", adminPassword);
+  }
+  const response = await fetch(`shared-history/${encodeURIComponent(sharedId)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!response.ok && response.status !== 404) {
+    const data = await safeJson(response);
+    throw new Error(data.detail || "Zrušení sdílení selhalo.");
+  }
+  clearLocalSharedMarker(sharedId);
+  if (linkedSharedItem?.id === sharedId) {
+    linkedSharedItem = null;
+  }
+  sharedHistoryItems = sharedHistoryItems.filter((item) => item.id !== sharedId);
+  loadSharedHistory();
+}
+
+async function shareSelectedEntries(visibility) {
+  const history = getHistoryEntries();
+  const selected = history.filter((entry) => selectedShareIds.has(entry.id));
+  // Sharing an entry again would create a duplicate item.
+  const toShare = selected.filter((entry) => !entry.shared_id);
+  const alreadyShared = selected.length - toShare.length;
+  if (!toShare.length) {
+    setHistoryShareStatus(alreadyShared ? "Vybrané položky už jsou sdílené." : "");
     return;
   }
-  renderAuthorName();
-  const history = getHistoryEntries();
-  const toShare = history.filter((entry) => selectedShareIds.has(entry.id));
-  shareSelectedButton.disabled = true;
+  let authorName;
+  try {
+    authorName = requireAuthorName();
+  } catch (error) {
+    setHistoryShareStatus(error.message, "error");
+    return;
+  }
+  shareSelectedListedButton.disabled = true;
+  shareSelectedLinkButton.disabled = true;
   setHistoryShareStatus(`Sdílím ${toShare.length}…`);
   let shared = 0;
   const failures = [];
   for (const entry of toShare) {
     try {
-      const stored = await shareHistoryEntry(entry, authorName);
-      updateLocalHistoryEntryShared(entry.id, stored.id);
+      const stored = await shareHistoryEntry(entry, authorName, visibility);
+      markLocalEntryShared(entry.id, stored);
       shared += 1;
     } catch (error) {
       failures.push(error.message);
     }
   }
   selectedShareIds.clear();
+  const how = visibility === "link" ? " jen odkazem" : " všem";
+  const skipped = alreadyShared ? ` ${alreadyShared} už bylo sdíleno dřív.` : "";
   if (failures.length) {
-    setHistoryShareStatus(`Sdíleno ${shared}, selhalo ${failures.length}. ${failures[0]}`, shared ? "" : "error");
+    setHistoryShareStatus(`Sdíleno${how} ${shared}, selhalo ${failures.length}. ${failures[0]}${skipped}`, shared ? "" : "error");
   } else {
-    setHistoryShareStatus(`Sdíleno ${shared} ${shared === 1 ? "položka" : "položek"}. Díky!`, "success");
+    setHistoryShareStatus(`Sdíleno${how}: ${shared}.${skipped}`, "success");
   }
   if (activeHistoryTab === "mine") {
     renderHistory();
@@ -8437,30 +8654,175 @@ async function shareSelectedEntries() {
   await loadSharedHistory();
 }
 
-async function unshareSharedItem(item) {
-  const params = new URLSearchParams({ owner_id: getBrowserOwnerId() });
-  const adminPassword = llmUnlockPassword.value.trim();
-  if (adminPassword) {
-    params.set("admin_password", adminPassword);
+// --- Share controls --------------------------------------------------------------
+// One set of controls for the local detail, the Shared-tab detail and the
+// main-page share panel, so all three offer the same actions and wording.
+
+const SHARE_VISIBILITY_HINT =
+  "Všem: objeví se v záložce Sdílené. Jen odkazem: otevře ji jen ten, komu pošleš odkaz.";
+
+function renderShareButtons() {
+  return `
+    <button type="button" data-share-action="share" data-visibility="listed" title="Objeví se v záložce Sdílené pro všechny">Sdílet všem</button>
+    <button type="button" data-share-action="share" data-visibility="link" title="Neobjeví se v seznamu; otevře ji jen ten, komu pošleš odkaz">Sdílet jen odkazem</button>
+  `;
+}
+
+function renderShareState(sharedId, visibility, { manage = true } = {}) {
+  const linkOnly = visibility === "link";
+  return `
+    <div class="share-state">
+      <p class="share-state-line">
+        <span class="history-shared-badge">${linkOnly ? "Sdíleno jen odkazem" : "Sdíleno všem"}</span>
+        <span>${linkOnly ? "Neukazuje se v seznamu Sdílené, otevře ji jen ten, kdo má odkaz." : "Vidí ji všichni v záložce Sdílené."}</span>
+      </p>
+      ${renderSharedLinkRow(sharedId)}
+      ${
+        manage
+          ? `<div class="share-state-actions">
+              <button type="button" class="ghost-button" data-share-action="visibility" data-visibility="${linkOnly ? "listed" : "link"}">${
+                linkOnly ? "Zobrazit všem ve Sdílených" : "Skrýt ze Sdílených (jen odkazem)"
+              }</button>
+              <button type="button" class="ghost-button history-unshare" data-share-action="unshare">Zrušit sdílení</button>
+            </div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+const SHARE_ACTION_MESSAGES = {
+  listed: "Sdíleno všem.",
+  link: "Sdíleno jen odkazem. Zkopíruj odkaz a pošli ho.",
+  toListed: "Položka je teď vidět ve Sdílených.",
+  toLink: "Položka je teď dostupná jen přes odkaz.",
+  unshare: "Sdílení bylo zrušeno.",
+};
+
+// Binds every [data-share-action] button in `container`. `entryId` names the
+// local entry (needed to share); `sharedId` is used when there is none.
+function bindShareActions(container, { entryId = null, sharedId = null, setStatus, onChange }) {
+  const buttons = [...container.querySelectorAll("button[data-share-action]")];
+  for (const button of buttons) {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.shareAction;
+      const visibility = button.dataset.visibility;
+      const targetSharedId = (entryId !== null ? findHistoryEntry(entryId)?.shared_id : null) || sharedId;
+      if (action === "unshare" && !window.confirm("Zrušit sdílení? Odkaz přestane fungovat a položka zmizí ze Sdílených.")) {
+        return;
+      }
+      buttons.forEach((item) => {
+        item.disabled = true;
+      });
+      setStatus(action === "unshare" ? "Ruším sdílení…" : "Ukládám…");
+      try {
+        let message;
+        if (action === "share") {
+          await shareLocalEntry(entryId, visibility);
+          message = SHARE_ACTION_MESSAGES[visibility === "link" ? "link" : "listed"];
+        } else if (action === "visibility") {
+          await updateSharedItem(targetSharedId, { visibility });
+          message = SHARE_ACTION_MESSAGES[visibility === "link" ? "toLink" : "toListed"];
+        } else {
+          await deleteSharedItem(targetSharedId);
+          message = SHARE_ACTION_MESSAGES.unshare;
+        }
+        onChange(message, false);
+      } catch (error) {
+        onChange(error.message, true);
+      }
+    });
   }
-  setHistoryShareStatus("Ruším sdílení…");
+}
+
+function renderNoteEdited(noteEditedAt) {
+  return noteEditedAt
+    ? `<span class="note-edited" title="Poznámka byla upravena po sdílení">upraveno ${escapeHtml(formatHistoryTime(noteEditedAt))}</span>`
+    : "";
+}
+
+function renderNoteField(note, noteEditedAt, placeholder) {
+  return `
+    <textarea class="history-note-input" data-note-input rows="2" placeholder="${escapeHtml(placeholder)}">${escapeHtml(note || "")}</textarea>
+    <p class="note-meta">
+      <span data-note-edited>${renderNoteEdited(noteEditedAt)}</span>
+      <span class="share-status" data-note-status role="status" aria-live="polite"></span>
+    </p>
+  `;
+}
+
+// Saves on change (blur), not per keystroke, and never re-renders: a re-render on
+// blur would swallow the click that caused it. `save` resolves to
+// { message, error, noteEditedAt }.
+function bindNoteField(container, save) {
+  const input = container.querySelector("[data-note-input]");
+  if (!input) {
+    return;
+  }
+  input.addEventListener("change", async () => {
+    const status = container.querySelector("[data-note-status]");
+    setInlineStatus(status, "Ukládám…");
+    const result = await save(input.value);
+    setInlineStatus(status, result.message, result.error);
+    const edited = container.querySelector("[data-note-edited]");
+    if (edited) {
+      edited.innerHTML = renderNoteEdited(result.noteEditedAt);
+    }
+  });
+}
+
+function setInlineStatus(element, message, isError = false) {
+  if (!element) {
+    return;
+  }
+  element.textContent = message || "";
+  element.classList.toggle("error", Boolean(isError));
+}
+
+// A local entry's note; for a shared entry the shared item gets the same text,
+// since it is one note.
+async function saveHistoryEntryNote(entryId, note) {
+  updateLocalHistoryEntryNote(entryId, note);
+  const entry = findHistoryEntry(entryId);
+  if (!entry?.shared_id) {
+    return { message: "Uloženo.", noteEditedAt: null };
+  }
   try {
-    const response = await fetch(
-      `shared-history/${encodeURIComponent(item.id)}?${params.toString()}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok && response.status !== 404) {
-      const data = await safeJson(response);
-      throw new Error(data.detail || "Zrušení sdílení selhalo.");
-    }
-    clearLocalSharedMarker(item.id);
-    if (linkedSharedItem?.id === item.id) {
-      linkedSharedItem = null;
-    }
-    setHistoryShareStatus("Sdílení bylo zrušeno.", "success");
-    await loadSharedHistory();
+    const item = await updateSharedItem(entry.shared_id, { note });
+    return { message: "Uloženo i ve sdílené položce.", noteEditedAt: item.note_edited_at };
   } catch (error) {
-    setHistoryShareStatus(error.message, "error");
+    return {
+      message: `Uloženo jen u tebe: ${error.message}`,
+      error: true,
+      noteEditedAt: findHistoryEntry(entryId)?.note_edited_at || null,
+    };
+  }
+}
+
+// Shared items opened in this dialog session whose local copy was refreshed
+// from the server (an admin may have edited the note or unshared the item).
+const syncedSharedIds = new Set();
+
+async function refreshLocalSharedEntry(entry) {
+  if (!entry.shared_id || syncedSharedIds.has(entry.shared_id)) {
+    return;
+  }
+  syncedSharedIds.add(entry.shared_id);
+  let changed = false;
+  try {
+    const response = await fetch(`shared-history/${encodeURIComponent(entry.shared_id)}`);
+    if (response.status === 404) {
+      clearLocalSharedMarker(entry.shared_id);
+      changed = true;
+    } else if (response.ok) {
+      changed = syncLocalEntriesFromSharedItem(await response.json());
+    }
+  } catch {
+    return;
+  }
+  const typing = document.activeElement?.matches?.("[data-note-input]");
+  if (changed && !typing && activeHistoryTab === "mine" && selectedHistoryId === entry.id && historyDialog.open) {
+    renderHistory();
   }
 }
 
@@ -8469,22 +8831,23 @@ let historyDetailEntry = null;
 
 function renderHistoryDetail(entry) {
   historyDetailEntry = entry;
-  const sharedBadge = entry.shared_id
-    ? ` <span class="history-shared-badge">Sdíleno ✓</span>`
-    : "";
   historyDetail.innerHTML = `
     <div class="history-detail-header">
       <div>
         <h3>${escapeHtml(entry.question)}</h3>
-        <p>${entry.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · ${formatHistoryTime(entry.createdAt)}${sharedBadge}</p>
+        <p>${entry.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · ${formatHistoryTime(entry.createdAt)}</p>
       </div>
-      <button id="reuseHistoryButton" type="button">Načíst do formuláře</button>
+      <div class="history-detail-actions">
+        <button id="reuseHistoryButton" type="button">Načíst do formuláře</button>
+        ${entry.shared_id ? "" : renderShareButtons()}
+        <button id="deleteHistoryEntryButton" type="button" class="history-unshare">Smazat</button>
+      </div>
     </div>
     ${
       entry.shared_id
         ? `<section class="history-block">
-            <h4>Odkaz na sdílenou položku</h4>
-            ${renderSharedLinkRow(entry.shared_id)}
+            <h4>Sdílení</h4>
+            ${renderShareState(entry.shared_id, entry.shared_visibility)}
           </section>`
         : ""
     }
@@ -8493,30 +8856,45 @@ function renderHistoryDetail(entry) {
       <p class="history-question">${escapeHtml(entry.question)}</p>
     </section>
     ${renderHistoryQueryTransform(entry)}
-    <section class="history-block">
-      <h4>Poznámka (uloží se při sdílení)</h4>
-      <textarea id="historyNoteInput" class="history-note-input" rows="2" placeholder="Volitelná poznámka ke sdílení…">${escapeHtml(entry.note || "")}</textarea>
+    <section class="history-block history-note-block">
+      <h4>Poznámka</h4>
+      ${renderNoteField(entry.note, entry.note_edited_at, entry.shared_id ? "Poznámka ke sdílené položce…" : "Volitelná poznámka; při sdílení se sdílí s položkou…")}
     </section>
     ${renderHistorySettingsAndAnswer(entry)}
   `;
 
   bindSharedLinkRow(historyDetail);
+  bindShareActions(historyDetail, {
+    entryId: entry.id,
+    setStatus: (message) => setHistoryShareStatus(message),
+    onChange: (message, isError) => {
+      renderHistory();
+      setHistoryShareStatus(message, isError ? "error" : "success");
+    },
+  });
+  bindNoteField(historyDetail, (note) => saveHistoryEntryNote(entry.id, note));
 
-  const reuseButton = historyDetail.querySelector("#reuseHistoryButton");
-  reuseButton?.addEventListener("click", () => {
+  historyDetail.querySelector("#reuseHistoryButton")?.addEventListener("click", () => {
     applyHistoryEntryToForm(entry);
     historyDialog.close();
   });
 
-  const noteInput = historyDetail.querySelector("#historyNoteInput");
-  noteInput?.addEventListener("change", () => {
-    // Keep the in-memory entry current for an immediate share, and persist. No
-    // re-render here: it fires on blur and would eat a subsequent button click.
-    entry.note = noteInput.value;
-    updateLocalHistoryEntryNote(entry.id, noteInput.value);
+  historyDetail.querySelector("#deleteHistoryEntryButton")?.addEventListener("click", () => {
+    const warning = entry.shared_id ? "\n\nSdílená položka zůstane sdílená, dokud nezrušíš sdílení." : "";
+    if (!window.confirm(`Smazat tuto položku z historie?${warning}`)) {
+      return;
+    }
+    const remainingHistory = getHistoryEntries().filter((item) => item.id !== entry.id);
+    const { filtered } = applyHistoryFilters(getHistoryEntries());
+    const index = filtered.findIndex((item) => item.id === entry.id);
+    saveHistoryEntriesSafely(remainingHistory);
+    const next = filtered[index + 1] || filtered[index - 1];
+    selectedHistoryId = next ? next.id : null;
+    renderHistory();
   });
 
   mountHistoryDetailSources(entry);
+  refreshLocalSharedEntry(entry);
 }
 
 function renderHistoryQueryTransform(entry) {
@@ -8879,6 +9257,12 @@ function restoreAnswerFromHistoryEntry(entry) {
   // snippet text, so the seeded turn would carry sources the model could not be
   // shown again. The offer belongs to the live answer only.
   currentAnswerContinuation = null;
+  // A local entry, or a shared item this browser shared, can be shared from the
+  // main page as well; anyone else's shared item cannot.
+  currentAnswerHistoryId =
+    getHistoryEntries().find((item) => item.id === entry.id || (item.shared_id && item.shared_id === entry.id))?.id ?? null;
+  answerSharePanelOpen = false;
+  renderAnswerShare();
   renderReasoning(currentReasoning);
   // Stored entries have no baseline / rescore comparison to show.
   currentBaselineChunks = [];
