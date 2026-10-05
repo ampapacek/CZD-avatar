@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import hashlib
 import json
 import logging
 import hmac
 import random
+import re
 import threading
 import time
 import httpx
@@ -13,7 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
@@ -393,9 +396,44 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
     return resolved_provider, resolved_model, resolved_api_key, resolved_base_url
 
 
+_VERSIONED_ASSET_RE = re.compile(r"(static/([\w./-]+))\?v=[^\"']*")
+
+
+def _asset_version(path: Path) -> str:
+    """Short content hash of a static file, cached until the file changes."""
+
+    stat = path.stat()
+    return _hash_file(path, stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=64)
+def _hash_file(path: Path, mtime_ns: int, size: int) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+
+def _render_index() -> str:
+    """index.html with every `static/<file>?v=...` pointed at that file's content hash.
+
+    The hash changes exactly when the file does, so a deploy never has to bump a
+    version by hand and a browser never keeps running last week's app.js.
+    """
+
+    def versioned(match: re.Match[str]) -> str:
+        asset = static_dir / match.group(2)
+        try:
+            return f"{match.group(1)}?v={_asset_version(asset)}"
+        except OSError:
+            return match.group(0)
+
+    return _VERSIONED_ASSET_RE.sub(versioned, (static_dir / "index.html").read_text(encoding="utf-8"))
+
+
 @app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    return FileResponse(static_dir / "index.html")
+def index() -> HTMLResponse:
+    # no-cache: the browser may store the page but must revalidate it on every
+    # load. A heuristically cached index.html pinned old asset versions and
+    # served a stale UI long after a deploy.
+    return HTMLResponse(_render_index(), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/logo_ufal_110u.png", include_in_schema=False)

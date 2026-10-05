@@ -24,6 +24,8 @@ Stack: FastAPI · hosted `msearch` retrieval (default) · local/remote Qdrant ·
 - `app/rag/wp_config.py` — single source of WP config (labels, built-in prompts, collections, defaults)
 - `app/rag/placeholders.py` — placeholder engine + `DEFAULT_PLACEHOLDERS` floor
 - `app/static/` — frontend (index.html, app.js, styles.css) + the built `avatar.bundle.js`
+  `/` serves index.html with `Cache-Control: no-cache` and rewrites each `static/<file>?v=...`
+  to that file's content hash, so never bump the `?v=` tokens by hand.
 - `frontend/` — ES modules bundled into `app/static/avatar.bundle.js` (global `Avatar`) by
   `npm run build`, each with a `*.test.js` beside it. Entry point is `frontend/bundle.js`.
   **Rebuild the bundle after editing any of them** and commit it; the deployed app
