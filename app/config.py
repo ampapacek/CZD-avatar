@@ -13,7 +13,12 @@ class Settings(BaseSettings):
 
     llm_provider: str = Field(default="", alias="LLM_PROVIDER")
     admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
-    llm_models_cache_ttl_seconds: int = Field(default=3600, alias="LLM_MODELS_CACHE_TTL_SECONDS")
+    llm_models_cache_ttl_seconds: int = Field(default=172800, alias="LLM_MODELS_CACHE_TTL_SECONDS")
+    # How often a background task re-fetches the provider model lists and the
+    # live mSearch collections; 0 turns it off (startup discovery still runs).
+    discovery_refresh_interval_seconds: float = Field(
+        default=86400, ge=0, alias="DISCOVERY_REFRESH_INTERVAL_SECONDS"
+    )
     llm_timeout_seconds: float = Field(default=120.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
@@ -37,6 +42,9 @@ class Settings(BaseSettings):
     reranker_device: str = Field(default="", alias="RERANKER_DEVICE")
 
     msearch_base_url: str = Field(default="https://api.msearch.themama.ai", alias="MSEARCH_BASE_URL")
+    msearch_collections_cache_ttl_seconds: float = Field(
+        default=172800, gt=0, alias="MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS"
+    )
     msearch_username: str = Field(default="", alias="MSEARCH_USERNAME")
     msearch_password: str = Field(default="", alias="MSEARCH_PASSWORD")
     msearch_collection: str = Field(

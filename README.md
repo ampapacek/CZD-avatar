@@ -21,7 +21,7 @@ For the default hosted `msearch` flow, define one or more providers in `.env`. A
 
 ```env
 LLM_PROVIDER=aiufal
-LLM_MODELS_CACHE_TTL_SECONDS=3600
+LLM_MODELS_CACHE_TTL_SECONDS=172800
 LLM_PROVIDERS=aiufal,openrouter,einfra
 
 LLM_PROVIDER_AIUFAL_NAME=AI Ufal
@@ -69,7 +69,7 @@ Each provider can define:
 
 If `LLM_PROVIDER` is set, that provider is selected by default in the UI. If it is empty, the first provider in `LLM_PROVIDERS` is used.
 
-Discovered model lists are cached server-side for `LLM_MODELS_CACHE_TTL_SECONDS`, which defaults to `3600` seconds. Opening the app refreshes stale model lists through `/settings`; the Settings dialog also has an `Obnovit seznam modelů` button that forces an immediate server-side refresh without exposing provider API keys to the browser.
+Discovered model lists and the live mSearch collections are fetched at startup and re-fetched in the background every `DISCOVERY_REFRESH_INTERVAL_SECONDS` (default `86400`, one day), so opening the app never waits on them. A failed refresh keeps the previous lists. `LLM_MODELS_CACHE_TTL_SECONDS` and `MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS` (default `172800`) are the request-side fallback for when that refresh keeps failing; the Settings dialog also has an `Obnovit seznam modelů` button that forces an immediate server-side refresh without exposing provider API keys to the browser.
 
 If you also set `ADMIN_PASSWORD`, the browser can enter that shared admin password to unlock the full model list and to modify or delete shared prompt presets owned by another browser (creating a new shared prompt stays open). Without it, only the public models configured for the selected provider appear in the selector. Future public deployments may also require this password for creating shared/server prompts.
 

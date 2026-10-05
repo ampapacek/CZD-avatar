@@ -1,7 +1,9 @@
+import time
 import unittest
 from unittest.mock import patch
 
 from app.config import Settings, get_settings
+from app.rag import msearch
 from app.rag.msearch import MSearchRetriever, _group_collections_by_prefix, _records_from_response
 from app.rag.pipeline import RAGPipeline
 
@@ -343,6 +345,46 @@ class MSearchRescoreWiringTests(unittest.TestCase):
         pipeline.retrieve_candidates("q", top_k=5, retrieval_backend="msearch")
         expected = "cross_encoder" if pipeline.settings.msearch_rescore else None
         self.assertEqual(recorder.calls[0]["rescore_method"], expected)
+
+
+class CollectionsCacheTtlTests(unittest.TestCase):
+    def _retriever(self, ttl: str) -> MSearchRetriever:
+        return MSearchRetriever(
+            Settings(
+                MSEARCH_USERNAME="user",
+                MSEARCH_PASSWORD="password",
+                MSEARCH_BASE_URL="https://msearch.example.test",
+                MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS=ttl,
+            )
+        )
+
+    def _seed(self, retriever: MSearchRetriever, age_seconds: float) -> None:
+        msearch._collections_cache[retriever.base_url] = msearch._CollectionsCacheEntry(
+            collections=[{"collection_id": "wp1-cached"}],
+            fetched_at=time.time() - age_seconds,
+        )
+
+    def tearDown(self) -> None:
+        msearch.clear_collections_cache()
+
+    def test_fresh_cache_makes_no_request(self) -> None:
+        retriever = self._retriever("100")
+        self._seed(retriever, age_seconds=50)
+        with patch.object(msearch.httpx, "Client", side_effect=AssertionError("no fetch expected")):
+            collections = retriever._fetch_collections()
+
+        self.assertEqual(collections, [{"collection_id": "wp1-cached"}])
+
+    def test_ttl_comes_from_settings(self) -> None:
+        # Past the configured TTL the request path fetches again; a failed fetch
+        # still serves the last good list.
+        retriever = self._retriever("100")
+        self._seed(retriever, age_seconds=150)
+        with patch.object(msearch.httpx, "Client", side_effect=RuntimeError("down")) as client:
+            collections = retriever._fetch_collections()
+
+        client.assert_called_once()
+        self.assertEqual(collections, [{"collection_id": "wp1-cached"}])
 
 
 if __name__ == "__main__":

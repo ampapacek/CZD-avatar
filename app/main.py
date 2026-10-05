@@ -260,35 +260,86 @@ def _llm_settings_payload() -> dict[str, object]:
 pipeline = RAGPipeline(settings)
 
 
-async def _prewarm_discovery() -> None:
-    """Fill the discovery caches at startup instead of on the first request.
+def _refresh_provider_state_in_background() -> None:
+    """Re-fetch every provider catalogue, then swap the result in.
 
-    `/settings` needs the provider catalogues and the live mSearch collection
-    list, and both were fetched by whichever request asked for them first —
-    measured at roughly 4.8s and 0.6s on a cold worker, which is exactly the
-    delay before the WP, prompt and collection controls can be populated. Both
-    results are cached (TTL from `LLM_MODELS_CACHE_TTL_SECONDS`, 1h for the
-    collections), so warming them here means the browser's first `/settings`
-    usually finds them ready.
-
-    This does not make `/settings` non-blocking: a request that arrives before
-    the prewarm finishes still waits, now on the same work already in flight.
-    Failures are logged and left to the request path to retry.
+    `/settings` takes `_provider_state_lock` on every call, so the slow forced
+    fetch runs outside it and only fills the discovery caches; the locked
+    rebuild that follows reads those caches and is quick. A provider that fails
+    keeps its previous list (the caches fall back to the last good entry).
     """
 
-    for label, work in (
-        ("provider discovery", _refresh_provider_state),
-        ("mSearch collection discovery", pipeline.msearch_retriever.live_collections_by_prefix),
-    ):
+    load_provider_configs(
+        force_model_refresh=True,
+        model_context_windows=model_metadata.context_windows,
+        provider_context_window_defaults=model_metadata.provider_context_windows,
+        provider_context_window_ceilings=model_metadata.provider_context_window_ceilings,
+        model_reasoning=model_metadata.reasoning,
+    )
+    _refresh_provider_state()
+
+
+async def _run_discovery(phase: str, jobs) -> None:
+    for label, work in jobs:
         started = time.perf_counter()
         try:
             await asyncio.to_thread(work)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Startup %s failed; it will be retried on demand", label)
+            logger.exception("%s %s failed; keeping the previous result", phase, label)
         else:
-            logger.info("Startup %s finished in %.2fs", label, time.perf_counter() - started)
+            logger.info("%s %s finished in %.2fs", phase, label, time.perf_counter() - started)
+
+
+async def _prewarm_discovery() -> None:
+    """Fill the discovery caches at startup instead of on the first request.
+
+    `/settings` needs the provider catalogues and the live mSearch collection
+    list, and both were fetched by whichever request asked for them first —
+    measured at roughly 4.8s and 0.6s on a cold worker, which is exactly the
+    delay before the WP, prompt and collection controls can be populated.
+    Warming them here means the browser's first `/settings` usually finds them
+    ready.
+
+    This does not make `/settings` non-blocking: a request that arrives before
+    the prewarm finishes still waits, now on the same work already in flight.
+    Failures are logged and left to the request path to retry.
+    """
+
+    await _run_discovery(
+        "Startup",
+        (
+            ("provider discovery", _refresh_provider_state),
+            ("mSearch collection discovery", pipeline.msearch_retriever.live_collections_by_prefix),
+        ),
+    )
+
+
+async def _discovery_loop(interval_seconds: float) -> None:
+    """Startup discovery, then a forced re-fetch every `interval_seconds`.
+
+    Keeping the caches fresh here means a request never has to fetch: their
+    TTLs (`LLM_MODELS_CACHE_TTL_SECONDS`, `MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS`)
+    are set longer than the interval, so they only expire if this refresh has
+    been failing for a while. Each uvicorn worker runs its own loop.
+    """
+
+    await _prewarm_discovery()
+    if interval_seconds <= 0:
+        return
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await _run_discovery(
+            "Scheduled",
+            (
+                ("provider discovery", _refresh_provider_state_in_background),
+                (
+                    "mSearch collection discovery",
+                    functools.partial(pipeline.msearch_retriever.live_collections_by_prefix, force_refresh=True),
+                ),
+            ),
+        )
 
 
 @asynccontextmanager
@@ -301,12 +352,12 @@ async def lifespan(app: FastAPI):
         settings.analytics_dir,
         settings.analytics_instance_id,
     )
-    prewarm = asyncio.create_task(_prewarm_discovery())
+    discovery = asyncio.create_task(_discovery_loop(settings.discovery_refresh_interval_seconds))
     yield
     logger.info("Shutting down API")
-    prewarm.cancel()
+    discovery.cancel()
     with suppress(asyncio.CancelledError):
-        await prewarm
+        await discovery
     pipeline.close()
 
 

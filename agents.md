@@ -51,7 +51,7 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000
 Minimum `.env` for hosted msearch: one or more `LLM_PROVIDER_<ID>_*` provider blocks, `LLM_PROVIDER`, `LLM_PROVIDERS`, `RETRIEVAL_BACKEND=msearch`, `MSEARCH_USERNAME`, `MSEARCH_PASSWORD`.
 
 - Generation is generic OpenAI-compatible, configured through provider env vars: `LLM_PROVIDER_<ID>_BASE_URL`, `API_KEY`, `DEFAULT_MODEL`, `PUBLIC_MODELS`, optional `MODELS`, `MODELS_URL`, `DISCOVER_MODELS`, `SUPPORTS_STREAMING`, `API_KEY_LABEL`. The UI's `LLM API` panel can override base URL/key per browser session.
-- `LLM_MODELS_CACHE_TTL_SECONDS` controls server-side discovered model cache; `/llm-providers/refresh` busts model and live mSearch collection caches.
+- Model and live mSearch collection discovery run at startup and then in a background loop every `DISCOVERY_REFRESH_INTERVAL_SECONDS` (default 1 day, `0` = startup only; `_discovery_loop` in `main.py`). The forced fetch runs outside `_provider_state_lock`, because `/settings` takes that lock on every call. `LLM_MODELS_CACHE_TTL_SECONDS` / `MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS` (default 2 days) are only the request-side fallback and should stay longer than the interval. `/llm-providers/refresh` still forces both immediately.
 - `ADMIN_PASSWORD` unlocks the full model list and authorizes editing/deleting shared presets owned by others.
 - `.env` intentionally wins over exported shell env vars — an exported API key silently overriding it cost a debugging session. On odd LLM behavior, check the key fingerprint in startup logs; never print the key.
 
@@ -64,7 +64,7 @@ Tests: `uv run pytest` (Python; the `dev` dependency group and `pythonpath`/`tes
 ## WP config, prompts, placeholders
 
 - WPs are typed dataclasses in `wp_config.py`, not env or JSON — add or change one there. WP1 holds the Czech-history prompts; WP2–WP4 ship neutral starters.
-- Collections map by number prefix (WP1→`wp1-*`, etc.). `wp_config.py` entries are only the offline fallback; at runtime `MSearchRetriever.live_collections_by_prefix()` lists live versions (cached 1h, busted by `/llm-providers/refresh`), injected into `/settings` by `_wps_payload_with_live_collections()` in `main.py`.
+- Collections map by number prefix (WP1→`wp1-*`, etc.). `wp_config.py` entries are only the offline fallback; at runtime `MSearchRetriever.live_collections_by_prefix()` lists live versions (refreshed daily in the background, busted by `/llm-providers/refresh`), injected into `/settings` by `_wps_payload_with_live_collections()` in `main.py`.
 - AI-Ufal gating is per-WP (`WPConfig.requires_aiufal`, currently WP2). Backend `_enforce_msearch_collection_policy` gates by `wp_id`; frontend disables gated collections unless AI Ufal provider is selected.
 - Random/prepared questions are per-WP plain-text files configured by `WPConfig.questions_path`: `data/questions/wp1-historie.txt`, `wp2-media.txt`, `wp3-pravo.txt`, `wp4-adiktologie.txt`. These are private/gitignored; missing files make `/questions/random` and `/questions` return 404 for that WP only.
 - `/settings` exposes `wps` + `default_wp`; built-in prompts appear even without `data/prompt_presets.json`.

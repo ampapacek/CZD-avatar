@@ -12,10 +12,10 @@ from app.rag.wp_config import gated_wp_collection_prefixes
 
 
 # mSearch publishes new collection versions rarely, so the full collection list
-# is cached and only re-fetched once an hour. This mirrors the LLM model
-# discovery cache (``llm_providers._discover_models_cached``): each page load
-# reads the settings payload, which reuses the cached list unless it is stale.
-_COLLECTIONS_CACHE_TTL_SECONDS = 3600.0
+# is cached. The background discovery task in ``app.main`` re-fetches it daily;
+# ``MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS`` is only the request-side fallback for
+# when that refresh keeps failing. This mirrors the LLM model discovery cache
+# (``llm_providers._discover_models_cached``).
 _MIN_FALLBACK_UNIQUE_WORDS = 10
 
 
@@ -39,7 +39,7 @@ class MSearchRetriever:
         self.settings = settings
 
     def _fetch_collections(self, force_refresh: bool = False) -> list[dict[str, Any]]:
-        """All mSearch collections (raw dicts), cached with a 1h TTL.
+        """All mSearch collections (raw dicts), cached for ``msearch_collections_cache_ttl_seconds``.
 
         Returns the last good list on transient failure, or an empty list when no
         credentials are configured / nothing has ever been fetched.
@@ -51,7 +51,8 @@ class MSearchRetriever:
         cache_key = self.base_url
         cached = _collections_cache.get(cache_key)
         now = time.time()
-        if cached and not force_refresh and now - cached.fetched_at < _COLLECTIONS_CACHE_TTL_SECONDS:
+        ttl_seconds = self.settings.msearch_collections_cache_ttl_seconds
+        if cached and not force_refresh and now - cached.fetched_at < ttl_seconds:
             return cached.collections
 
         try:
