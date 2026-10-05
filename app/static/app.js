@@ -7882,7 +7882,7 @@ function formatTimingLabel(doneData, modelLabel) {
 // time the dialog opens; "" in any field means "any".
 const historyFilters = { wp: "", text: "", author: "", prompt: "", model: "", period: "all", groupBy: "none" };
 const collapsedHistoryGroups = new Set();
-const HISTORY_GROUP_LABELS = { none: "Neseskupovat", day: "Podle dne", author: "Podle autora", prompt: "Podle promptu", model: "Podle modelu" };
+const HISTORY_GROUP_LABELS = { none: "Neseskupovat", day: "Podle dne", author: "Podle autora", prompt: "Podle profilu", model: "Podle modelu" };
 const HISTORY_PERIOD_LABELS = { all: "Kdykoli", today: "Dnes", "7d": "Posledních 7 dní", "30d": "Posledních 30 dní" };
 
 // Shared items are dated (and sorted) by share time, local ones by generation.
@@ -7930,7 +7930,7 @@ function applyHistoryFilters(items) {
   }
   const inWp = Avatar.filterHistory(items, historyFacets, { wp: historyFilters.wp });
   fillHistoryFilterSelect(historyFilterAuthor, Avatar.facetOptions(inWp, historyFacets, "author"), "Všichni autoři", "author");
-  fillHistoryFilterSelect(historyFilterPrompt, Avatar.facetOptions(inWp, historyFacets, "prompt"), "Všechny prompty", "prompt");
+  fillHistoryFilterSelect(historyFilterPrompt, Avatar.facetOptions(inWp, historyFacets, "prompt"), "Všechny profily", "prompt");
   fillHistoryFilterSelect(historyFilterModel, Avatar.facetOptions(inWp, historyFacets, "model"), "Všechny modely", "model");
   if (historyFilterAuthor) {
     historyFilterAuthor.hidden = !shared;
