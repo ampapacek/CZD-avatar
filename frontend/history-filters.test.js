@@ -5,6 +5,7 @@ import {
   facetOptions,
   filterHistory,
   groupHistory,
+  OTHER_QUESTIONS_KEY,
   periodStart,
   trimHistoryPerWp,
 } from "./history-filters.js";
@@ -74,6 +75,44 @@ describe("groupHistory", () => {
       dayLabel: (time) => new Date(time).getDate().toString(),
     });
     expect(groups.map((group) => group.label)).toEqual(["2", "1", "20"]);
+  });
+});
+
+describe("groupHistory by question", () => {
+  const asked = [
+    { id: 1, question: "  Kdo byl Havel?" },
+    { id: 2, question: "Jaký byl význam husitů?" },
+    { id: 3, question: "KDO BYL HAVEL?  " },
+    { id: 4, question: "kdo byl havel" },
+    { id: 5, question: "jaky byl VYZNAM husitu?" },
+    { id: 6, question: "Kdo byl Masaryk?" },
+    { id: 7, question: "" },
+  ];
+
+  it("matches ignoring case, diacritics and surrounding whitespace", () => {
+    const groups = groupHistory(asked, facets, "question");
+    expect(groups.map((group) => [group.label, ids(group.items)])).toEqual([
+      ["Kdo byl Havel?", [1, 3]],
+      ["Jaký byl význam husitů?", [2, 5]],
+      ["Ostatní", [4, 6, 7]],
+    ]);
+  });
+
+  it("does not drop punctuation or inner whitespace", () => {
+    // "kdo byl havel" (no "?") is a different question from "Kdo byl Havel?".
+    const groups = groupHistory(asked, facets, "question");
+    expect(groups[0].items.map((item) => item.id)).not.toContain(4);
+  });
+
+  it("labels a group with its newest wording and leaves out an empty Ostatní", () => {
+    const groups = groupHistory(asked.slice(1, 5), facets, "question", { otherLabel: "Jednou" });
+    expect(groups.map((group) => [group.key, group.label, ids(group.items)])).toEqual([
+      ["jaky byl vyznam husitu?", "Jaký byl význam husitů?", [2, 5]],
+      [OTHER_QUESTIONS_KEY, "Jednou", [3, 4]],
+    ]);
+    expect(groupHistory(asked.slice(0, 1).concat(asked[2]), facets, "question").map((g) => g.key)).toEqual([
+      "kdo byl havel?",
+    ]);
   });
 });
 

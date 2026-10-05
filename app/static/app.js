@@ -7882,13 +7882,14 @@ function formatTimingLabel(doneData, modelLabel) {
 // time the dialog opens; "" in any field means "any".
 const historyFilters = { wp: "", text: "", author: "", prompt: "", model: "", period: "all", groupBy: "none" };
 const collapsedHistoryGroups = new Set();
-const HISTORY_GROUP_LABELS = { none: "Neseskupovat", day: "Podle dne", author: "Podle autora", prompt: "Podle profilu", model: "Podle modelu" };
+const HISTORY_GROUP_LABELS = { none: "Neseskupovat", day: "Podle dne", question: "Podle otázky", author: "Podle autora", prompt: "Podle profilu", model: "Podle modelu" };
 const HISTORY_PERIOD_LABELS = { all: "Kdykoli", today: "Dnes", "7d": "Posledních 7 dní", "30d": "Posledních 30 dní" };
 
 // Shared items are dated (and sorted) by share time, local ones by generation.
 function historyFacets(entry) {
   return {
     wp: historyEntryWp(entry),
+    question: entry.question || "",
     author: activeHistoryTab === "shared" ? entry.author_name || "Anonym" : "",
     prompt: promptPresetLabelFromSettings(entry.settings) || "",
     model: modelDisplayName(entry.model_used || entry.settings?.model),
@@ -7964,6 +7965,7 @@ function applyHistoryFilters(items) {
   const groups = Avatar.groupHistory(filtered, historyFacets, historyFilters.groupBy, {
     emptyLabel: "—",
     dayLabel: historyDayLabel,
+    otherLabel: "Ostatní (položené jednou)",
   });
   return { filtered, groups };
 }

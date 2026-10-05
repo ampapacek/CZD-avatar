@@ -3,7 +3,8 @@
 // ({ wp, author, prompt, model, time, text }) so these never read entry shapes.
 
 export const HISTORY_PERIODS = ["all", "today", "7d", "30d"];
-export const HISTORY_GROUPINGS = ["none", "day", "author", "prompt", "model"];
+export const HISTORY_GROUPINGS = ["none", "day", "question", "author", "prompt", "model"];
+export const OTHER_QUESTIONS_KEY = "__other__";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -71,22 +72,45 @@ export function facetOptions(items, facetsOf, field) {
 
 // Groups keep the incoming (newest-first) order, both between groups and inside
 // them: a group sits where its newest item would. "day" groups by `dayLabel`,
-// which the caller formats for the local time zone.
-export function groupHistory(items, facetsOf, groupBy, { emptyLabel = "—", dayLabel } = {}) {
+// which the caller formats for the local time zone. "question" matches ignoring
+// case, diacritics and surrounding whitespace, labels each group with its newest
+// item's wording, and gathers questions asked only once into a last
+// `otherLabel` group so the repeated ones stand out.
+export function groupHistory(items, facetsOf, groupBy, { emptyLabel = "—", dayLabel, otherLabel = "Ostatní" } = {}) {
   if (!groupBy || groupBy === "none") {
     return [{ key: "", label: "", items: [...items] }];
   }
   const groups = new Map();
   for (const item of items) {
     const facets = facetsOf(item);
-    const raw = groupBy === "day" ? (dayLabel ? dayLabel(facets.time) : String(facets.time || "").slice(0, 10)) : facets[groupBy];
-    const label = raw || emptyLabel;
-    if (!groups.has(label)) {
-      groups.set(label, { key: label, label, items: [] });
+    let raw;
+    if (groupBy === "day") {
+      raw = dayLabel ? dayLabel(facets.time) : String(facets.time || "").slice(0, 10);
+    } else if (groupBy === "question") {
+      raw = String(facets.question || "").trim();
+    } else {
+      raw = facets[groupBy];
     }
-    groups.get(label).items.push(item);
+    const label = raw || emptyLabel;
+    const key = groupBy === "question" ? normalizeText(raw).trim() : label;
+    if (!groups.has(key)) {
+      groups.set(key, { key, label, items: [] });
+    }
+    groups.get(key).items.push(item);
   }
-  return [...groups.values()];
+  if (groupBy !== "question") {
+    return [...groups.values()];
+  }
+  const repeated = [];
+  const other = { key: OTHER_QUESTIONS_KEY, label: otherLabel, items: [] };
+  for (const group of groups.values()) {
+    if (group.items.length > 1) {
+      repeated.push(group);
+    } else {
+      other.items.push(...group.items);
+    }
+  }
+  return other.items.length ? [...repeated, other] : repeated;
 }
 
 // Keep at most `maxPerWp` entries per WP; entries are newest-first, so the
