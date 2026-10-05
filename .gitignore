@@ -23,6 +23,8 @@ data/qdrant/
 data/processed/
 data/prompt_presets.json
 data/shared_history.json
+data/shared_history.json.lock
+data/.shared_history.json.*.tmp
 data/placeholders.json
 data/query_transforms.json
 data/questions/

@@ -1,10 +1,13 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from app import main
+from app.rag import shared_history
 
 
 class SharedHistoryEndpointTests(unittest.TestCase):
@@ -215,6 +218,61 @@ class SharedHistoryEndpointTests(unittest.TestCase):
         admin = self.client.patch(url, json={"note": "fixed", "owner_id": "owner-b", "admin_password": "s3cret"})
         self.assertEqual(admin.status_code, 200, admin.text)
         self.assertEqual(admin.json()["note"], "fixed")
+
+
+class SharedHistoryStorageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "shared_history.json"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_concurrent_shares_are_all_kept(self) -> None:
+        # Each share reads the list, adds one and writes it back; without the
+        # lock, overlapping shares drop each other's items.
+        real_read = shared_history._read_items
+
+        def slow_read(path):
+            items = real_read(path)
+            threading.Event().wait(0.01)  # widen the read-to-write window
+            return items
+
+        with patch.object(shared_history, "_read_items", side_effect=slow_read):
+            threads = [
+                threading.Thread(
+                    target=shared_history.save_shared_history_item,
+                    kwargs={"path": self.path, "question": f"q{index}"},
+                )
+                for index in range(8)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        questions = {item["question"] for item in shared_history.load_shared_history(self.path)}
+        self.assertEqual(questions, {f"q{index}" for index in range(8)})
+
+    def test_failed_write_leaves_the_old_file_whole(self) -> None:
+        kept = shared_history.save_shared_history_item(self.path, question="kept")
+
+        with patch.object(shared_history.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                shared_history.save_shared_history_item(self.path, question="lost")
+
+        self.assertEqual([item["id"] for item in shared_history.load_shared_history(self.path)], [kept["id"]])
+        self.assertEqual(list(self.path.parent.glob("*.tmp")), [])
+
+    def test_unreadable_file_is_never_overwritten(self) -> None:
+        # Readers see a broken file as empty, but a write must not turn that
+        # into "the new item only" and erase everything else.
+        self.path.write_text('{"items": [{"id": "a"', encoding="utf-8")
+
+        self.assertEqual(shared_history.load_shared_history(self.path), [])
+        with self.assertRaises(ValueError):
+            shared_history.save_shared_history_item(self.path, question="new")
+        self.assertEqual(self.path.read_text(encoding="utf-8"), '{"items": [{"id": "a"')
 
 
 if __name__ == "__main__":

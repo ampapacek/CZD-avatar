@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,20 +23,49 @@ def normalize_visibility(value: Any) -> str:
 
 
 def load_shared_history(path: Path) -> list[dict[str, Any]]:
+    try:
+        return _read_items(path)
+    except (ValueError, OSError):
+        return []
+
+
+def _read_items(path: Path) -> list[dict[str, Any]]:
+    """Items newest-first; raises if the file exists but cannot be parsed.
+
+    Readers treat that as empty, but writers must not: writing back "empty plus
+    one" would replace every shared item with the new one.
+    """
     if not path.exists():
         return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
     items = data.get("items") if isinstance(data, dict) else data
     if not isinstance(items, list):
-        return []
+        raise ValueError(f"{path} has no list of items")
     normalized = [_normalize_item(item) for item in items if isinstance(item, dict)]
     # Newest shared_at first. ISO-8601 UTC timestamps sort lexicographically; a
     # stable sort keeps insertion order (newest-first, see save) for any ties.
     normalized.sort(key=lambda item: item.get("shared_at") or "", reverse=True)
     return normalized
+
+
+@contextmanager
+def _locked_items(path: Path) -> Iterator[list[dict[str, Any]]]:
+    """Hold an exclusive lock across a read-modify-write of the file.
+
+    `flock` on a sidecar lock file serializes both request threads (each opens
+    its own descriptor) and uvicorn worker processes. Without it two shares at
+    once both read the old list and the later write drops the other's item.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield _read_items(path)
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def save_shared_history_item(
@@ -54,7 +88,6 @@ def save_shared_history_item(
     token_budget: dict[str, Any] | None = None,
     visibility: str = DEFAULT_VISIBILITY,
 ) -> dict[str, Any]:
-    items = load_shared_history(path)
     record = {
         "id": uuid4().hex,
         "owner_id": (owner_id or "").strip(),
@@ -78,8 +111,8 @@ def save_shared_history_item(
         "visibility": normalize_visibility(visibility),
         "note_edited_at": None,
     }
-    next_items = [record, *items]
-    _write_items(path, next_items)
+    with _locked_items(path) as items:
+        _write_items(path, [record, *items])
     return record
 
 
@@ -95,32 +128,44 @@ def update_shared_history_item(
     A note change stamps `note_edited_at`. Only the current text is kept, so the
     stamp says that the note changed after sharing, not what it said before.
     """
-    items = load_shared_history(path)
-    for item in items:
-        if item["id"] != item_id:
-            continue
-        if visibility is not None:
-            item["visibility"] = normalize_visibility(visibility)
-        if note is not None and note != item["note"]:
-            item["note"] = note
-            item["note_edited_at"] = datetime.now(timezone.utc).isoformat()
-        _write_items(path, items)
-        return item
+    with _locked_items(path) as items:
+        for item in items:
+            if item["id"] != item_id:
+                continue
+            if visibility is not None:
+                item["visibility"] = normalize_visibility(visibility)
+            if note is not None and note != item["note"]:
+                item["note"] = note
+                item["note_edited_at"] = datetime.now(timezone.utc).isoformat()
+            _write_items(path, items)
+            return item
     return None
 
 
 def delete_shared_history_item(path: Path, item_id: str) -> bool:
-    items = load_shared_history(path)
-    next_items = [item for item in items if item["id"] != item_id]
-    if len(next_items) == len(items):
-        return False
-    _write_items(path, next_items)
+    with _locked_items(path) as items:
+        next_items = [item for item in items if item["id"] != item_id]
+        if len(next_items) == len(items):
+            return False
+        _write_items(path, next_items)
     return True
 
 
 def _write_items(path: Path, items: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    """Replace the file atomically: a crash mid-write leaves the old file whole."""
+    payload = json.dumps({"items": items}, ensure_ascii=False, indent=2) + "\n"
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, path.stat().st_mode & 0o777 if path.exists() else 0o644)
+        os.replace(tmp_name, path)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
