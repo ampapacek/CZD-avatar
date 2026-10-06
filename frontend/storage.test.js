@@ -94,42 +94,4 @@ describe("conversation storage", () => {
     expect(result).toEqual({ saved: true, entries: [{ id: 1 }, { id: 2 }] });
     expect(JSON.parse(stored)).toHaveLength(2);
   });
-
-  it("evicts entries until the list fits when given an evict step", () => {
-    let stored = "[]";
-    const storage = {
-      getItem: () => stored,
-      setItem: (_key, value) => {
-        if (JSON.parse(value).length > 2) {
-          throw new DOMException("full", "QuotaExceededError");
-        }
-        stored = value;
-      },
-    };
-
-    const result = saveJsonEntryList(
-      storage,
-      "history",
-      [{ id: 4 }, { id: 3 }, { id: 2 }, { id: 1 }],
-      (entry) => entry,
-      { evict: (entries) => entries.slice(0, -1) },
-    );
-    expect(result).toEqual({ saved: true, entries: [{ id: 4 }, { id: 3 }], evicted: 2 });
-    expect(JSON.parse(stored)).toEqual([{ id: 4 }, { id: 3 }]);
-  });
-
-  it("gives up and keeps the previous list when eviction runs out", () => {
-    const previous = [{ id: "old" }];
-    const storage = {
-      getItem: () => JSON.stringify(previous),
-      setItem: () => {
-        throw new DOMException("full", "QuotaExceededError");
-      },
-    };
-
-    const result = saveJsonEntryList(storage, "history", [{ id: 2 }, { id: 1 }], (entry) => entry, {
-      evict: (entries) => (entries.length > 1 ? entries.slice(0, -1) : null),
-    });
-    expect(result).toEqual({ saved: false, entries: previous });
-  });
 });

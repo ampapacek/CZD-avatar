@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  evictOldestFromLargestWp,
   facetOptions,
   filterHistory,
   groupHistory,
@@ -129,11 +128,5 @@ describe("per-WP history cap", () => {
 
   it("keeps the newest entries of each WP up to the cap", () => {
     expect(ids(trimHistoryPerWp(entries, 2, wpOf))).toEqual([6, 5, 4, 2]);
-  });
-
-  it("evicts the oldest entry of the largest WP, never the newest entry", () => {
-    expect(ids(evictOldestFromLargestWp(entries, wpOf))).toEqual([6, 5, 4, 3, 2]);
-    expect(ids(evictOldestFromLargestWp([{ id: 2, wp: "a" }, { id: 1, wp: "b" }], wpOf))).toEqual([2]);
-    expect(evictOldestFromLargestWp([{ id: 1, wp: "a" }], wpOf)).toBeNull();
   });
 });

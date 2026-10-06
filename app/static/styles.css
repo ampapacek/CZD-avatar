@@ -4133,3 +4133,157 @@ body[data-theme="dark"] .source-highlight {
     flex: 1 1 140px;
   }
 }
+
+/* Browser-storage meter and "free up space" dialog */
+.storage-pressure-notice {
+  margin: 0 0 12px;
+}
+
+.storage-dialog {
+  width: min(760px, calc(100% - 20px));
+  height: auto;
+  max-height: 90vh;
+}
+
+.storage-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: 90vh;
+}
+
+.storage-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+}
+
+.storage-body h3 {
+  margin: 8px 0 0;
+  font-size: 15px;
+}
+
+.storage-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.storage-meter {
+  height: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.storage-meter-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+
+.storage-meter-fill[data-pressure="warn"],
+.storage-meter-fill[data-pressure="critical"] {
+  background: var(--warn);
+}
+
+.storage-breakdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.storage-breakdown th,
+.storage-breakdown td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.storage-breakdown td.num,
+.storage-breakdown th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-breakdown .sub td:first-child {
+  padding-left: 22px;
+  color: var(--muted);
+}
+
+.storage-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.storage-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.storage-action-text {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.storage-action-text span {
+  color: var(--muted);
+}
+
+.storage-action label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.storage-action input[type="number"] {
+  width: 72px;
+}
+
+.storage-manual-list {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.storage-manual-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.storage-manual-row:last-child {
+  border-bottom: 0;
+}
+
+.storage-manual-row .kind {
+  color: var(--muted);
+  margin-right: 6px;
+}
+
+.storage-manual-row .size {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.storage-manual-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}

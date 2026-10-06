@@ -11,3 +11,4 @@ export * from "./conversation-settings.js";
 export * from "./conversation-bridge.js";
 export * from "./model-display.js";
 export * from "./history-filters.js";
+export * from "./storage-usage.js";

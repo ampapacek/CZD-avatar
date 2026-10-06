@@ -101,6 +101,10 @@
           </button>
         </div>
       </header>
+      <div id="storagePressureNotice" class="conversation-storage-status storage-pressure-notice" role="status" aria-live="polite" hidden>
+        <span id="storagePressureText"></span>
+        <button id="storagePressureOpen" class="secondary" type="button">Uvolnit místo</button>
+      </div>
 
       <section class="workspace">
         <form id="chatForm" class="composer">
@@ -953,6 +957,7 @@
             <p id="historyShareStatus" class="history-share-status" role="status" aria-live="polite"></p>
           </div>
           <div class="history-dialog-actions">
+            <button id="historyStorageButton" type="button" title="Kolik místa v prohlížeči zabírá historie a konverzace, a jak ho uvolnit">Úložiště</button>
             <button id="historyBatchToggle" type="button" aria-pressed="false" aria-controls="historyBatchBar" title="Vybrat víc položek a sdílet nebo smazat je najednou">Hromadné akce</button>
             <button id="closeHistoryButton" class="icon-button help-close" type="button" aria-label="Zavřít historii" title="Zavřít">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -991,6 +996,68 @@
       </div>
     </dialog>
 
+
+    <dialog id="storageDialog" class="history-dialog storage-dialog">
+      <div class="storage-shell">
+        <div class="history-dialog-header">
+          <div>
+            <h2>Úložiště prohlížeče</h2>
+            <p id="storageSummary"></p>
+          </div>
+          <div class="history-dialog-actions">
+            <button id="closeStorageButton" class="icon-button help-close" type="button" aria-label="Zavřít" title="Zavřít">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M6 6l12 12"></path>
+                <path d="M18 6 6 18"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="storage-body">
+          <div class="storage-meter" aria-hidden="true"><div id="storageMeterFill" class="storage-meter-fill"></div></div>
+          <div id="storagePendingWarning" class="conversation-storage-status" role="alert" hidden>
+            <span>Poslední změna se do úložiště nevešla a zatím není uložena. Po uvolnění místa se uloží sama. Do té doby ji drží jen tato stránka, proto ji můžete exportovat.</span>
+            <button id="storageExportPending" class="secondary" type="button">Exportovat neuložené (JSON)</button>
+          </div>
+          <div id="storageBreakdown" class="storage-breakdown"></div>
+          <h3>Uvolnit místo</h3>
+          <p class="storage-hint">Nic se nemaže bez potvrzení. U každé volby je vidět, kolik místa uvolní.</p>
+          <div id="storageActions" class="storage-actions">
+            <div class="storage-action" data-action="history-reasoning">
+              <div class="storage-action-text"><strong>Historie: smazat reasoning</strong><span data-hint></span></div>
+              <label>Ponechat u nejnovějších <input type="number" min="0" value="0" data-param /></label>
+              <button type="button" class="secondary" data-run>Smazat</button>
+            </div>
+            <div class="storage-action" data-action="history-shared">
+              <div class="storage-action-text"><strong>Historie: smazat lokální kopie sdílených položek</strong><span data-hint></span></div>
+              <button type="button" class="secondary" data-run>Smazat</button>
+            </div>
+            <div class="storage-action" data-action="history-oldest">
+              <div class="storage-action-text"><strong>Historie: smazat nejstarší položky</strong><span data-hint></span></div>
+              <label>Počet <input type="number" min="0" value="10" data-param /></label>
+              <button type="button" class="secondary" data-run>Smazat</button>
+            </div>
+            <div class="storage-action" data-action="conversation-reasoning">
+              <div class="storage-action-text"><strong>Konverzace: smazat reasoning</strong><span data-hint></span></div>
+              <label>Ponechat u nejnovějších <input type="number" min="0" value="0" data-param /></label>
+              <button type="button" class="secondary" data-run>Smazat</button>
+            </div>
+            <div class="storage-action" data-action="conversation-oldest">
+              <div class="storage-action-text"><strong>Konverzace: smazat nejstarší</strong><span data-hint></span></div>
+              <label>Počet <input type="number" min="0" value="1" data-param /></label>
+              <button type="button" class="secondary" data-run>Smazat</button>
+            </div>
+          </div>
+          <h3>Ruční výběr</h3>
+          <p class="storage-hint">Historie i konverzace dohromady, od největších.</p>
+          <div id="storageManualList" class="storage-manual-list"></div>
+          <div class="storage-manual-footer">
+            <span id="storageManualCount"></span>
+            <button id="storageManualDelete" class="secondary danger-lite" type="button" disabled>Smazat vybrané</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
 
     <script src="static/avatar.bundle.js?v=auto"></script>
     <script src="static/app.js?v=auto"></script>

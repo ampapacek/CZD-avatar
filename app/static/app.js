@@ -205,6 +205,21 @@ const conversationCompatibilityStatus = document.querySelector("#conversationCom
 const legacyHistoryStorageActions = document.querySelector("#legacyHistoryStorageActions");
 const exportLegacyHistoryButton = document.querySelector("#exportLegacyHistoryButton");
 const deleteLegacyHistoryButton = document.querySelector("#deleteLegacyHistoryButton");
+const storagePressureNotice = document.querySelector("#storagePressureNotice");
+const storagePressureText = document.querySelector("#storagePressureText");
+const storagePressureOpen = document.querySelector("#storagePressureOpen");
+const storageDialog = document.querySelector("#storageDialog");
+const closeStorageButton = document.querySelector("#closeStorageButton");
+const historyStorageButton = document.querySelector("#historyStorageButton");
+const storageSummary = document.querySelector("#storageSummary");
+const storageMeterFill = document.querySelector("#storageMeterFill");
+const storagePendingWarning = document.querySelector("#storagePendingWarning");
+const storageExportPending = document.querySelector("#storageExportPending");
+const storageBreakdown = document.querySelector("#storageBreakdown");
+const storageActions = document.querySelector("#storageActions");
+const storageManualList = document.querySelector("#storageManualList");
+const storageManualCount = document.querySelector("#storageManualCount");
+const storageManualDelete = document.querySelector("#storageManualDelete");
 const newConversationButton = document.querySelector("#newConversationButton");
 const conversationSettingsPopover = document.querySelector("#conversationSettingsPopover");
 const conversationSettingsToggle = document.querySelector("#conversationSettingsToggle");
@@ -309,8 +324,7 @@ const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
-// Local history is capped per WP so a busy WP cannot push the others out. A
-// full localStorage evicts further (see saveHistoryEntriesSafely).
+// Local history is capped per WP so a busy WP cannot push the others out.
 const MAX_HISTORY_ENTRIES_PER_WP = 100;
 const COMPACT_STORED_CHUNK_TEXT_LIMIT = 1200;
 // System placeholders are filled by the server and never warned about; the two
@@ -5180,7 +5194,7 @@ function refreshConversationStorageStatus() {
 }
 
 function reportStorageSaveFailure(key, label) {
-  const message = `Změny se nepodařilo uložit: úložiště prohlížeče je plné. Žádná starší položka nebyla smazána.`;
+  const message = "Změny se nepodařilo uložit: úložiště prohlížeče je plné. Žádná starší položka nebyla smazána. Otevřete Úložiště a uvolněte místo.";
   console.warn(`[rag-avatar] Could not save ${label}; browser localStorage quota is full. Existing entries were preserved.`);
   if (key === CONVERSATION_STORAGE_KEY) {
     conversationStorageFailure = message;
@@ -5235,12 +5249,11 @@ function historyEntryWp(entry) {
   return resolveWpId(entry?.settings?.wp_id);
 }
 
-// The per-WP cap is a ceiling; when localStorage fills up first, the oldest
-// entries of the largest WP make room instead of the new entry being lost.
+// The per-WP cap is a ceiling. When localStorage fills up nothing is
+// evicted: the entry waits in `storagePendingSaves` and the storage dialog asks
+// the user what to free (see "Browser storage pressure" below).
 function saveHistoryEntriesSafely(entries) {
-  return saveEntryListSafely(HISTORY_STORAGE_KEY, entries, compactStoredHistoryEntry, "history entries", {
-    evict: (list) => Avatar.evictOldestFromLargestWp(list, historyEntryWp),
-  });
+  return saveEntryListSafely(HISTORY_STORAGE_KEY, entries, compactStoredHistoryEntry, "history entries");
 }
 
 function compactStoredConversation(entry) {
@@ -5249,18 +5262,310 @@ function compactStoredConversation(entry) {
   });
 }
 
-function saveEntryListSafely(key, entries, compactEntry, label, options = {}) {
-  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry, options);
+function saveEntryListSafely(key, entries, compactEntry, label) {
+  const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry);
   if (result.saved) {
     storageSaveSucceeded.set(key, true);
+    storagePendingSaves.delete(key);
     clearStorageSaveFailure(key);
+    scheduleStoragePressureRefresh(key);
     return result.entries;
   }
 
   storageSaveSucceeded.set(key, false);
+  storagePendingSaves.set(key, (Array.isArray(entries) ? entries : []).map(compactEntry));
   reportStorageSaveFailure(key, label);
+  scheduleStoragePressureRefresh(key);
   return result.entries;
 }
+
+// ---------------------------------------------------------------------------
+// Browser storage pressure. localStorage is ~5 MiB; when history and
+// conversations approach it, the user is told how the space is used and asked
+// what to free. Nothing is ever dropped silently: a list that does not fit is
+// kept in `storagePendingSaves` (in memory only) until the user frees space.
+// ---------------------------------------------------------------------------
+
+const storagePendingSaves = new Map(); // storage key -> list that did not fit
+const STORAGE_KEYS_TRACKED = new Set([HISTORY_STORAGE_KEY, CONVERSATION_STORAGE_KEY]);
+const storageManualSelection = new Set(); // "h:<id>" / "c:<id>"
+let storageRefreshTimer = null;
+let storageAutoOpened = false;
+
+function storageWorkingList(key) {
+  if (storagePendingSaves.has(key)) {
+    return storagePendingSaves.get(key);
+  }
+  return key === HISTORY_STORAGE_KEY ? getHistoryEntries() : getConversationEntries();
+}
+
+function measureStorage() {
+  let otherBytes = 0;
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (STORAGE_KEYS_TRACKED.has(key)) {
+        continue;
+      }
+      otherBytes += Avatar.textBytes(key) + Avatar.textBytes(localStorage.getItem(key));
+    }
+  } catch {
+    // Storage may be unavailable; report what we can.
+  }
+  const history = storageWorkingList(HISTORY_STORAGE_KEY);
+  const conversations = storageWorkingList(CONVERSATION_STORAGE_KEY);
+  const historyStats = Avatar.historyBreakdown(history);
+  const conversationStats = Avatar.conversationBreakdown(conversations);
+  const used = otherBytes + historyStats.total + conversationStats.total;
+  return {
+    history,
+    conversations,
+    historyStats,
+    conversationStats,
+    otherBytes,
+    used,
+    pressure: Avatar.storagePressure(used),
+  };
+}
+
+function scheduleStoragePressureRefresh(key) {
+  if (key && !STORAGE_KEYS_TRACKED.has(key)) {
+    return;
+  }
+  // Streaming rewrites the conversation on every update; measure once it settles.
+  window.clearTimeout(storageRefreshTimer);
+  storageRefreshTimer = window.setTimeout(() => refreshStoragePressure({ autoOpen: true }), 300);
+}
+
+function storageUsageText(measured) {
+  const percent = Math.round((measured.used / Avatar.STORAGE_BUDGET_BYTES) * 100);
+  return `${Avatar.formatMiB(measured.used)} z ${Avatar.formatMiB(Avatar.STORAGE_BUDGET_BYTES)} (${percent} %)`;
+}
+
+function refreshStoragePressure({ autoOpen = false } = {}) {
+  const measured = measureStorage();
+  const pending = storagePendingSaves.size > 0;
+  if (storagePressureNotice) {
+    storagePressureNotice.hidden = !pending && measured.pressure === "ok";
+    storagePressureText.textContent = pending
+      ? "Poslední změna se nevešla do úložiště prohlížeče a zatím není uložena. Uvolněte místo."
+      : `Úložiště prohlížeče je téměř plné: ${storageUsageText(measured)}. Než se zaplní, uvolněte místo.`;
+  }
+  if (historyStorageButton) {
+    historyStorageButton.textContent = `Úložiště ${Math.round((measured.used / Avatar.STORAGE_BUDGET_BYTES) * 100)} %`;
+  }
+  if (measured.pressure === "ok" && !pending) {
+    storageAutoOpened = false;
+  } else if (autoOpen && !storageAutoOpened && (pending || measured.pressure === "critical") && !storageDialog.open) {
+    storageAutoOpened = true;
+    storageDialog.showModal();
+  }
+  if (storageDialog.open) {
+    renderStorageDialog(measured);
+  }
+}
+
+function storageRow(label, bytes, { sub = false, count = null } = {}) {
+  return `<tr class="${sub ? "sub" : ""}"><td>${escapeHtml(label)}</td><td class="num">${count === null ? "" : count}</td><td class="num">${Avatar.formatMiB(bytes)}</td></tr>`;
+}
+
+function storagePlan(action, param) {
+  const historyKey = HISTORY_STORAGE_KEY;
+  const conversationKey = CONVERSATION_STORAGE_KEY;
+  const plans = {
+    "history-reasoning": [historyKey, (list) => Avatar.stripHistoryReasoning(list, param), "reasoning z historie"],
+    "history-shared": [historyKey, (list) => Avatar.withoutSharedEntries(list), "lokální kopie sdílených položek"],
+    "history-oldest": [historyKey, (list) => Avatar.dropOldest(list, param), "nejstarší položky historie"],
+    "conversation-reasoning": [
+      conversationKey,
+      (list) => Avatar.stripConversationReasoning(list, param),
+      "reasoning z konverzací",
+    ],
+    "conversation-oldest": [conversationKey, (list) => Avatar.dropOldest(list, param), "nejstarší konverzace"],
+  };
+  const [key, transform, label] = plans[action];
+  const before = storageWorkingList(key);
+  const next = transform(before);
+  return { key, before, next, label, freed: Avatar.bytesFreed(before, next), removed: before.length - next.length };
+}
+
+function renderStorageDialog(measured = measureStorage()) {
+  const { historyStats: h, conversationStats: c } = measured;
+  const fraction = Math.min(1, measured.used / Avatar.STORAGE_BUDGET_BYTES);
+  storageSummary.textContent = `Využito ${storageUsageText(measured)}. Odhad: prohlížeč dává stránce zhruba 5 MiB.`;
+  storageMeterFill.style.width = `${(fraction * 100).toFixed(1)}%`;
+  storageMeterFill.dataset.pressure = measured.pressure;
+  storagePendingWarning.hidden = storagePendingSaves.size === 0;
+  storageBreakdown.innerHTML = `<table>
+    <thead><tr><th>Co</th><th class="num">Položek</th><th class="num">Místo</th></tr></thead>
+    <tbody>
+      ${storageRow("Historie", h.total, { count: h.count })}
+      ${storageRow("odpovědi", h.answers, { sub: true })}
+      ${storageRow("reasoning", h.reasoning, { sub: true })}
+      ${storageRow("zdroje", h.sources, { sub: true })}
+      ${storageRow("z toho sdílené", h.sharedBytes, { sub: true, count: h.sharedCount })}
+      ${storageRow("Konverzace", c.total, { count: c.count })}
+      ${storageRow("texty zpráv", c.text, { sub: true })}
+      ${storageRow("reasoning", c.reasoning, { sub: true })}
+      ${storageRow("zdroje", c.sources, { sub: true })}
+      ${storageRow("Ostatní (nastavení, prompty, stará historie)", measured.otherBytes)}
+    </tbody></table>`;
+
+  for (const row of storageActions.querySelectorAll(".storage-action")) {
+    const plan = storagePlan(row.dataset.action, Number(row.querySelector("[data-param]")?.value));
+    row.querySelector("[data-hint]").textContent = plan.removed
+      ? `Dotčených položek: ${plan.removed}, uvolní ${Avatar.formatMiB(plan.freed)}.`
+      : `Uvolní ${Avatar.formatMiB(plan.freed)}.`;
+    row.querySelector("[data-run]").disabled = plan.freed === 0 && plan.removed === 0;
+  }
+
+  const rows = Avatar.rankBySize([
+    ...measured.history.map((entry) => ({
+      ref: `h:${entry.id}`,
+      kind: "Historie",
+      label: shortenText(entry.question, 70) || "(bez otázky)",
+      bytes: Avatar.jsonBytes(entry),
+    })),
+    ...measured.conversations.map((entry) => ({
+      ref: `c:${entry.id}`,
+      kind: "Konverzace",
+      label: conversationDisplayTitle(entry),
+      bytes: Avatar.jsonBytes(entry),
+    })),
+  ]);
+  const known = new Set(rows.map((row) => row.ref));
+  for (const ref of [...storageManualSelection]) {
+    if (!known.has(ref)) {
+      storageManualSelection.delete(ref);
+    }
+  }
+  storageManualList.innerHTML = rows.length
+    ? rows
+        .map(
+          (row) => `<label class="storage-manual-row">
+            <input type="checkbox" data-ref="${escapeHtml(row.ref)}"${storageManualSelection.has(row.ref) ? " checked" : ""} />
+            <span><span class="kind">${row.kind}</span>${escapeHtml(row.label)}</span>
+            <span class="size">${Avatar.formatMiB(row.bytes)}</span>
+          </label>`,
+        )
+        .join("")
+    : '<p class="storage-hint" style="padding:8px 10px">Nic uloženo.</p>';
+  const selectedBytes = rows.filter((row) => storageManualSelection.has(row.ref)).reduce((sum, row) => sum + row.bytes, 0);
+  storageManualCount.textContent = storageManualSelection.size
+    ? `Vybráno ${storageManualSelection.size} (${Avatar.formatMiB(selectedBytes)})`
+    : "";
+  storageManualDelete.disabled = storageManualSelection.size === 0;
+}
+
+// Writes a freed-up list back, then repaints whatever shows it.
+function commitStorageChange(changes) {
+  for (const [key, list] of changes) {
+    if (key === HISTORY_STORAGE_KEY) {
+      const saved = saveHistoryEntriesSafely(list);
+      if (!list.some((entry) => entry.id === selectedHistoryId)) {
+        selectedHistoryId = saved[0]?.id ?? null;
+      }
+      for (const id of [...selectedShareIds]) {
+        if (!saved.some((entry) => entry.id === id)) {
+          selectedShareIds.delete(id);
+        }
+      }
+    } else {
+      const saved = setConversationEntries(list);
+      if (!saved.some((entry) => entry.id === selectedConversationId)) {
+        selectedConversationId = saved[0]?.id ?? null;
+        conversationSourcesView = null;
+        conversationSelectedAssistantIndex = null;
+      }
+    }
+  }
+  renderHistory();
+  if (activeAppMode === APP_MODE_CONVERSATION && changes.some(([key]) => key === CONVERSATION_STORAGE_KEY)) {
+    renderConversationWorkspace();
+  }
+  refreshStoragePressure();
+}
+
+storageActions?.addEventListener("click", (event) => {
+  const run = event.target.closest("[data-run]");
+  if (!run) {
+    return;
+  }
+  const row = run.closest(".storage-action");
+  const plan = storagePlan(row.dataset.action, Number(row.querySelector("[data-param]")?.value));
+  const what = plan.removed ? `${plan.removed} položek (${plan.label})` : plan.label;
+  if (!window.confirm(`Smazat ${what}? Uvolní ${Avatar.formatMiB(plan.freed)}. Tuto akci nelze vrátit zpět.`)) {
+    return;
+  }
+  commitStorageChange([[plan.key, plan.next]]);
+});
+storageActions?.addEventListener("input", () => renderStorageDialog());
+
+storageManualList?.addEventListener("change", (event) => {
+  const box = event.target.closest("input[data-ref]");
+  if (!box) {
+    return;
+  }
+  if (box.checked) {
+    storageManualSelection.add(box.dataset.ref);
+  } else {
+    storageManualSelection.delete(box.dataset.ref);
+  }
+  renderStorageDialog();
+});
+
+storageManualDelete?.addEventListener("click", () => {
+  const idsOf = (prefix) =>
+    [...storageManualSelection].filter((ref) => ref.startsWith(prefix)).map((ref) => Number(ref.slice(2)));
+  const historyIds = idsOf("h:");
+  const conversationIds = idsOf("c:");
+  if (!window.confirm(`Smazat vybrané položky (${storageManualSelection.size})? Tuto akci nelze vrátit zpět.`)) {
+    return;
+  }
+  const changes = [];
+  if (historyIds.length) {
+    changes.push([HISTORY_STORAGE_KEY, Avatar.dropByIds(storageWorkingList(HISTORY_STORAGE_KEY), historyIds)]);
+  }
+  if (conversationIds.length) {
+    changes.push([
+      CONVERSATION_STORAGE_KEY,
+      Avatar.dropByIds(storageWorkingList(CONVERSATION_STORAGE_KEY), conversationIds),
+    ]);
+  }
+  storageManualSelection.clear();
+  commitStorageChange(changes);
+});
+
+storageExportPending?.addEventListener("click", () => {
+  const payload = {};
+  for (const [key, list] of storagePendingSaves) {
+    payload[key] = list;
+  }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `czdemos4ai-unsaved-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+});
+
+function openStorageDialog() {
+  renderStorageDialog();
+  if (!storageDialog.open) {
+    storageDialog.showModal();
+  }
+}
+
+storagePressureOpen?.addEventListener("click", openStorageDialog);
+historyStorageButton?.addEventListener("click", openStorageDialog);
+closeStorageButton?.addEventListener("click", () => storageDialog.close());
+storageDialog?.addEventListener("click", (event) => {
+  if (event.target === storageDialog) {
+    storageDialog.close();
+  }
+});
 
 function updateCustomModelVisibility(unlocked) {
   // The options show compact names, so the exact id goes in the tooltip.
@@ -9488,6 +9793,7 @@ function formatHistoryTime(timestamp) {
   }
 }
 
+refreshStoragePressure();
 loadSettings().then(openSharedItemFromUrl).catch((error) => {
   statusEl.hidden = false;
   statusEl.className = "status error";

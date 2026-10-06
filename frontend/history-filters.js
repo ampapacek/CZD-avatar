@@ -124,29 +124,3 @@ export function trimHistoryPerWp(entries, maxPerWp, wpOf) {
     return count <= maxPerWp;
   });
 }
-
-// One eviction step for a full localStorage: drop the oldest entry of the WP
-// holding the most entries. The newest entry (index 0, the one being saved) is
-// never dropped; returns null when nothing else is left to drop.
-export function evictOldestFromLargestWp(entries, wpOf) {
-  if (entries.length <= 1) {
-    return null;
-  }
-  const counts = new Map();
-  entries.slice(1).forEach((entry) => {
-    const wp = wpOf(entry);
-    counts.set(wp, (counts.get(wp) || 0) + 1);
-  });
-  let largest = null;
-  for (const [wp, count] of counts) {
-    if (largest === null || count > counts.get(largest)) {
-      largest = wp;
-    }
-  }
-  for (let index = entries.length - 1; index >= 1; index -= 1) {
-    if (wpOf(entries[index]) === largest) {
-      return [...entries.slice(0, index), ...entries.slice(index + 1)];
-    }
-  }
-  return null;
-}

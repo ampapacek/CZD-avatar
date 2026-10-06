@@ -48,27 +48,17 @@ export function approximateLocalStorageMiB(value) {
   return (characters * 2) / (1024 * 1024);
 }
 
-// `evict(entries)` is an optional fallback for a full storage: it returns the
-// list with one entry fewer (or null to give up), and saving retries until the
-// list fits. Without it, a full storage leaves the previous list in place.
-export function saveJsonEntryList(storage, key, entries, compactEntry = (entry) => entry, { evict } = {}) {
-  let candidate = (Array.isArray(entries) ? entries : []).map(compactEntry);
-  let evicted = 0;
-  for (;;) {
-    try {
-      storage.setItem(key, JSON.stringify(candidate));
-      return evicted ? { saved: true, entries: candidate, evicted } : { saved: true, entries: candidate };
-    } catch (error) {
-      if (!isStorageQuotaError(error)) {
-        throw error;
-      }
+// A full storage never deletes anything: the previous list stays in place and
+// the caller is told, so the user can decide what to free (see storage-usage.js).
+export function saveJsonEntryList(storage, key, entries, compactEntry = (entry) => entry) {
+  const candidate = (Array.isArray(entries) ? entries : []).map(compactEntry);
+  try {
+    storage.setItem(key, JSON.stringify(candidate));
+    return { saved: true, entries: candidate };
+  } catch (error) {
+    if (!isStorageQuotaError(error)) {
+      throw error;
     }
-    const next = evict ? evict(candidate) : null;
-    if (!next || next.length >= candidate.length) {
-      break;
-    }
-    candidate = next;
-    evicted += 1;
   }
 
   let previous = [];
