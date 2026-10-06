@@ -6562,24 +6562,63 @@ function createConversation() {
   return conversation;
 }
 
-// The bridge out of single-turn mode: the question and answer on screen become
-// a conversation's first complete turn, under the settings that produced them
-// rather than whatever the controls say now.
-function continueInConversation() {
-  const conversation = Avatar.conversationFromSingleTurn(currentAnswerContinuation, { id: Date.now() });
+// The bridge out of single-turn mode: the question and answer on screen (or a
+// stored one from History) become a conversation's first complete turn, under
+// the settings that produced them rather than whatever the controls say now.
+// Returns whether the thread was created and opened.
+function continueInConversation(
+  turn = currentAnswerContinuation,
+  reportError = (message) => showCopyStatus(copyAnswerStatus, message, true),
+) {
+  const conversation = Avatar.conversationFromSingleTurn(turn, { id: Date.now() });
   if (!conversation) {
-    showCopyStatus(copyAnswerStatus, "Není co převést do konverzace.", true);
-    return;
+    reportError("Není co převést do konverzace.");
+    return false;
+  }
+  // From History the thread may open inside conversation mode; pending edits
+  // belong to the conversation selected until now, not to the new one.
+  if (conversationSettingsActive) {
+    saveCurrentSettingsSession();
   }
   if (!storeNewConversation(conversation)) {
     refreshConversationStorageStatus();
-    showCopyStatus(copyAnswerStatus, "Konverzaci se nepodařilo uložit.", true);
-    return;
+    reportError("Konverzaci se nepodařilo uložit.");
+    return false;
   }
   // A seeded thread is opened on its own turn, with the panel settling itself.
   conversationSelectedAssistantIndex = null;
   conversationSourcesView = null;
-  setAppMode(APP_MODE_CONVERSATION);
+  if (activeAppMode === APP_MODE_CONVERSATION) {
+    applyConversationSettings(ensureSelectedConversation());
+    renderConversationWorkspace();
+  } else {
+    setAppMode(APP_MODE_CONVERSATION);
+  }
+  return true;
+}
+
+// A stored answer (local entry or shared item) as a turn to continue. Fields
+// an older entry never recorded come from the current main-page settings.
+function continuationFromStoredEntry(entry) {
+  return Avatar.continuationFromHistoryEntry(entry, {
+    baseSettings: currentMainSettings(),
+    title: shortenText(entry?.question || "", 64),
+  });
+}
+
+function continueStoredEntryInConversation(entry) {
+  const continued = continueInConversation(continuationFromStoredEntry(entry), (message) =>
+    setHistoryShareStatus(message, "error"),
+  );
+  if (continued) {
+    historyDialog.close();
+  }
+}
+
+function continueStoredEntryButton(entry) {
+  return continuationFromStoredEntry(entry)
+    ? `<button id="continueHistoryButton" type="button" title="Založí konverzaci z této otázky a odpovědi, s nastavením, se kterým vznikla.">Pokračovat v konverzaci</button>`
+    : "";
 }
 
 function ensureSelectedConversation() {
@@ -8775,6 +8814,7 @@ function renderSharedHistoryDetail(item) {
       </div>
       <div class="history-detail-actions">
         <button id="reuseSharedButton" type="button">Načíst do formuláře</button>
+        ${continueStoredEntryButton(item)}
       </div>
     </div>
     ${renderHistoryQueryTransform(item)}
@@ -8789,6 +8829,9 @@ function renderSharedHistoryDetail(item) {
     applyHistoryEntryToForm(item);
     historyDialog.close();
   });
+  historyDetail
+    .querySelector("#continueHistoryButton")
+    ?.addEventListener("click", () => continueStoredEntryInConversation(item));
   historyDetail.querySelector("[data-shared-card-toggle]")?.addEventListener("click", () => {
     sharedCardExpanded = !sharedCardExpanded;
     renderSharedHistoryDetail(item);
@@ -9287,6 +9330,7 @@ function renderHistoryDetail(entry) {
       </div>
       <div class="history-detail-actions">
         <button id="reuseHistoryButton" type="button">Načíst do formuláře</button>
+        ${continueStoredEntryButton(entry)}
         <button id="deleteHistoryEntryButton" type="button" class="history-unshare">Smazat</button>
       </div>
     </div>
@@ -9307,6 +9351,9 @@ function renderHistoryDetail(entry) {
     applyHistoryEntryToForm(entry);
     historyDialog.close();
   });
+  historyDetail
+    .querySelector("#continueHistoryButton")
+    ?.addEventListener("click", () => continueStoredEntryInConversation(entry));
 
   historyDetail.querySelector("#deleteHistoryEntryButton")?.addEventListener("click", () => {
     const warning = entry.shared_id ? "\n\nSdílená položka zůstane sdílená, dokud nezrušíš sdílení." : "";
@@ -9774,10 +9821,10 @@ function restoreAnswerFromHistoryEntry(entry) {
   currentTokenBudget = entry.token_budget || null;
   currentConversationSummary = entry.conversation_summary || "";
   currentReasoning = entry.reasoning || "";
-  // A restored answer cannot be continued: history stores sources without their
-  // snippet text, so the seeded turn would carry sources the model could not be
-  // shown again. The offer belongs to the live answer only.
-  currentAnswerContinuation = null;
+  // A restored answer continues like a live one. Its sources lack snippet text,
+  // which the thread does not miss: earlier turns reach the model as question
+  // and answer only.
+  currentAnswerContinuation = continuationFromStoredEntry(entry);
   // A local entry, or a shared item this browser shared, can be shared from the
   // main page as well; anyone else's shared item cannot.
   currentAnswerHistoryId =

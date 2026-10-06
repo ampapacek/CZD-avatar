@@ -71,3 +71,77 @@ export function conversationFromSingleTurn(turn, { id, now } = {}) {
     ],
   };
 }
+
+// The conversation settings snapshot keys a stored answer's request payload can
+// fill in. The payload names them the same way; everything else it carries
+// (budgets, retrieval backend, keys) is request-only.
+const SNAPSHOT_KEYS_FROM_REQUEST = [
+  "wp_id",
+  "prompt_preset_id",
+  "prompt_preset_name",
+  "prompt_preset_note",
+  "system_prompt",
+  "user_prompt_template",
+  "selections",
+  "placeholder_defs",
+  "llm_provider",
+  "model",
+  "msearch_collection",
+  "context_window_tokens",
+  "reasoning_effort",
+  "top_k",
+  "msearch_rescore",
+  "msearch_min_confidence",
+  "min_relative_score",
+];
+
+/**
+ * The single-turn shape `conversationFromSingleTurn` takes, built from a stored
+ * history entry or shared item, or `null` for a retrieve-only entry or one
+ * without an answer.
+ *
+ * History keeps the request payload rather than a settings snapshot, so the
+ * snapshot starts from `baseSettings` (the current main-page snapshot) and the
+ * entry overrides every key it recorded: an older entry missing a field gets
+ * today's value for it instead of nothing.
+ *
+ * Sources come back without their snippet text, which costs the thread
+ * nothing: earlier turns reach the model as question and answer only.
+ */
+export function continuationFromHistoryEntry(entry, { baseSettings = {}, title } = {}) {
+  if (!entry || entry.mode === "retrieve" || !String(entry.answer || "").trim()) {
+    return null;
+  }
+  const request = entry.settings || {};
+  const settings = { ...baseSettings };
+  for (const key of SNAPSHOT_KEYS_FROM_REQUEST) {
+    if (Object.prototype.hasOwnProperty.call(request, key) && request[key] !== undefined) {
+      settings[key] = request[key];
+    }
+  }
+  // The payload sends "no choice" as null; the snapshot keeps the select value.
+  if (settings.reasoning_effort === null) {
+    settings.reasoning_effort = "";
+  }
+  const question = entry.question || "";
+  return {
+    title: title || question,
+    question,
+    answer: entry.answer,
+    settings,
+    requestSettings: request,
+    retrievalInfo: {
+      original_question: entry.original_question || question,
+      retrieval_query: entry.retrieval_query || request.retrieval_query || question,
+    },
+    sources: entry.sources || [],
+    retrievedChunks: entry.retrieved_chunks || [],
+    omittedChunks: entry.omitted_chunks || [],
+    tokenBudget: entry.token_budget || null,
+    chunkBudgetWarnings: entry.chunk_budget_warnings || [],
+    reasoning: entry.reasoning || "",
+    modelUsed: entry.model_used || request.model || null,
+    upstreamModel: entry.upstream_model || null,
+    responseTimeSeconds: entry.response_time_seconds ?? null,
+  };
+}
