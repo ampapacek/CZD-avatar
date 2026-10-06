@@ -6,7 +6,6 @@ import {
   groupHistory,
   OTHER_QUESTIONS_KEY,
   periodStart,
-  trimHistoryPerWp,
 } from "./history-filters.js";
 
 const facets = (item) => item;
@@ -112,21 +111,5 @@ describe("groupHistory by question", () => {
     expect(groupHistory(asked.slice(0, 1).concat(asked[2]), facets, "question").map((g) => g.key)).toEqual([
       "kdo byl havel?",
     ]);
-  });
-});
-
-describe("per-WP history cap", () => {
-  const wpOf = (entry) => entry.wp;
-  const entries = [
-    { id: 6, wp: "a" },
-    { id: 5, wp: "b" },
-    { id: 4, wp: "a" },
-    { id: 3, wp: "a" },
-    { id: 2, wp: "b" },
-    { id: 1, wp: "a" },
-  ];
-
-  it("keeps the newest entries of each WP up to the cap", () => {
-    expect(ids(trimHistoryPerWp(entries, 2, wpOf))).toEqual([6, 5, 4, 2]);
   });
 });

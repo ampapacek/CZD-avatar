@@ -324,8 +324,6 @@ const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
 const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
-// Local history is capped per WP so a busy WP cannot push the others out.
-const MAX_HISTORY_ENTRIES_PER_WP = 100;
 const COMPACT_STORED_CHUNK_TEXT_LIMIT = 1200;
 // System placeholders are filled by the server and never warned about; the two
 // parameter placeholders shipped in the code floor (length, custom_instructions)
@@ -5249,7 +5247,7 @@ function historyEntryWp(entry) {
   return resolveWpId(entry?.settings?.wp_id);
 }
 
-// The per-WP cap is a ceiling. When localStorage fills up nothing is
+// There is no entry-count cap. When localStorage fills up nothing is
 // evicted: the entry waits in `storagePendingSaves` and the storage dialog asks
 // the user what to free (see "Browser storage pressure" below).
 function saveHistoryEntriesSafely(entries) {
@@ -8125,8 +8123,7 @@ function saveHistoryEntry(entry) {
     response_time_seconds: entry.response_time_seconds ?? null,
     createdAt: new Date().toISOString(),
   });
-  const trimmed = Avatar.trimHistoryPerWp(history, MAX_HISTORY_ENTRIES_PER_WP, historyEntryWp);
-  const savedHistory = saveHistoryEntriesSafely(trimmed);
+  const savedHistory = saveHistoryEntriesSafely(history);
   selectedHistoryId = savedHistory[0]?.id ?? null;
   renderHistory();
   return selectedHistoryId;

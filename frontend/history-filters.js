@@ -112,15 +112,3 @@ export function groupHistory(items, facetsOf, groupBy, { emptyLabel = "—", day
   }
   return other.items.length ? [...repeated, other] : repeated;
 }
-
-// Keep at most `maxPerWp` entries per WP; entries are newest-first, so the
-// oldest of each WP go. Other WPs' entries are untouched.
-export function trimHistoryPerWp(entries, maxPerWp, wpOf) {
-  const counts = new Map();
-  return entries.filter((entry) => {
-    const wp = wpOf(entry);
-    const count = (counts.get(wp) || 0) + 1;
-    counts.set(wp, count);
-    return count <= maxPerWp;
-  });
-}
