@@ -33,6 +33,7 @@ describe("historyBreakdown", () => {
     expect(result.sharedCount).toBe(1);
     expect(result.sharedBytes).toBeGreaterThan(0);
     expect(result.total).toBeGreaterThan(result.reasoning + result.answers);
+    expect(result.reasoning + result.answers + result.sources + result.settings + result.other).toBe(result.total);
   });
 });
 
@@ -44,6 +45,7 @@ describe("conversationBreakdown", () => {
     expect(result.count).toBe(1);
     expect(result.reasoning).toBe(10);
     expect(result.text).toBe(4);
+    expect(result.reasoning + result.text + result.sources + result.settings + result.other).toBe(result.total);
   });
 });
 

@@ -47,6 +47,7 @@ export function historyBreakdown(entries) {
       jsonBytes(entry?.omitted_chunks || []) +
       jsonBytes(entry?.sources || []),
   );
+  const settings = sumBytes(list, (entry) => jsonBytes(entry?.settings || {}));
   const sharedEntries = list.filter((entry) => entry?.shared_id);
   return {
     count: list.length,
@@ -54,7 +55,8 @@ export function historyBreakdown(entries) {
     reasoning,
     answers,
     sources,
-    other: Math.max(0, total - reasoning - answers - sources),
+    settings,
+    other: Math.max(0, total - reasoning - answers - sources - settings),
     sharedCount: sharedEntries.length,
     sharedBytes: jsonBytes(sharedEntries),
   };
@@ -67,13 +69,17 @@ export function conversationBreakdown(entries) {
   const reasoning = sumBytes(messages, (message) => textBytes(message?.reasoning));
   const text = sumBytes(messages, (message) => textBytes(message?.content));
   const sources = sumBytes(messages, (message) => jsonBytes(message?.retrieved_chunks || []));
+  const settings =
+    sumBytes(list, (entry) => jsonBytes(entry?.settings || {})) +
+    sumBytes(messages, (message) => jsonBytes(message?.settings || {}));
   return {
     count: list.length,
     total,
     reasoning,
     text,
     sources,
-    other: Math.max(0, total - reasoning - text - sources),
+    settings,
+    other: Math.max(0, total - reasoning - text - sources - settings),
   };
 }
 

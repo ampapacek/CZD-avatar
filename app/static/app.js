@@ -5364,7 +5364,7 @@ function refreshStoragePressure({ autoOpen = false } = {}) {
 }
 
 function storageRow(label, bytes, { sub = false, count = null } = {}) {
-  return `<tr class="${sub ? "sub" : ""}"><td>${escapeHtml(label)}</td><td class="num">${count === null ? "" : count}</td><td class="num">${Avatar.formatMiB(bytes)}</td></tr>`;
+  return `<tr class="${sub ? "sub" : "head"}"><td>${escapeHtml(label)}</td><td class="num">${count === null ? "" : count}</td><td class="num">${Avatar.formatMiB(bytes)}</td></tr>`;
 }
 
 function storagePlan(action, param) {
@@ -5401,11 +5401,17 @@ function renderStorageDialog(measured = measureStorage()) {
       ${storageRow("odpovědi", h.answers, { sub: true })}
       ${storageRow("reasoning", h.reasoning, { sub: true })}
       ${storageRow("zdroje", h.sources, { sub: true })}
-      ${storageRow("z toho sdílené", h.sharedBytes, { sub: true, count: h.sharedCount })}
+      ${storageRow("nastavení u položek", h.settings, { sub: true })}
+      ${storageRow("ostatní (otázky, rozpočty tokenů, metadata)", h.other, { sub: true })}
+      ${storageRow("z toho sdílené položky (už započteno výše)", h.sharedBytes, { sub: true, count: h.sharedCount })}
+    </tbody><tbody>
       ${storageRow("Konverzace", c.total, { count: c.count })}
       ${storageRow("texty zpráv", c.text, { sub: true })}
       ${storageRow("reasoning", c.reasoning, { sub: true })}
       ${storageRow("zdroje", c.sources, { sub: true })}
+      ${storageRow("nastavení (u konverzace a zpráv)", c.settings, { sub: true })}
+      ${storageRow("ostatní (souhrny, metadata)", c.other, { sub: true })}
+    </tbody><tbody>
       ${storageRow("Ostatní (nastavení, prompty, stará historie)", measured.otherBytes)}
     </tbody></table>`;
 
