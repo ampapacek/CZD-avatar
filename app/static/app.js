@@ -1375,7 +1375,7 @@ async function runQuery(retrieveOnlyMode) {
         token_budget: data.token_budget || null,
         chunk_budget_warnings: data.chunk_budget_warnings || [],
         conversation_summary: data.conversation_summary || null,
-        reasoning: data.reasoning || "",
+        reasoning: data.reasoning || currentReasoning,
         sources: data.sources || [],
         model_used: data.model || model.value,
         upstream_model: data.upstream_model || null,
@@ -7802,6 +7802,7 @@ function saveHistoryEntry(entry) {
     query_transform_action_id: entry.query_transform_action_id || null,
     mode: entry.mode,
     answer: entry.answer,
+    reasoning: entry.reasoning || "",
     sourceCount: entry.sourceCount,
     // Optional per-entry note; editable in the detail pane and shared with the
     // entry when it is pushed to /shared-history.
@@ -8605,6 +8606,7 @@ async function shareHistoryEntry(entry, authorName, visibility) {
     note: entry.note || "",
     question: entry.question || "",
     answer: entry.answer || "",
+    reasoning: entry.reasoning || "",
     mode: entry.mode || "",
     settings: entry.settings || {},
     sources: entry.sources || [],
@@ -9098,9 +9100,22 @@ function renderHistoryAnswer(entry, { share = false } = {}) {
         <span class="copy-status" role="status" aria-live="polite"></span>
       </div>
       ${share ? renderHistorySharePanel(entry) : ""}
+      ${renderStoredReasoning(entry.reasoning)}
       <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
     </section>
   `;
+}
+
+// A stored trace opens collapsed, like a finished live answer's.
+function renderStoredReasoning(reasoning) {
+  const text = String(reasoning || "").trim();
+  if (!text) {
+    return "";
+  }
+  return `<details class="reasoning-panel">
+      <summary>Uvažování modelu</summary>
+      <pre class="reasoning-text">${escapeHtml(text)}</pre>
+    </details>`;
 }
 
 function renderHistorySettings(entry) {
