@@ -1730,7 +1730,19 @@ button:hover {
   margin: 0;
 }
 
-#shareAnswerButton.is-shared {
+.share-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-toggle .share-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.share-toggle.is-shared {
   border-color: var(--accent);
   color: var(--accent);
 }

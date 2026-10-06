@@ -5539,15 +5539,67 @@ function updateAnswerActions() {
   }
 }
 
+// The "Sdílet" toggle beside the copy buttons and the panel it opens, used by
+// the main answer (with the note inside the panel) and the History detail
+// (which keeps its note in its own block). An already shared item opens the
+// same panel, showing how it is shared, its link and the way back.
+const SHARE_ICON_SVG = `<svg class="share-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`;
+
+function shareToggleLabel(entry) {
+  if (!entry?.shared_id) {
+    return "Sdílet";
+  }
+  return entry.shared_visibility === "link" ? "Sdíleno odkazem" : "Sdíleno";
+}
+
+function shareToggleContent(entry) {
+  return `${SHARE_ICON_SVG}<span>${shareToggleLabel(entry)}</span>`;
+}
+
+function renderSharePanelContent(entry, { withNote }) {
+  return `
+    ${
+      withNote
+        ? `<div class="answer-share-note">
+            <h4>Poznámka</h4>
+            ${renderNoteField(entry.note, entry.note_edited_at, "Volitelná poznámka, sdílí se s odpovědí…")}
+          </div>`
+        : ""
+    }
+    ${
+      entry.shared_id
+        ? renderShareState(entry.shared_id, entry.shared_visibility)
+        : `<div class="answer-share-actions">${renderShareButtons()}</div>
+           <p class="field-note">${SHARE_VISIBILITY_HINT}</p>`
+    }
+    <p class="share-status" data-share-status role="status" aria-live="polite"></p>
+  `;
+}
+
+// `rerender` redraws the panel after a share action and returns it, so the
+// outcome message lands in the redrawn panel's status line.
+function bindSharePanel(panel, entry, { withNote, rerender }) {
+  const status = (container) => container?.querySelector("[data-share-status]");
+  if (withNote) {
+    bindNoteField(panel, (note) => saveHistoryEntryNote(entry.id, note));
+  }
+  bindSharedLinkRow(panel);
+  bindShareActions(panel, {
+    entryId: entry.id,
+    setStatus: (message) => setInlineStatus(status(panel), message),
+    onChange: (message, isError) => {
+      setInlineStatus(status(rerender()), message, isError);
+    },
+  });
+}
+
 // Share panel under the main answer: the note and the same share controls as the
 // history detail, so a fresh answer can be shared without opening the dialog.
 function renderAnswerShare() {
   const entry = currentAnswerHistoryId === null ? null : findHistoryEntry(currentAnswerHistoryId);
   if (shareAnswerButton) {
     shareAnswerButton.hidden = !entry;
-    shareAnswerButton.textContent = entry?.shared_id
-      ? entry.shared_visibility === "link" ? "Sdíleno odkazem" : "Sdíleno"
-      : "Sdílet";
+    shareAnswerButton.innerHTML = shareToggleContent(entry);
     shareAnswerButton.classList.toggle("is-shared", Boolean(entry?.shared_id));
     shareAnswerButton.setAttribute("aria-expanded", entry && answerSharePanelOpen ? "true" : "false");
   }
@@ -5559,28 +5611,12 @@ function renderAnswerShare() {
     answerSharePanel.innerHTML = "";
     return;
   }
-  answerSharePanel.innerHTML = `
-    <div class="answer-share-note">
-      <h4>Poznámka</h4>
-      ${renderNoteField(entry.note, entry.note_edited_at, "Volitelná poznámka, sdílí se s odpovědí…")}
-    </div>
-    ${
-      entry.shared_id
-        ? renderShareState(entry.shared_id, entry.shared_visibility)
-        : `<div class="answer-share-actions">${renderShareButtons()}</div>
-           <p class="field-note">${SHARE_VISIBILITY_HINT}</p>`
-    }
-    <p class="share-status" data-share-status role="status" aria-live="polite"></p>
-  `;
-  const status = () => answerSharePanel.querySelector("[data-share-status]");
-  bindNoteField(answerSharePanel, (note) => saveHistoryEntryNote(entry.id, note));
-  bindSharedLinkRow(answerSharePanel);
-  bindShareActions(answerSharePanel, {
-    entryId: entry.id,
-    setStatus: (message) => setInlineStatus(status(), message),
-    onChange: (message, isError) => {
+  answerSharePanel.innerHTML = renderSharePanelContent(entry, { withNote: true });
+  bindSharePanel(answerSharePanel, entry, {
+    withNote: true,
+    rerender: () => {
       renderAnswerShare();
-      setInlineStatus(status(), message, isError);
+      return answerSharePanel;
     },
   });
 }
@@ -8832,27 +8868,25 @@ async function refreshLocalSharedEntry(entry) {
 let historyDetailEntry = null;
 
 function renderHistoryDetail(entry) {
+  if (historyDetailEntry?.id !== entry.id) {
+    historySharePanelEntryId = null;
+  }
   historyDetailEntry = entry;
   historyDetail.innerHTML = `
     <div class="history-detail-header">
       <div>
         <h3>${escapeHtml(entry.question)}</h3>
-        <p>${entry.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · ${formatHistoryTime(entry.createdAt)}</p>
+        <p>${entry.mode === "retrieve" ? "Pouze vyhledání zdrojů" : "Vygenerovaná odpověď"} · ${formatHistoryTime(entry.createdAt)}${
+          entry.shared_id
+            ? ` <span class="history-shared-badge">${entry.shared_visibility === "link" ? "Sdíleno jen odkazem" : "Sdíleno všem"}</span>`
+            : ""
+        }</p>
       </div>
       <div class="history-detail-actions">
         <button id="reuseHistoryButton" type="button">Načíst do formuláře</button>
-        ${entry.shared_id ? "" : renderShareButtons()}
         <button id="deleteHistoryEntryButton" type="button" class="history-unshare">Smazat</button>
       </div>
     </div>
-    ${
-      entry.shared_id
-        ? `<section class="history-block">
-            <h4>Sdílení</h4>
-            ${renderShareState(entry.shared_id, entry.shared_visibility)}
-          </section>`
-        : ""
-    }
     <section class="history-block">
       <h4>Otázka</h4>
       <p class="history-question">${escapeHtml(entry.question)}</p>
@@ -8862,19 +8896,11 @@ function renderHistoryDetail(entry) {
       <h4>Poznámka</h4>
       ${renderNoteField(entry.note, entry.note_edited_at, entry.shared_id ? "Poznámka ke sdílené položce…" : "Volitelná poznámka; při sdílení se sdílí s položkou…")}
     </section>
-    ${renderHistorySettingsAndAnswer(entry)}
+    ${renderHistorySettingsAndAnswer(entry, { share: true })}
   `;
 
-  bindSharedLinkRow(historyDetail);
-  bindShareActions(historyDetail, {
-    entryId: entry.id,
-    setStatus: (message) => setHistoryShareStatus(message),
-    onChange: (message, isError) => {
-      renderHistory();
-      setHistoryShareStatus(message, isError ? "error" : "success");
-    },
-  });
-  bindNoteField(historyDetail, (note) => saveHistoryEntryNote(entry.id, note));
+  bindHistorySharePanel(entry);
+  bindNoteField(historyDetail.querySelector(".history-note-block"), (note) => saveHistoryEntryNote(entry.id, note));
 
   historyDetail.querySelector("#reuseHistoryButton")?.addEventListener("click", () => {
     applyHistoryEntryToForm(entry);
@@ -8897,6 +8923,40 @@ function renderHistoryDetail(entry) {
 
   mountHistoryDetailSources(entry);
   refreshLocalSharedEntry(entry);
+}
+
+// Which local entry's share panel is open. Kept across re-renders of the
+// detail (a share action redraws it) and dropped when another entry is shown.
+let historySharePanelEntryId = null;
+
+function renderHistoryShareToggle(entry) {
+  const open = historySharePanelEntryId === entry.id;
+  return `<button type="button" class="ghost-button share-toggle${entry.shared_id ? " is-shared" : ""}" data-history-share-toggle aria-expanded="${open}" aria-controls="historySharePanel">${shareToggleContent(entry)}</button>`;
+}
+
+function renderHistorySharePanel(entry) {
+  if (historySharePanelEntryId !== entry.id) {
+    return `<section id="historySharePanel" class="answer-share-panel" hidden></section>`;
+  }
+  return `<section id="historySharePanel" class="answer-share-panel">${renderSharePanelContent(entry, { withNote: false })}</section>`;
+}
+
+function bindHistorySharePanel(entry) {
+  historyDetail.querySelector("[data-history-share-toggle]")?.addEventListener("click", () => {
+    historySharePanelEntryId = historySharePanelEntryId === entry.id ? null : entry.id;
+    renderHistoryDetail(findHistoryEntry(entry.id) || entry);
+  });
+  const panel = historyDetail.querySelector("#historySharePanel");
+  if (!panel || panel.hidden) {
+    return;
+  }
+  bindSharePanel(panel, entry, {
+    withNote: false,
+    rerender: () => {
+      renderHistory();
+      return historyDetail.querySelector("#historySharePanel");
+    },
+  });
 }
 
 function renderHistoryQueryTransform(entry) {
@@ -8925,7 +8985,9 @@ function renderHistoryQueryTransform(entry) {
 // detail panes: the "Použitá nastavení" grid, the Feature-2 verbatim prompt
 // toggle, the answer, and the sources placeholder (#historySources filled by
 // mountHistoryDetailSources after innerHTML is set).
-function renderHistorySettingsAndAnswer(entry) {
+// `share` adds the Sdílet toggle and its panel (local entries only): beside the
+// copy buttons, or atop the documents when there is no answer to copy.
+function renderHistorySettingsAndAnswer(entry, { share = false } = {}) {
   const chunks = entry.retrieved_chunks || [];
   const modelId = entry.model_used || entry.settings?.model;
   // Local entries say createdAt, shared ones created_at; both mark when the
@@ -8971,14 +9033,21 @@ function renderHistorySettingsAndAnswer(entry) {
             <div class="answer-actions">
               <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
               <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
+              ${share ? renderHistoryShareToggle(entry) : ""}
               <span class="copy-status" role="status" aria-live="polite"></span>
             </div>
+            ${share ? renderHistorySharePanel(entry) : ""}
             <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
           </section>`
         : ""
     }
     <section class="history-block">
       <h4>Nalezené dokumenty</h4>
+      ${
+        share && !entry.answer
+          ? `<div class="answer-actions">${renderHistoryShareToggle(entry)}</div>${renderHistorySharePanel(entry)}`
+          : ""
+      }
       <div id="historySources" class="sources history-sources"></div>
     </section>
   `;
