@@ -2912,17 +2912,18 @@ function refreshReasoningEffortOptions() {
 // While it streams it is the exception: a reasoning model writes its whole
 // trace before its first answer token, so for those seconds the trace is the
 // only thing happening and the panel is worth having open. `collapseReasoning`
-// folds it again as soon as the answer starts.
+// folds it again as soon as the answer starts. While it streams the reader may
+// fold it or scroll back up, and later deltas leave both alone.
 function renderReasoning(text, { streaming = false } = {}) {
   if (!reasoningPanel || !reasoningText) {
     return;
   }
   const trimmed = String(text || "").trim();
   reasoningPanel.hidden = !trimmed;
-  reasoningText.textContent = trimmed;
-  if (streaming && trimmed) {
-    reasoningPanel.open = true;
-    reasoningText.scrollTop = reasoningText.scrollHeight;
+  if (streaming) {
+    Avatar.updateStreamingReasoning(reasoningPanel, reasoningText, trimmed);
+  } else {
+    reasoningText.textContent = trimmed;
   }
 }
 
@@ -7368,6 +7369,11 @@ function renderConversationDetail(conversation) {
   if (!messages.length) {
     conversationMessageList.innerHTML = `<p class="conversation-empty">Zatím tu nic není. Polož první otázku a pak na ni můžeš plynule navazovat.</p>`;
   } else {
+    // Every streamed delta lands here, so a panel the reader folded or scrolled
+    // back up must survive the rebuild — within the same conversation only.
+    const sameConversation = conversationMessageList.dataset.conversationId === String(conversation?.id);
+    const reasoningPanels = sameConversation ? Avatar.captureReasoningPanels(conversationMessageList) : new Map();
+    conversationMessageList.dataset.conversationId = String(conversation?.id);
     conversationMessageList.innerHTML = messages
       .map((message, index) =>
         renderConversationMessage(
@@ -7376,6 +7382,7 @@ function renderConversationDetail(conversation) {
           index === latestAssistantIndex ? conversation.conversation_summary || "" : "",
         ))
       .join("");
+    Avatar.restoreReasoningPanels(conversationMessageList, reasoningPanels);
     conversationMessages.scrollTop = conversationMessages.scrollHeight;
   }
 
@@ -7664,7 +7671,7 @@ function renderConversationMessage(message, index = 0, conversationSummary = "")
     message.role === "assistant" ? renderConversationContextStatus(message, conversationSummary) : "";
   const reasoningBlock =
     message.role === "assistant" && (message.reasoning || "").trim()
-      ? `<details class="reasoning-panel"${message.reasoning_streaming ? " open" : ""}>
+      ? `<details class="reasoning-panel" data-reasoning-index="${index}" data-reasoning-streaming="${message.reasoning_streaming ? "1" : "0"}"${message.reasoning_streaming ? " open" : ""}>
           <summary>Uvažování modelu</summary>
           <pre class="reasoning-text">${escapeHtml(message.reasoning)}</pre>
         </details>`

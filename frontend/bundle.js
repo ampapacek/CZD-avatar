@@ -13,3 +13,4 @@ export * from "./model-display.js";
 export * from "./model-filter.js";
 export * from "./history-filters.js";
 export * from "./storage-usage.js";
+export * from "./reasoning-panel.js";
