@@ -8375,9 +8375,72 @@ function sharedItemManageable(item) {
   return Boolean(llmUnlockPassword.value.trim());
 }
 
+// The Shared detail's card: who shared it, how, their note and a copy-link
+// button. The owner (or admin) can expand it to edit the note, see the raw
+// link and change or cancel the sharing; the choice is kept across items.
+let sharedCardExpanded = false;
+
+function renderSharedItemCard(item, { canManage, expanded }) {
+  const note = String(item.note || "");
+  const linkOnly = item.visibility === "link";
+  const noteHtml = expanded
+    ? `<div class="history-shared-note-edit">${renderNoteField(note, item.note_edited_at, "Poznámka ke sdílené položce…")}</div>`
+    : note
+      ? `<p class="history-shared-note">${escapeHtml(note)}</p>${item.note_edited_at ? `<p class="note-meta">${renderNoteEdited(item.note_edited_at)}</p>` : ""}`
+      : "";
+  return `
+    <section class="history-block history-shared-meta">
+      <div class="shared-card-head">
+        <p class="history-shared-author"><span>Sdílel(a)</span> ${escapeHtml(item.author_name || "Anonym")}</p>
+        <span class="history-shared-badge">${linkOnly ? "Sdíleno jen odkazem" : "Sdíleno všem"}</span>
+        <div class="shared-card-actions">
+          <span class="copy-status" role="status" aria-live="polite"></span>
+          <button type="button" class="ghost-button" data-copy-shared-link>Kopírovat odkaz</button>
+          ${
+            canManage
+              ? `<button type="button" class="ghost-button" data-shared-card-toggle aria-expanded="${expanded}">${expanded ? "Sbalit ▴" : "Upravit ▾"}</button>`
+              : ""
+          }
+        </div>
+      </div>
+      ${noteHtml}
+      ${
+        expanded
+          ? `<div class="shared-card-manage">
+              <p class="share-state-line">${linkOnly ? "Neukazuje se v seznamu Sdílené, otevře ji jen ten, kdo má odkaz." : "Vidí ji všichni v záložce Sdílené."}</p>
+              <input type="text" class="history-link-input" readonly value="${escapeHtml(sharedItemUrl(item.id))}" aria-label="Odkaz na sdílenou položku" />
+              <div class="share-state-actions">
+                <button type="button" class="ghost-button" data-share-action="visibility" data-visibility="${linkOnly ? "listed" : "link"}">${
+                  linkOnly ? "Zobrazit všem ve Sdílených" : "Skrýt ze Sdílených (jen odkazem)"
+                }</button>
+                <button type="button" class="ghost-button history-unshare" data-share-action="unshare">Zrušit sdílení</button>
+              </div>
+            </div>`
+          : ""
+      }
+    </section>
+  `;
+}
+
+function bindCopySharedLinkButton(container, sharedId) {
+  const button = container?.querySelector("[data-copy-shared-link]");
+  if (!button) {
+    return;
+  }
+  const status = container.querySelector(".copy-status");
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(sharedItemUrl(sharedId));
+      showCopyStatus(status, "Odkaz zkopírován.");
+    } catch {
+      showCopyStatus(status, `Zkopíruj odkaz ručně: ${sharedItemUrl(sharedId)}`, true);
+    }
+  });
+}
+
 function renderSharedHistoryDetail(item) {
   const canManage = sharedItemManageable(item);
-  const note = String(item.note || "");
+  const expanded = canManage && sharedCardExpanded;
   historyDetail.innerHTML = `
     <div class="history-detail-header">
       <div>
@@ -8388,27 +8451,11 @@ function renderSharedHistoryDetail(item) {
         <button id="reuseSharedButton" type="button">Načíst do formuláře</button>
       </div>
     </div>
-    <section class="history-block history-shared-meta">
-      <h4>Sdílel(a)</h4>
-      <p class="history-shared-author">${escapeHtml(item.author_name || "Anonym")}</p>
-      ${
-        canManage
-          ? `<div class="history-shared-note-edit">${renderNoteField(note, item.note_edited_at, "Poznámka ke sdílené položce…")}</div>`
-          : note
-            ? `<p class="history-shared-note">${escapeHtml(note)}</p>${item.note_edited_at ? `<p class="note-meta">${renderNoteEdited(item.note_edited_at)}</p>` : ""}`
-            : ""
-      }
-    </section>
-    <section class="history-block">
-      <h4>Odkaz</h4>
-      ${renderShareState(item.id, item.visibility, { manage: canManage })}
-    </section>
-    <section class="history-block">
-      <h4>Otázka</h4>
-      <p class="history-question">${escapeHtml(item.question)}</p>
-    </section>
     ${renderHistoryQueryTransform(item)}
-    ${renderHistorySettingsAndAnswer(item)}
+    ${renderSharedItemCard(item, { canManage, expanded })}
+    ${renderHistorySettings(item)}
+    ${renderHistoryAnswer(item)}
+    ${renderHistoryDocuments(item)}
   `;
 
   historyDetail.querySelector("#reuseSharedButton")?.addEventListener("click", () => {
@@ -8416,6 +8463,11 @@ function renderSharedHistoryDetail(item) {
     applyHistoryEntryToForm(item);
     historyDialog.close();
   });
+  historyDetail.querySelector("[data-shared-card-toggle]")?.addEventListener("click", () => {
+    sharedCardExpanded = !sharedCardExpanded;
+    renderSharedHistoryDetail(item);
+  });
+  bindCopySharedLinkButton(historyDetail.querySelector(".shared-card-head"), item.id);
   bindSharedLinkRow(historyDetail);
   bindShareActions(historyDetail, {
     sharedId: item.id,
@@ -8428,6 +8480,9 @@ function renderSharedHistoryDetail(item) {
   bindNoteField(historyDetail, async (value) => {
     try {
       const updated = await updateSharedItem(item.id, { note: value });
+      // Keep the item on display in step, so collapsing the card shows the new text.
+      item.note = value;
+      item.note_edited_at = updated.note_edited_at;
       return { message: "Uloženo.", noteEditedAt: updated.note_edited_at };
     } catch (error) {
       return { message: error.message, error: true, noteEditedAt: item.note_edited_at };
@@ -8781,7 +8836,7 @@ function renderNoteEdited(noteEditedAt) {
 
 function renderNoteField(note, noteEditedAt, placeholder) {
   return `
-    <textarea class="history-note-input" data-note-input rows="2" placeholder="${escapeHtml(placeholder)}">${escapeHtml(note || "")}</textarea>
+    <textarea class="history-note-input" data-note-input rows="1" placeholder="${escapeHtml(placeholder)}">${escapeHtml(note || "")}</textarea>
     <p class="note-meta">
       <span data-note-edited>${renderNoteEdited(noteEditedAt)}</span>
       <span class="share-status" data-note-status role="status" aria-live="polite"></span>
@@ -8797,6 +8852,7 @@ function bindNoteField(container, save) {
   if (!input) {
     return;
   }
+  autosizeNoteInput(input);
   input.addEventListener("change", async () => {
     const status = container.querySelector("[data-note-status]");
     setInlineStatus(status, "Ukládám…");
@@ -8807,6 +8863,26 @@ function bindNoteField(container, save) {
       edited.innerHTML = renderNoteEdited(result.noteEditedAt);
     }
   });
+}
+
+// The note box is one line until it holds more. CSS `field-sizing: content`
+// does this where supported; elsewhere it is resized here as the text changes.
+const NOTE_FIELD_SIZING = typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content");
+
+function autosizeNoteInput(input) {
+  if (NOTE_FIELD_SIZING) {
+    return;
+  }
+  const fit = () => {
+    if (!input.offsetParent) {
+      return;
+    }
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
+  };
+  input.addEventListener("input", fit);
+  input.addEventListener("focus", fit);
+  requestAnimationFrame(fit);
 }
 
 function setInlineStatus(element, message, isError = false) {
@@ -8887,16 +8963,14 @@ function renderHistoryDetail(entry) {
         <button id="deleteHistoryEntryButton" type="button" class="history-unshare">Smazat</button>
       </div>
     </div>
-    <section class="history-block">
-      <h4>Otázka</h4>
-      <p class="history-question">${escapeHtml(entry.question)}</p>
-    </section>
     ${renderHistoryQueryTransform(entry)}
     <section class="history-block history-note-block">
       <h4>Poznámka</h4>
       ${renderNoteField(entry.note, entry.note_edited_at, entry.shared_id ? "Poznámka ke sdílené položce…" : "Volitelná poznámka; při sdílení se sdílí s položkou…")}
     </section>
-    ${renderHistorySettingsAndAnswer(entry, { share: true })}
+    ${renderHistorySettings(entry)}
+    ${renderHistoryAnswer(entry, { share: true })}
+    ${renderHistoryDocuments(entry, { share: true })}
   `;
 
   bindHistorySharePanel(entry);
@@ -8981,22 +9055,67 @@ function renderHistoryQueryTransform(entry) {
   `;
 }
 
+// "Použitá nastavení" starts collapsed so the answer sits higher; once opened
+// it stays open for the next entries (and across re-renders) until closed.
+let historySettingsOpen = false;
+
+historyDetail?.addEventListener(
+  "toggle",
+  (event) => {
+    if (event.target.matches?.("[data-history-settings]")) {
+      historySettingsOpen = event.target.open;
+    }
+  },
+  true,
+);
+
 // Shared between local (renderHistoryDetail) and server (renderSharedHistoryDetail)
-// detail panes: the "Použitá nastavení" grid, the Feature-2 verbatim prompt
-// toggle, the answer, and the sources placeholder (#historySources filled by
-// mountHistoryDetailSources after innerHTML is set).
-// `share` adds the Sdílet toggle and its panel (local entries only): beside the
-// copy buttons, or atop the documents when there is no answer to copy.
-function renderHistorySettingsAndAnswer(entry, { share = false } = {}) {
+// detail panes, which order them differently: the answer, the "Použitá
+// nastavení" section with the Feature-2 verbatim prompt toggle, and the sources
+// placeholder (#historySources, filled by mountHistoryDetailSources after
+// innerHTML is set). `share` adds the Sdílet toggle and its panel (local
+// entries only): beside the copy buttons, or atop the documents when there is
+// no answer to copy.
+function historyEntrySources(entry) {
   const chunks = entry.retrieved_chunks || [];
+  return (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
+}
+
+function renderHistoryAnswer(entry, { share = false } = {}) {
+  if (!entry.answer) {
+    return "";
+  }
+  const sources = historyEntrySources(entry);
+  return `
+    <section class="history-block">
+      <h4>Odpověď</h4>
+      <div class="answer-actions">
+        <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
+        <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
+        ${share ? renderHistoryShareToggle(entry) : ""}
+        <span class="copy-status" role="status" aria-live="polite"></span>
+      </div>
+      ${share ? renderHistorySharePanel(entry) : ""}
+      <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
+    </section>
+  `;
+}
+
+function renderHistorySettings(entry) {
   const modelId = entry.model_used || entry.settings?.model;
   // Local entries say createdAt, shared ones created_at; both mark when the
   // answer was generated, as opposed to shared_at.
   const generatedAt = entry.createdAt || entry.created_at || "";
-  const sources = (entry.sources && entry.sources.length ? entry.sources : chunksToSources(chunks)) || [];
+  const settingsSummary = [promptPresetLabelFromSettings(entry.settings), formatModelUsageLabel(modelId, entry.upstream_model)]
+    .filter((part) => part && part !== "—")
+    .join(" · ");
   return `
-    <section class="history-block">
-      <h4>Použitá nastavení</h4>
+    <details class="history-settings" data-history-settings ${historySettingsOpen ? "open" : ""}>
+      <summary>
+        <h4>Použitá nastavení</h4>
+        ${settingsSummary ? `<span class="history-settings-summary">${escapeHtml(settingsSummary)}</span>` : ""}
+      </summary>
+      <div class="history-settings-body">
       <div class="settings-grid">
         ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
@@ -9025,22 +9144,13 @@ function renderHistorySettingsAndAnswer(entry, { share = false } = {}) {
         </div>
       </details>
       ${renderVerbatimPromptDetails(entry.settings)}
-    </section>
-    ${
-      entry.answer
-        ? `<section class="history-block">
-            <h4>Odpověď</h4>
-            <div class="answer-actions">
-              <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
-              <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
-              ${share ? renderHistoryShareToggle(entry) : ""}
-              <span class="copy-status" role="status" aria-live="polite"></span>
-            </div>
-            ${share ? renderHistorySharePanel(entry) : ""}
-            <div class="history-answer">${Avatar.renderMarkdown(entry.answer, sources, "history-source")}</div>
-          </section>`
-        : ""
-    }
+      </div>
+    </details>
+  `;
+}
+
+function renderHistoryDocuments(entry, { share = false } = {}) {
+  return `
     <section class="history-block">
       <h4>Nalezené dokumenty</h4>
       ${
@@ -9097,7 +9207,7 @@ function renderVerbatimPromptDetails(settings) {
   `;
 }
 
-// Fills the #historySources placeholder produced by renderHistorySettingsAndAnswer.
+// Fills the #historySources placeholder produced by renderHistoryDocuments.
 // Budget fields are absent on shared items, so the notes simply render nothing.
 function mountHistoryDetailSources(entry) {
   const chunks = entry.retrieved_chunks || [];

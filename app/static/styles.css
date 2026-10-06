@@ -1532,7 +1532,9 @@ button:hover {
 .history-note-input {
   width: 100%;
   resize: vertical;
-  min-height: 48px;
+  field-sizing: content;
+  min-height: 2.6em;
+  max-height: 16em;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1543,6 +1545,57 @@ button:hover {
 
 .history-note-input::placeholder {
   color: var(--field-placeholder);
+}
+
+.history-settings > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  cursor: pointer;
+}
+
+.history-settings > summary {
+  list-style: none;
+}
+
+.history-settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A flex summary loses the native marker, so draw the same triangle. */
+.history-settings > summary::before {
+  content: "▶";
+  align-self: center;
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.history-settings[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.history-settings > summary h4 {
+  display: inline;
+  margin: 0;
+}
+
+.history-settings-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.history-settings[open] .history-settings-summary {
+  display: none;
+}
+
+.history-settings-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .history-technical,
@@ -1758,6 +1811,41 @@ button:hover {
   margin: 0;
   font-weight: 700;
   color: var(--text);
+}
+
+.shared-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.shared-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.shared-card-manage {
+  display: grid;
+  gap: 8px;
+}
+
+.history-shared-meta .history-shared-note {
+  margin: 0;
+}
+
+.history-shared-author > span {
+  margin-right: 4px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.history-detail-header h3 {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .history-shared-note {
