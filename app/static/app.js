@@ -1154,7 +1154,10 @@ async function loadSettings() {
   updateThresholdLabels();
   updateRescoreThresholdNote();
   applyTheme(localStorage.getItem("theme") || "light");
-  renderHistory();
+  // A `?shared=<id>` link may already have the dialog open on the Shared tab.
+  if (activeHistoryTab === "mine") {
+    renderHistory();
+  }
   await loadPromptPresets();
   renderGlobalPlaceholderDefs();
   // A first conversation must inherit the resolved WP prompt, not the generic
@@ -8637,7 +8640,9 @@ function clearLocalSharedMarker(sharedId) {
   }
 }
 
-function setHistoryTab(tab) {
+// `loadShared: false` switches to the Shared tab without fetching the list, for
+// a caller that renders what it already has and loads the list itself.
+function setHistoryTab(tab, { loadShared = true } = {}) {
   activeHistoryTab = tab === "shared" ? "shared" : "mine";
   const mine = activeHistoryTab === "mine";
   historyTabMine.classList.toggle("active", mine);
@@ -8652,7 +8657,7 @@ function setHistoryTab(tab) {
   setHistoryShareStatus("");
   if (mine) {
     renderHistory();
-  } else {
+  } else if (loadShared) {
     loadSharedHistory();
   }
 }
@@ -8672,17 +8677,23 @@ async function fetchSharedHistory() {
 // while the Shared tab is active, so it can be called as a background refresh
 // after a share/unshare done from the Moje historie tab.
 async function loadSharedHistory() {
-  const onSharedTab = activeHistoryTab === "shared";
-  if (onSharedTab) {
+  // Items already on screen (a linked item, or an earlier load) stay usable
+  // while the fresh list arrives.
+  if (activeHistoryTab === "shared" && !sharedHistoryItems.length) {
     historyList.innerHTML = `<p class="history-empty">Načítám sdílené položky…</p>`;
   }
   try {
     sharedHistoryItems = withLinkedSharedItem(await fetchSharedHistory());
   } catch (error) {
-    sharedHistoryItems = [];
+    sharedHistoryItems = withLinkedSharedItem([]);
     if (activeHistoryTab === "shared") {
-      historyList.innerHTML = `<p class="history-empty">${escapeHtml(error.message)}</p>`;
-      historyDetail.innerHTML = `<p class="history-empty">Zkus to prosím načíst znovu.</p>`;
+      if (sharedHistoryItems.length) {
+        renderSharedHistory();
+        setHistoryShareStatus(error.message, "error");
+      } else {
+        historyList.innerHTML = `<p class="history-empty">${escapeHtml(error.message)}</p>`;
+        historyDetail.innerHTML = `<p class="history-empty">Zkus to prosím načíst znovu.</p>`;
+      }
     }
     return;
   }
@@ -8925,16 +8936,15 @@ function clearSharedItemLinkFromUrl() {
   window.history.replaceState(null, "", url.toString());
 }
 
-async function openSharedItemFromUrl() {
+// Started at page load, alongside loadSettings: a `?shared=<id>` link shows its
+// item as soon as the item arrives, not after everything else the page loads.
+// Null when the URL carries no shared id.
+function fetchSharedItemFromUrl() {
   const sharedId = new URLSearchParams(window.location.search).get(SHARED_ITEM_URL_PARAM);
   if (!sharedId) {
-    return;
+    return null;
   }
-  renderAuthorName();
-  historyDialog.showModal();
-  let item;
-  try {
-    const response = await fetch(`shared-history/${encodeURIComponent(sharedId)}`);
+  return fetch(`shared-history/${encodeURIComponent(sharedId)}`).then((response) => {
     if (!response.ok) {
       throw new Error(
         response.status === 404
@@ -8942,27 +8952,70 @@ async function openSharedItemFromUrl() {
           : "Sdílenou položku z odkazu se nepodařilo načíst.",
       );
     }
-    item = await response.json();
-  } catch (error) {
-    historyFilters.wp = activeWpId;
-    setHistoryTab("shared");
-    setHistoryShareStatus(error.message, "error");
+    return response.json();
+  });
+}
+
+// The dialog opens at once and shows the item alone. Before settings no WP is
+// known (every entry resolves to none), so the filter starts on all of them.
+// Everything that needs settings waits for them: the WP switch (applied after
+// loadSettings, so it cannot overwrite it), the admin's manage rights, and the
+// full shared list, which then loads in the background around the item.
+async function openSharedItemFromUrl(itemRequest, settingsReady) {
+  if (!itemRequest) {
     return;
   }
-  linkedSharedItem = item;
-  selectedSharedId = item.id;
-  const itemWpId = item.settings?.wp_id;
-  const switchWp = itemWpId && resolveWpId(itemWpId) === itemWpId && itemWpId !== activeWpId;
-  if (switchWp) {
-    selectWp(itemWpId);
+  renderAuthorName();
+  historyDialog.showModal();
+  setHistoryTab("shared", { loadShared: false });
+  historyList.innerHTML = `<p class="history-empty">Načítám sdílenou položku…</p>`;
+  historyDetail.innerHTML = "";
+  let item = null;
+  let itemError = null;
+  try {
+    item = await itemRequest;
+  } catch (error) {
+    itemError = error;
+  }
+  if (item) {
+    linkedSharedItem = item;
+    selectedSharedId = item.id;
+    sharedHistoryItems = withLinkedSharedItem(sharedHistoryItems);
+    historyFilters.wp = "";
+    if (activeHistoryTab === "shared") {
+      renderSharedHistory();
+    }
+  } else if (activeHistoryTab === "shared") {
+    setHistoryShareStatus(itemError.message, "error");
+  }
+  try {
+    await settingsReady;
+  } catch {
+    // loadSettings reports its own failure on the page.
+    return;
+  }
+  let switchedWpId = null;
+  if (item) {
+    const itemWpId = item.settings?.wp_id;
+    if (itemWpId && resolveWpId(itemWpId) === itemWpId && itemWpId !== activeWpId) {
+      selectWp(itemWpId);
+      switchedWpId = itemWpId;
+    }
   }
   historyFilters.wp = activeWpId;
-  setHistoryTab("shared");
-  if (switchWp) {
+  if (activeHistoryTab !== "shared") {
+    return;
+  }
+  if (item) {
+    // Re-render with settings in: WP labels in the filter bar, admin rights.
+    renderSharedHistory();
+  }
+  if (switchedWpId) {
     setHistoryShareStatus(
-      `Položka je z oblasti ${getWpConfig(itemWpId)?.label || itemWpId}, oblast byla přepnuta.`,
+      `Položka je z oblasti ${getWpConfig(switchedWpId)?.label || switchedWpId}, oblast byla přepnuta.`,
     );
   }
+  loadSharedHistory();
 }
 
 async function shareHistoryEntry(entry, authorName, visibility) {
@@ -9858,9 +9911,12 @@ function formatHistoryTime(timestamp) {
   }
 }
 
+const sharedItemRequest = fetchSharedItemFromUrl();
 refreshStoragePressure();
-loadSettings().then(openSharedItemFromUrl).catch((error) => {
+const settingsLoaded = loadSettings();
+settingsLoaded.catch((error) => {
   statusEl.hidden = false;
   statusEl.className = "status error";
   statusEl.textContent = error.message;
 });
+openSharedItemFromUrl(sharedItemRequest, settingsLoaded);
