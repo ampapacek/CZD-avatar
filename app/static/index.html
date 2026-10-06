@@ -192,6 +192,11 @@
               </label>
             </div>
             <div class="model-context-notes">
+              <label id="openRouterModelFilter" class="field inline-field" hidden>
+                <input id="showAllOpenRouterModels" type="checkbox" />
+                <span>Zobrazit v seznamu všechny modely</span>
+              </label>
+              <span id="openRouterModelFilterNote" class="field-note" hidden></span>
               <span id="modelContextWindowNote" class="field-note">Načítám výchozí hodnotu modelu...</span>
               <span class="field-note">Context window ovlivňuje, kolik nalezených zdrojů z databáze se připojí do promptu a zda se před odesláním zkrátí. Nejde o skutečný limit modelu.</span>
             </div>
@@ -504,6 +509,16 @@
           <section class="help-section">
             <h3>Profil</h3>
             <p>Profil je uložené nastavení promptu, které určuje způsob odpovědi a případnou úpravu dotazu před vyhledáváním. Profily a jejich proměnné lze spravovat v <code>Nastavení</code>.</p>
+            <h4>Jak vytvořit vlastní profil</h4>
+            <ol class="help-steps">
+              <li>Otevři <code>Nastavení</code> → <code>Profily a proměnné</code> a nahoře vyber pracovní balíček (WP), pod který se profil uloží.</li>
+              <li>V části <code>Prompty</code> vyber existující profil, který se ti blíží, a uprav systémový nebo uživatelský prompt. Nebo klikni na <code>Nový prázdný</code> a začni od nuly. Uživatelský prompt by měl obsahovat <code>{question}</code> a <code>{retrieved_snippets}</code>, jinak by model neviděl otázku ani podklady.</li>
+              <li>Zadej název (a případně poznámku) a klikni na <code>Uložit jako nový</code>. Úpravy už uloženého profilu potvrdíš tlačítkem <code>Aktualizovat vybraný</code>. Vestavěné profily se nepřepisují, uloží se jako nová kopie.</li>
+              <li>Na hlavní stránce profil vyber v poli <code>Profil</code>.</li>
+            </ol>
+            <p><strong>Tip:</strong> pro jednorázové přání nemusíš vytvářet profil. Do pole <code>Vlastní instrukce</code> v sekci <code>Podoba odpovědi</code> napiš např. „Odpověz v pěti větách“ nebo „Vysvětli to jako žákovi základní školy“; text se přidá k otázce jako dodatečná instrukce a citace zůstávají zachované. Pokud ji chceš mít vždy, přidej do profilu vlastní proměnnou <code>custom_instructions</code> s požadovaným výchozím textem (profilová verze má přednost před globální).</p>
+            <h4>Jak profil sdílet</h4>
+            <p>Nový profil je zpočátku jen v tomto prohlížeči. Pokud před uložením zaškrtneš <code>Sdílet s ostatními</code>, uloží se na server a objeví se v seznamu profilů všem uživatelům. Poznámka je u sdíleného profilu viditelná ostatním (modelu se neposílá). Upravovat nebo mazat ho může jen jeho vlastník, případně administrátor. Proměnné přidané přímo k profilu (<code>Vlastní proměnné promptu</code>) se sdílejí spolu s ním. Globální proměnné, které profil používá, sdílej zvlášť zaškrtnutím <code>Sdílet s ostatními</code> v jejich editoru – jinak budou mít ostatní jen výchozí verzi.</p>
           </section>
 
           <h3 class="help-advanced-title">Pokročilé a technické</h3>
@@ -524,14 +539,19 @@
           <details class="help-details">
             <summary>Model, context window a tokeny</summary>
             <p>V části <code>Model</code> vybereš poskytovatele, model a context window. Context window zde řídí balení promptu a zdrojů; nejde o skutečný limit modelu. Při nedostatku místa se nejméně relevantní zdroje vynechají nebo zkrátí.</p>
+            <p>Odemčený seznam OpenRouter standardně ukazuje nejnovější verze GPT, Gemini, Claude Sonnet/Haiku a DeepSeek, odděleně podle varianty. GPT s příponou <code>-pro</code> jsou skryté. Volba <code>Zobrazit v seznamu všechny modely</code> zpřístupní i starší verze a ostatní rodiny. Aktuálně vybraný model zůstane viditelný i po vypnutí této volby.</p>
           </details>
           <details class="help-details">
             <summary>Prompty, proměnné a sdílení</summary>
             <p>Prompt může používat proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>. Lokální profily a proměnné zůstávají v tomto prohlížeči; sdílené položky jsou uložené na serveru a řídí se stávajícím vlastnictvím a admin přístupem.</p>
           </details>
           <details class="help-details">
-            <summary>Konverzace, historie a soukromí</summary>
-            <p>Konverzace slouží pro navazující otázky. Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči. Tlačítko „Sdílet“ vedle kopírovacích tlačítek (u odpovědi i v historii) nabídne sdílení všem, kdy se položka objeví v záložce Sdílené, nebo jen odkazem, kdy ji otevře jen ten, komu odkaz pošleš. U sdílené položky ukáže odkaz a umožní sdílení změnit nebo zrušit; víc položek najednou sdílíš přes Hromadné akce. API klíče, lokální profily a osobní konverzace zůstávají v prohlížeči.</p>
+            <summary>Konverzace</summary>
+            <p>Konverzace slouží pro navazující otázky: avatar si pamatuje předchozí otázky a odpovědi a při každé další otázce znovu vyhledá podklady. Když se konverzace prodlouží, starší část se automaticky shrne, aby se vešla do context window. Osobní konverzace zůstávají v tomto prohlížeči.</p>
+          </details>
+          <details class="help-details">
+            <summary>Historie a sdílení odpovědí</summary>
+            <p>Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči. Tlačítko „Sdílet“ vedle kopírovacích tlačítek (u odpovědi i v historii) nabídne sdílení všem, kdy se položka objeví v záložce Sdílené, nebo jen odkazem, kdy ji otevře jen ten, komu odkaz pošleš. U sdílené položky ukáže odkaz a umožní sdílení změnit nebo zrušit; víc položek najednou sdílíš přes Hromadné akce. API klíče, lokální profily a historie zůstávají v prohlížeči, dokud je nesdílíš.</p>
           </details>
         </div>
       </div>

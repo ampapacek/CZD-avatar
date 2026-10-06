@@ -3437,6 +3437,11 @@ body[data-theme="dark"] .source-highlight {
   border-bottom: 1px solid var(--line);
 }
 
+.help-section h4 {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
 .help-start h3,
 .help-section h3,
 .help-advanced-title {

@@ -92,6 +92,17 @@ describe("selected Settings and Help organization", () => {
     expect(start.compareDocumentPosition(verification) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(verification.compareDocumentPosition(firstDetails) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it("documents profile creation and sharing, and keeps conversation and history separate", () => {
+    const helpBody = document.querySelector(".help-body");
+    const profile = [...helpBody.querySelectorAll(".help-section")].find((s) => s.querySelector("h3").textContent.trim() === "Profil");
+    const headings = [...profile.querySelectorAll("h4")].map((h) => h.textContent.trim());
+    expect(headings).toEqual(["Jak vytvořit vlastní profil", "Jak profil sdílet"]);
+    const summaries = [...helpBody.querySelectorAll("details.help-details > summary")].map((s) => s.textContent.trim());
+    expect(summaries).toContain("Konverzace");
+    expect(summaries.some((t) => t.startsWith("Historie"))).toBe(true);
+    expect(summaries.some((t) => t.includes("Konverzace, historie"))).toBe(false);
+  });
 });
 
 describe("selected typography and accessibility contracts", () => {

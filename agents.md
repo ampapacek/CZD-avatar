@@ -8,6 +8,7 @@ Practical handoff for future agents in this repo.
 - Treat "can we / could we / should we / is it possible / what about X?" as questions, not work orders. Answer with feasibility + approach; do NOT touch code until the user explicitly says to build it.
 - For anything beyond a small/mechanical change, first reply with a short plan (files you'd touch, trade-offs, rough size) and wait for a clear go-ahead — even if implementing seems obviously wanted. Bigger change = more important to pause.
 - Test every non-trivial change (run the app/scripts or add automated tests) and report what was and wasn't verified.
+- When you change or add a user-visible feature (profiles, sharing, history, conversation, settings), update the Help dialog in `app/static/index.html` (`#helpDialog`) to match.
 - Don't commit or push without explicit approval. Split commits into related chunks with clear messages.
 
 ## What this is
