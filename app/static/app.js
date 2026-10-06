@@ -5,6 +5,9 @@ const questionStatus = document.querySelector("#questionStatus");
 const placeholderControls = document.querySelector("#placeholderControls");
 const llmProvider = document.querySelector("#llmProvider");
 const model = document.querySelector("#model");
+const openRouterModelFilter = document.querySelector("#openRouterModelFilter");
+const showAllOpenRouterModels = document.querySelector("#showAllOpenRouterModels");
+const openRouterModelFilterNote = document.querySelector("#openRouterModelFilterNote");
 const customModelField = document.querySelector("#customModelField");
 const customModel = document.querySelector("#customModel");
 const llmBaseUrl = document.querySelector("#llmBaseUrl");
@@ -2101,12 +2104,14 @@ providerApiKeyList.addEventListener("click", (event) => {
   refreshModelOptions(appSettings);
 });
 refreshModelsButton.addEventListener("click", refreshProviderModels);
+showAllOpenRouterModels.addEventListener("change", () => refreshModelOptions(appSettings));
 customModel.addEventListener("input", () => {
   persistLlmSettings();
   updateContextWindowForSelectedModel();
 });
 model.addEventListener("change", () => {
   updateCustomModelVisibility(customModelAllowed());
+  refreshModelOptions(appSettings);
   persistLlmSettings();
   updateContextWindowForSelectedModel();
   if (model.value === CUSTOM_MODEL_VALUE) {
@@ -3226,12 +3231,15 @@ function selectedModelValue() {
 
 function refreshModelOptions(settings = appSettings) {
   const provider = selectedProviderConfig(settings);
-  const providerModels = Array.isArray(provider?.model_presets) ? provider.model_presets.filter(Boolean) : [];
-  const publicModels = providerPublicModels(provider, settings);
   const browserApiKeyProvided = Boolean(selectedProviderApiKey(provider?.id));
   const unlocked = customModelAllowed(provider);
   const currentModel = model.value === CUSTOM_MODEL_VALUE ? customModel.value.trim() : model.value || provider?.default_model || "";
-  populateModels(unlocked ? providerModels : publicModels, currentModel, unlocked);
+  const view = Avatar.modelSelectorView(provider, { unlocked, showAll: showAllOpenRouterModels.checked, currentModel });
+  openRouterModelFilter.hidden = !view.filterAvailable;
+  openRouterModelFilterNote.hidden = !view.filterAvailable || showAllOpenRouterModels.checked;
+  openRouterModelFilterNote.textContent = "V seznamu zobrazeno: Nejnovější GPT, Gemini, Claude Sonnet/Haiku a DeepSeek"
+    + (view.selectedOutsideFilter ? " Aktuálně vybraný model je ponechán mimo filtr." : "");
+  populateModels(view.models, currentModel, unlocked);
   const providerBaseUrl = provider?.base_url || "";
   llmBaseUrl.value = selectedProviderBaseUrl(provider?.id) || providerBaseUrl;
   updateLlmPolicyNote(settings.llm_policy, unlocked, browserApiKeyProvided);

@@ -77,6 +77,21 @@ Set `LLM_PROVIDER_<ID>_PUBLIC_MODELS=*` to make every resolved model for that pr
 
 When `DISCOVER_MODELS=true`, discovered models are treated as authoritative. `MODELS` is used only as a fallback if discovery fails, so stale explicit model names do not appear while provider discovery is working.
 
+The unlocked OpenRouter selector defaults to a compact view: latest numeric
+versions of GPT, Gemini, Claude Sonnet/Haiku, and DeepSeek within each recognized
+variant. GPT mini/nano, Sol/Luna/Astra/Terra, GPT-OSS sizes,
+Gemini Pro/Flash/Flash Lite, Claude Sonnet/Haiku, and DeepSeek Pro/Flash/reasoning
+remain separate choices. Generic DeepSeek V-series models share the Pro slot.
+Equal versions prefer stable over preview and unpinned routes over dated
+snapshots; newer previews can replace older stable versions. Batch/free variants,
+GPT models with the `-pro` suffix, image/audio models, Codex, and unfamiliar naming schemes are omitted from this
+view. Public models and the current allowed selection remain visible.
+**Zobrazit v seznamu všechny modely** restores the full allowed catalogue,
+including older versions and other families; it never unlocks non-public models.
+The toggle applies for the current page session. This is a naming-based display
+filter, not a claim that each newer model is better; discovery and model metadata
+still retain the full catalogue. Other providers are unaffected.
+
 Provider API keys go into `LLM_PROVIDER_<ID>_API_KEY`, where `<ID>` is the uppercase provider id from `LLM_PROVIDERS`. For example, `aiufal` uses `LLM_PROVIDER_AIUFAL_API_KEY`, and `openrouter` uses `LLM_PROVIDER_OPENROUTER_API_KEY`.
 
 AI Ufal exposes models at:
