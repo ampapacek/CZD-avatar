@@ -8441,6 +8441,8 @@ function bindCopySharedLinkButton(container, sharedId) {
 function renderSharedHistoryDetail(item) {
   const canManage = sharedItemManageable(item);
   const expanded = canManage && sharedCardExpanded;
+  // The copy buttons read the entry on display from here.
+  historyDetailEntry = item;
   historyDetail.innerHTML = `
     <div class="history-detail-header">
       <div>
