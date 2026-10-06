@@ -1107,6 +1107,7 @@ def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
         note=request.note,
         question=request.question,
         answer=request.answer,
+        reasoning=request.reasoning,
         mode=request.mode,
         settings=request.settings,
         sources=request.sources,

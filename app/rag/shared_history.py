@@ -16,10 +16,23 @@ from uuid import uuid4
 VISIBILITIES = ("listed", "link")
 DEFAULT_VISIBILITY = "listed"
 
+# A reasoning trace can run far longer than the answer it led to. Shared items
+# keep the start of it, marked as cut, so one chatty model cannot bloat the file.
+MAX_SHARED_REASONING_CHARS = 40_000
+REASONING_TRUNCATION_MARKER = "\n… [zkráceno]"
+
 
 def normalize_visibility(value: Any) -> str:
     text = str(value or "").strip().lower()
     return text if text in VISIBILITIES else DEFAULT_VISIBILITY
+
+
+def cap_reasoning(value: Any) -> str:
+    text = str(value or "")
+    if len(text) <= MAX_SHARED_REASONING_CHARS:
+        return text
+    keep = MAX_SHARED_REASONING_CHARS - len(REASONING_TRUNCATION_MARKER)
+    return text[:keep].rstrip() + REASONING_TRUNCATION_MARKER
 
 
 def load_shared_history(path: Path) -> list[dict[str, Any]]:
@@ -76,6 +89,7 @@ def save_shared_history_item(
     note: str = "",
     question: str = "",
     answer: str = "",
+    reasoning: str = "",
     mode: str = "",
     settings: dict[str, Any] | None = None,
     sources: list[Any] | None = None,
@@ -95,6 +109,7 @@ def save_shared_history_item(
         "note": note or "",
         "question": question or "",
         "answer": answer or "",
+        "reasoning": cap_reasoning(reasoning),
         "mode": mode or "",
         # Stored verbatim so nothing (e.g. the raw request payload in settings)
         # is dropped.
@@ -179,6 +194,8 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
         "note": str(item.get("note") or ""),
         "question": str(item.get("question") or ""),
         "answer": str(item.get("answer") or ""),
+        # Absent on items shared before traces were kept.
+        "reasoning": str(item.get("reasoning") or ""),
         "mode": str(item.get("mode") or ""),
         # Preserve verbatim; only guard against non-container junk.
         "settings": settings if isinstance(settings, dict) else {},

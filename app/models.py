@@ -166,6 +166,7 @@ class SharedHistoryItem(BaseModel):
     note: str = ""
     question: str = ""
     answer: str = ""
+    reasoning: str = ""
     mode: str = ""
     settings: dict[str, Any] = Field(default_factory=dict)
     sources: list[Any] = Field(default_factory=list)
@@ -187,6 +188,7 @@ class SharedHistorySaveRequest(BaseModel):
     note: str = ""
     question: str = ""
     answer: str = ""
+    reasoning: str = ""
     mode: str = ""
     settings: dict[str, Any] = Field(default_factory=dict)
     sources: list[Any] = Field(default_factory=list)

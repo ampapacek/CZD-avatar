@@ -121,12 +121,24 @@ class SharedHistoryEndpointTests(unittest.TestCase):
         self.assertEqual(stored["response_time_seconds"], 4.2)
         self.assertEqual(stored["token_budget"]["estimated_source_tokens"], 15269)
 
+    def test_reasoning_round_trips(self) -> None:
+        created = self._create("Reasoning", reasoning="First I check the sources.")
+        stored = self.client.get(f"/shared-history/{created['id']}").json()
+        self.assertEqual(stored["reasoning"], "First I check the sources.")
+
+    def test_long_reasoning_is_capped_and_marked(self) -> None:
+        created = self._create("Long", reasoning="x" * 50_000)
+        stored = self.client.get(f"/shared-history/{created['id']}").json()["reasoning"]
+        self.assertEqual(len(stored), shared_history.MAX_SHARED_REASONING_CHARS)
+        self.assertTrue(stored.endswith(shared_history.REASONING_TRUNCATION_MARKER))
+
     def test_items_shared_without_generation_details_load(self) -> None:
         self.path.write_text('{"items": [{"id": "old", "response_time_seconds": "junk"}]}', encoding="utf-8")
         stored = self.client.get("/shared-history/old").json()
         self.assertIsNone(stored["model_used"])
         self.assertIsNone(stored["response_time_seconds"])
         self.assertIsNone(stored["token_budget"])
+        self.assertEqual(stored["reasoning"], "")
 
     def test_visibility_defaults_to_listed_for_new_and_legacy_items(self) -> None:
         created = self._create("New", owner_id="owner-a")
