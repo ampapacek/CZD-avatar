@@ -99,8 +99,9 @@ describe("selected Settings and Help organization", () => {
     const headings = [...profile.querySelectorAll("h4")].map((h) => h.textContent.trim());
     expect(headings).toEqual(["Jak vytvořit vlastní profil", "Jak profil sdílet"]);
     const summaries = [...helpBody.querySelectorAll("details.help-details > summary")].map((s) => s.textContent.trim());
-    expect(summaries).toContain("Konverzace");
-    expect(summaries.some((t) => t.startsWith("Historie"))).toBe(true);
+    // Everyday features lead the disclosed sections; the technical ones follow.
+    expect(summaries[0]).toBe("Konverzace");
+    expect(summaries[1].startsWith("Historie")).toBe(true);
     expect(summaries.some((t) => t.includes("Konverzace, historie"))).toBe(false);
   });
 });
