@@ -1,0 +1,58 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies without torch
+        # sentence-transformers pulls in torch and the CUDA wheels (gigabytes),
+        # and only local retrieval and reranking use it; the tests stub both.
+        # Everything else is pinned to the versions in uv.lock.
+        run: |
+          uv venv --python 3.12
+          uv export --frozen --no-hashes --no-emit-project --group dev -o "$RUNNER_TEMP/constraints.txt"
+          .venv/bin/python - > "$RUNNER_TEMP/requirements.txt" <<'EOF'
+          import tomllib
+          project = tomllib.load(open("pyproject.toml", "rb"))
+          deps = project["project"]["dependencies"] + project["dependency-groups"]["dev"]
+          print("\n".join(d for d in deps if not d.startswith("sentence-transformers")))
+          EOF
+          uv pip install -c "$RUNNER_TEMP/constraints.txt" -r "$RUNNER_TEMP/requirements.txt"
+      - name: Fail if torch slipped in
+        run: |
+          if .venv/bin/python -c "import torch" 2>/dev/null; then
+            echo "::error::torch is installed; a new dependency pulls it in"
+            exit 1
+          fi
+      - run: .venv/bin/python -m pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Committed bundle matches the sources
+        run: |
+          npm run build
+          if ! git diff --quiet -- app/static/avatar.bundle.js; then
+            echo "::error::app/static/avatar.bundle.js is stale: run 'npm run build' and commit it"
+            exit 1
+          fi
