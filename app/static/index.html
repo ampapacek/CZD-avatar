@@ -512,7 +512,7 @@
             <p>Profil je uložené nastavení promptu, které určuje způsob odpovědi a případnou úpravu dotazu před vyhledáváním. Profily a jejich proměnné lze spravovat v <code>Nastavení</code>.</p>
             <h4>Jak vytvořit vlastní profil</h4>
             <ol class="help-steps">
-              <li>Otevři <code>Nastavení</code> → <code>Profily a proměnné</code> a nahoře vyber pracovní balíček (WP), pod který se profil uloží.</li>
+              <li>Otevři <code>Nastavení</code> → <code>Profily</code> a nahoře vyber pracovní balíček (WP), pod který se profil uloží.</li>
               <li>V části <code>Prompty</code> vyber existující profil, který se ti blíží, a uprav systémový nebo uživatelský prompt. Nebo klikni na <code>Nový prázdný</code> a začni od nuly. Uživatelský prompt by měl obsahovat <code>{question}</code> a <code>{retrieved_snippets}</code>, jinak by model neviděl otázku ani podklady.</li>
               <li>Zadej název (a případně poznámku) a klikni na <code>Uložit jako nový</code>. Úpravy už uloženého profilu potvrdíš tlačítkem <code>Aktualizovat vybraný</code>. Vestavěné profily se nepřepisují, uloží se jako nová kopie.</li>
               <li>Na hlavní stránce profil vyber v poli <code>Profil</code>.</li>
@@ -566,7 +566,6 @@
         <div class="history-dialog-header">
           <div>
             <h2>Nastavení</h2>
-            <p>Prompty, proměnné, tokenový rozpočet a přístup k modelům.</p>
           </div>
           <button id="closeSettingsButton" class="icon-button help-close" type="button" aria-label="Zavřít nastavení" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -577,7 +576,7 @@
         </div>
         <div class="settings-body">
           <div id="settingsCategoryTabs" class="settings-category-tabs" role="tablist" aria-label="Kategorie nastavení">
-            <button id="settingsProfilesTab" class="settings-category-tab" type="button" role="tab" aria-selected="true" aria-controls="settingsProfilesPanel" tabindex="0" data-settings-category="profiles">Profily a proměnné</button>
+            <button id="settingsProfilesTab" class="settings-category-tab" type="button" role="tab" aria-selected="true" aria-controls="settingsProfilesPanel" tabindex="0" data-settings-category="profiles">Profily</button>
             <button id="settingsModelsTab" class="settings-category-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsModelsPanel" tabindex="-1" data-settings-category="models">Modely a tokeny</button>
             <button id="settingsAccessTab" class="settings-category-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsAccessPanel" tabindex="-1" data-settings-category="access">API a přístup</button>
           </div>

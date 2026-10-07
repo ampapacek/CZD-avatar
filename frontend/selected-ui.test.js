@@ -73,7 +73,7 @@ describe("selected Settings and Help organization", () => {
     const tabs = [...document.querySelectorAll("#settingsCategoryTabs [role='tab']")];
     const panels = [...document.querySelectorAll(".settings-body > [role='tabpanel']")];
     expect(tabs.map((tab) => tab.textContent.trim())).toEqual([
-      "Profily a proměnné",
+      "Profily",
       "Modely a tokeny",
       "API a přístup",
     ]);
