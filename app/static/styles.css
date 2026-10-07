@@ -3498,6 +3498,11 @@ body[data-theme="dark"] .source-highlight {
   font-size: 14px;
 }
 
+/* Same size as the steps and the folded sections around them. */
+.help-section p {
+  font-size: 14px;
+}
+
 .help-body p {
   color: var(--muted);
   line-height: 1.55;
@@ -3749,12 +3754,23 @@ body[data-theme="dark"] .source-highlight {
   flex-wrap: wrap;
 }
 
+/* The base button padding (10px 14px) left the icon 6px wide inside a 36px
+   box, so the padding goes and the icon gets its own size. */
 .help-close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
   width: 36px;
   height: 36px;
+  padding: 0;
   color: var(--text);
   border-color: var(--line);
   background: var(--surface-2);
+}
+
+.help-close svg {
+  width: 20px;
+  height: 20px;
 }
 
 .help-close:hover {
