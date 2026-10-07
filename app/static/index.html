@@ -513,13 +513,13 @@
             <h4>Jak vytvořit vlastní profil</h4>
             <ol class="help-steps">
               <li>Otevři <code>Nastavení</code> → <code>Profily</code> a nahoře vyber pracovní balíček (WP), pod který se profil uloží.</li>
-              <li>V části <code>Prompty</code> vyber existující profil, který se ti blíží, a uprav systémový nebo uživatelský prompt. Nebo klikni na <code>Nový prázdný</code> a začni od nuly. Uživatelský prompt by měl obsahovat <code>{question}</code> a <code>{retrieved_snippets}</code>, jinak by model neviděl otázku ani podklady.</li>
-              <li>Zadej název (a případně poznámku) a klikni na <code>Uložit jako nový</code>. Úpravy už uloženého profilu potvrdíš tlačítkem <code>Aktualizovat vybraný</code>. Vestavěné profily se nepřepisují, uloží se jako nová kopie.</li>
+              <li>V části <code>Profily</code> vyber existující profil, který se ti blíží. Uživatelský prompt by měl obsahovat <code>{question}</code> a <code>{retrieved_snippets}</code>, jinak by model neviděl otázku ani podklady.</li>
+              <li>Klikni na <code>Nový profil</code>, zadej název a vyber, zda začít z kopie vybraného profilu, nebo z prázdného. Nový profil se uloží lokálně hned a otevře se k úpravám; změny potvrdíš tlačítkem <code>Uložit</code>. Pokud profil opustíš nebo zavřeš nastavení s neuloženými změnami, aplikace se zeptá, zda je uložit. Vlastní profil později upravíš tlačítkem <code>Upravit</code>, nepotřebný smažeš tlačítkem <code>Smazat</code>. Vestavěné a cizí sdílené profily nejdou přepsat, upravuješ vždy svou kopii.</li>
               <li>Na hlavní stránce profil vyber v poli <code>Profil</code>.</li>
             </ol>
             <p><strong>Tip:</strong> pro jednorázové přání nemusíš vytvářet profil. Do pole <code>Vlastní instrukce</code> v sekci <code>Podoba odpovědi</code> napiš např. „Odpověz v pěti větách“ nebo „Vysvětli to jako žákovi základní školy“; text se přidá k otázce jako dodatečná instrukce a citace zůstávají zachované. Pokud ji chceš mít vždy, přidej do profilu vlastní proměnnou <code>custom_instructions</code> s požadovaným výchozím textem (profilová verze má přednost před globální).</p>
             <h4>Jak profil sdílet</h4>
-            <p>Nový profil je zpočátku jen v tomto prohlížeči. Pokud před uložením zaškrtneš <code>Sdílet s ostatními</code>, uloží se na server a objeví se v seznamu profilů všem uživatelům. Poznámka je u sdíleného profilu viditelná ostatním (modelu se neposílá). Upravovat nebo mazat ho může jen jeho vlastník, případně administrátor. Proměnné přidané přímo k profilu (<code>Vlastní proměnné promptu</code>) se sdílejí spolu s ním. Globální proměnné, které profil používá, sdílej zvlášť zaškrtnutím <code>Sdílet s ostatními</code> v jejich editoru – jinak budou mít ostatní jen výchozí verzi.</p>
+            <p>Nový profil je zpočátku jen v tomto prohlížeči (štítek <code>Lokální</code>). Tlačítko <code>Sdílet s ostatními</code> ho po potvrzení uloží na server a objeví se v seznamu profilů všem uživatelům (štítek <code>Sdílený</code>). Tlačítko <code>Přestat sdílet</code> ho ze serveru odstraní a ponechá ti lokální kopii. Poznámka je u sdíleného profilu viditelná ostatním (modelu se neposílá). Upravovat nebo mazat ho může jen jeho vlastník, případně administrátor. Proměnné přidané přímo k profilu (<code>Pokročilé nastavení profilu</code> → <code>Vlastní proměnné promptu</code>) se sdílejí spolu s ním. Globální proměnné, které profil používá, sdílej zvlášť zaškrtnutím <code>Sdílet s ostatními</code> v jejich editoru – jinak budou mít ostatní jen výchozí verzi.</p>
           </section>
 
           <h3 class="help-advanced-title">Pokročilé a technické</h3>
@@ -588,120 +588,154 @@
             </label>
             <p class="field-note">Vybraný WP určuje, které prompty se zde upravují a pod jaký WP se ukládají. Hlavní stránku to nemění.</p>
           </section>
-          <section class="settings-section placeholder-defs-section">
-            <h3>Proměnné promptu</h3>
-            <p class="field-note">
-              Proměnné promptu se dají v promptu používat ve tvaru <code>{nazev}</code>.
-              Při dotazu se nahradí vybranou hodnotou. Například proměnná <code>{length}</code>
-              může na hlavní stránce vytvořit výběr délky odpovědi; textová proměnná zase pole,
-              kam uživatel napíše vlastní instrukce. Aplikace vytvoří ovládací prvky pro každou
-              použitou proměnnou, která má definici.
-            </p>
-            <p class="field-note">
-              Globální proměnné se dají použít ve více promptech, např. <code>{length}</code>
-              nebo <code>{custom_instructions}</code>. Sdílené proměnné jsou uložené na serveru
-              pro všechny uživatele; lokální proměnné platí jen v tomto prohlížeči. Pro sdílení
-              zaškrtni v editoru proměnné „Sdílet s ostatními“.
-            </p>
-            <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
-            <p id="globalPlaceholderDefsStatus" class="field-note placeholder-defs-status" role="status" aria-live="polite"></p>
-            <div class="prompt-actions">
-              <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
-            </div>
-          </section>
           <section class="settings-section prompt-section-body">
-            <h3>Prompty</h3>
-            <p class="field-note">
-              Klikni na „Nový prázdný“, pokud chceš vytvořit nový prompt/profil. Můžeš také upravit
-              vybraný prompt přímo v textových polích a uložit ho jako nový. Zaškrtnutí
-              „Sdílet s ostatními“ uloží prompt/profil na server, aby ho mohli používat i ostatní.
-            </p>
+            <div class="prompt-title-row">
+              <div>
+                <h3>Profily</h3>
+                <p class="field-note">
+                  Vyber profil a prohlédni si jeho texty. Vlastní profil vytvoříš tlačítkem „Nový profil“ (kopie
+                  vybraného, nebo prázdný) a upravíš ho tlačítkem „Upravit“; změny potvrdíš tlačítkem „Uložit“. „Sdílet s ostatními“ uloží profil
+                  na server, aby ho mohli používat i ostatní; „Přestat sdílet“ ho vrátí jen do tohoto prohlížeče.
+                </p>
+              </div>
+              <button id="newPromptButton" class="secondary" type="button" title="Vytvoří nový lokální profil">Nový profil</button>
+            </div>
             <div class="prompt-controls">
               <label class="field">
-                <span>Uložený prompt</span>
+                <span>Profil</span>
                 <select id="promptPreset"></select>
               </label>
               <div class="prompt-actions">
-                <button id="newPromptButton" class="secondary" type="button">Nový prázdný</button>
+                <button id="editPromptButton" class="secondary" type="button">Upravit</button>
+                <button id="savePromptButton" class="secondary" type="button">Uložit</button>
+                <button id="sharePromptButton" class="secondary" type="button">Sdílet s ostatními</button>
                 <button id="deletePromptButton" class="secondary" type="button">Smazat</button>
               </div>
             </div>
-            <label class="field prompt-editor">
-              <span>Název promptu</span>
+            <p id="promptPresetStatus" class="field-note prompt-preset-status" role="status" aria-live="polite"></p>
+            <section id="newPromptDialog" class="answer-share-panel" hidden>
+              <form id="newPromptForm">
+                <h4>Nový profil</h4>
+                <p class="field-note">Vznikne lokální profil, který uvidíš jen v tomto prohlížeči. Později ho můžeš sdílet.</p>
+                <label class="field">
+                  <span>Název profilu</span>
+                  <input id="newPromptName" type="text" autocomplete="off" />
+                </label>
+                <fieldset class="new-prompt-source">
+                  <legend>Začít z</legend>
+                  <label class="field inline-field">
+                    <input type="radio" name="newPromptSource" value="copy" checked />
+                    <span id="newPromptCopyLabel">Kopie vybraného profilu</span>
+                  </label>
+                  <label class="field inline-field">
+                    <input type="radio" name="newPromptSource" value="blank" />
+                    <span>Prázdný profil (začít od nuly)</span>
+                  </label>
+                </fieldset>
+                <p id="newPromptError" class="prompt-template-warning" hidden></p>
+                <div class="prompt-actions">
+                  <button id="createNewPromptButton" class="secondary" type="submit">Vytvořit</button>
+                  <button id="cancelNewPromptButton" class="secondary" type="button">Zrušit</button>
+                </div>
+              </form>
+            </section>
+            <div class="prompt-save-panel">
+              <div class="prompt-save-row">
+                <span id="promptScopeBadge" class="prompt-scope-badge"></span>
+              </div>
+              <p id="promptShareNote" class="field-note"></p>
+            </div>
+            <label id="promptNameField" class="field prompt-editor" hidden>
+              <span>Název profilu</span>
               <input id="promptName" type="text" />
             </label>
-            <label class="field">
+            <label id="promptNoteField" class="field">
               <span>Poznámka</span>
-              <textarea id="promptNote" rows="4"></textarea>
-              <span class="field-note">U sdíleného promptu je poznámka viditelná ostatním uživatelům. Nikdy se neposílá modelu.</span>
+              <textarea id="promptNote" rows="1" readonly></textarea>
+              <span class="field-note">U sdíleného profilu je poznámka viditelná ostatním uživatelům. Nikdy se neposílá modelu.</span>
             </label>
             <label class="field prompt-editor">
               <span>Systémový prompt</span>
-              <textarea id="systemPrompt" rows="12"></textarea>
+              <textarea id="systemPrompt" rows="12" readonly></textarea>
             </label>
-            <label class="field prompt-editor">
-              <span>Uživatelský prompt</span>
-              <textarea id="userPromptTemplate" rows="8"></textarea>
-            </label>
-            <p class="field-note">
-              Systémový prompt nastavuje roli a pravidla odpovídání. Uživatelský prompt je šablona dotazu,
-              do které se obvykle vkládá <code>{question}</code>, <code>{retrieved_snippets}</code>
-              a další proměnné.
-            </p>
             <p id="promptTemplateWarning" class="prompt-template-warning" hidden></p>
-            <div class="prompt-save-panel">
-              <div class="prompt-save-row">
+            <details class="advanced prompt-advanced">
+              <summary>Pokročilé nastavení profilu</summary>
+              <label class="field prompt-editor">
+                <span>Uživatelský prompt</span>
+                <textarea id="userPromptTemplate" rows="8" readonly></textarea>
+              </label>
+              <p class="field-note">
+                Systémový prompt nastavuje roli a pravidla odpovídání. Uživatelský prompt je šablona dotazu,
+                do které se obvykle vkládá <code>{question}</code>, <code>{retrieved_snippets}</code>
+                a další proměnné.
+              </p>
+              <div class="placeholder-defs-inline">
+                <h4>Vlastní proměnné promptu</h4>
+                <p class="field-note">
+                  Tyto proměnné patří jen k vybranému promptu. Pokud mají stejný název jako
+                  nějaká globální proměnná, použije se tato promptová verze.
+                </p>
+                <p class="field-note">
+                  Přidání, úprava nebo smazání proměnné se uloží hned a uloží s ní i rozepsané změny profilu.
+                </p>
+                <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
                 <div class="prompt-actions">
-                  <button id="savePromptAsButton" class="secondary" type="button">Uložit jako nový</button>
-                  <button id="updatePromptButton" class="secondary" type="button">Aktualizovat vybraný</button>
+                  <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat proměnnou promptu</button>
                 </div>
-                <label class="field inline-field prompt-share-toggle">
-                  <input id="sharePromptOnServer" type="checkbox" />
-                  <span>Sdílet s ostatními</span>
+              </div>
+              <div class="placeholder-defs-inline">
+                <h4>Transformace dotazu</h4>
+                <p class="field-note">
+                  Umožní dotaz před vyhledáváním automaticky přeložit nebo upravit pomocí LLM.
+                  Více transformací může být dostupných ručně, ale právě jedna je výchozí.
+                  Nastavení patří jen k vybranému promptu/profilu.
+                </p>
+                <label class="field inline-field">
+                  <input id="queryTransformEnabledToggle" type="checkbox" />
+                  <span>Povolit úpravu dotazu pro tento prompt</span>
                 </label>
-              </div>
-              <p id="promptShareNote" class="field-note">Uloží se jen v tomto prohlížeči.</p>
-              <p id="promptPresetStatus" class="field-note prompt-preset-status" role="status" aria-live="polite"></p>
-            </div>
-            <div class="placeholder-defs-inline">
-              <h4>Vlastní proměnné promptu</h4>
-              <p class="field-note">
-                Tyto proměnné patří jen k vybranému promptu. Pokud mají stejný název jako
-                nějaká globální proměnná, použije se tato promptová verze.
-              </p>
-              <div id="inlinePlaceholderDefsList" class="placeholder-defs-list"></div>
-              <div class="prompt-actions">
-                <button id="newInlinePlaceholderButton" class="secondary" type="button">Přidat proměnnou promptu</button>
-              </div>
-            </div>
-            <div class="placeholder-defs-inline">
-              <h4>Transformace dotazu</h4>
-              <p class="field-note">
-                Umožní dotaz před vyhledáváním automaticky přeložit nebo upravit pomocí LLM.
-                Více transformací může být dostupných ručně, ale právě jedna je výchozí.
-                Nastavení patří jen k vybranému promptu/profilu.
-              </p>
-              <label class="field inline-field">
-                <input id="queryTransformEnabledToggle" type="checkbox" />
-                <span>Povolit úpravu dotazu pro tento prompt</span>
-              </label>
-              <label class="field inline-field">
-                <input id="queryTransformAutoApplyToggle" type="checkbox" />
-                <span>Použít výchozí transformaci automaticky</span>
-              </label>
-              <p id="queryTransformDisabledNote" class="field-note unsaved-note" hidden></p>
-              <div class="prompt-actions">
-                <button id="resetBuiltinQueryTransformButton" class="secondary danger-lite" type="button" hidden>
-                  Obnovit výchozí nastavení
-                </button>
-              </div>
-              <div id="queryTransformSettingsBody" hidden>
-                <div id="queryTransformActionDefsList" class="placeholder-defs-list"></div>
+                <label class="field inline-field">
+                  <input id="queryTransformAutoApplyToggle" type="checkbox" />
+                  <span>Použít výchozí transformaci automaticky</span>
+                </label>
+                <p id="queryTransformDisabledNote" class="field-note unsaved-note" hidden></p>
                 <div class="prompt-actions">
-                  <button id="newQueryTransformActionButton" class="secondary" type="button">Přidat akci úpravy</button>
+                  <button id="resetBuiltinQueryTransformButton" class="secondary danger-lite" type="button" hidden>
+                    Obnovit výchozí nastavení
+                  </button>
+                </div>
+                <div id="queryTransformSettingsBody" hidden>
+                  <div id="queryTransformActionDefsList" class="placeholder-defs-list"></div>
+                  <div class="prompt-actions">
+                    <button id="newQueryTransformActionButton" class="secondary" type="button">Přidat akci úpravy</button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
+          </section>
+          <section class="settings-section placeholder-defs-section">
+            <details class="advanced">
+              <summary>Globální proměnné promptu</summary>
+              <p class="field-note">
+                Proměnné promptu se dají v promptu používat ve tvaru <code>{nazev}</code>.
+                Při dotazu se nahradí vybranou hodnotou. Například proměnná <code>{length}</code>
+                může na hlavní stránce vytvořit výběr délky odpovědi; textová proměnná zase pole,
+                kam uživatel napíše vlastní instrukce. Aplikace vytvoří ovládací prvky pro každou
+                použitou proměnnou, která má definici.
+              </p>
+              <p class="field-note">
+                Globální proměnné se dají použít ve více promptech, např. <code>{length}</code>
+                nebo <code>{custom_instructions}</code>. Sdílené proměnné jsou uložené na serveru
+                pro všechny uživatele; lokální proměnné platí jen v tomto prohlížeči. Pro sdílení
+                zaškrtni v editoru proměnné „Sdílet s ostatními“.
+              </p>
+              <div id="globalPlaceholderDefsList" class="placeholder-defs-list"></div>
+              <p id="globalPlaceholderDefsStatus" class="field-note placeholder-defs-status" role="status" aria-live="polite"></p>
+              <div class="prompt-actions">
+                <button id="newGlobalPlaceholderButton" class="secondary" type="button">Nová proměnná</button>
+              </div>
+            </details>
           </section>
           </div>
 
