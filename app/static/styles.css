@@ -4017,6 +4017,9 @@ body[data-theme="dark"] .source-highlight {
     border-right: 0;
     border-left: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .conversation-list-panel {
     max-height: 220px;
   }
 
@@ -4054,8 +4057,51 @@ body[data-theme="dark"] .source-highlight {
     max-height: none;
   }
 
+  /* The thread flows in the page instead of scrolling in a box of its own
+     inside the scrolling page, and the composer stays at the bottom of the
+     screen while the thread is read. */
   .conversation-messages {
-    max-height: 60vh;
+    overflow: visible;
+  }
+
+  .conversation-view {
+    /* A backdrop filter makes this the containing block of fixed children,
+       which would pin the settings sheet below to the view, not the screen. */
+    backdrop-filter: none;
+  }
+
+  .conversation-composer-dock {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+  }
+
+  .conversation-composer {
+    background-color: var(--bg);
+    background-image: linear-gradient(var(--surface), var(--surface));
+    box-shadow: 0 -6px 16px rgba(13, 17, 23, 0.08);
+  }
+
+  /* The settings open as a sheet from the bottom of the screen; opening
+     upward from the composer cut their top, close button included, off. */
+  .conversation-settings-popover {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    max-height: 85dvh;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -12px 32px rgba(13, 17, 23, 0.28);
+    overscroll-behavior: contain;
+  }
+
+  .conversation-settings-popover-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-3);
   }
 }
 
@@ -4076,6 +4122,39 @@ body[data-theme="dark"] .source-highlight {
   .conversation-settings-advanced .conversation-settings-grid,
   .conversation-retrieval-sliders {
     grid-template-columns: 1fr;
+  }
+
+  .conversation-list-header p {
+    display: none;
+  }
+
+  .conversation-messages {
+    padding: 12px;
+  }
+
+  /* The send button sits beside the question rather than on a row of its own,
+     so the sticky composer covers less of the thread. */
+  .conversation-composer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    padding: 8px 12px 10px;
+  }
+
+  .conversation-composer .conversation-chips {
+    grid-column: 1 / -1;
+  }
+
+  .conversation-composer-actions {
+    gap: 6px;
+  }
+
+  .conversation-composer .conversation-hint {
+    display: none;
+  }
+
+  .conversation-composer-actions button {
+    min-height: 44px;
+    padding: 0 14px;
   }
 
   .prompt-actions {
@@ -4250,6 +4329,13 @@ body[data-theme="dark"] .source-highlight {
     padding: 7px 4px;
     font-size: 12px;
     line-height: 1.25;
+  }
+}
+
+/* A keyboard shortcut means nothing on a touch screen. */
+@media (hover: none) {
+  .conversation-hint {
+    display: none;
   }
 }
 
