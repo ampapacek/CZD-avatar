@@ -3917,6 +3917,12 @@ body[data-theme="dark"] .source-highlight {
     max-height: 220px;
   }
 
+  /* A touch scroll that reaches the end of a dialog would otherwise carry on
+     into the page behind it. */
+  body:has(dialog:modal) {
+    overflow: hidden;
+  }
+
   /* Stacked, the page scrolls again. */
   body.mode-conversation {
     height: auto;
@@ -4031,8 +4037,57 @@ body[data-theme="dark"] .source-highlight {
     padding-right: 16px;
   }
 
+  /* One compact row: the name on the left, the four tools as icons on the
+     right (each keeps its aria-label and tooltip), the mode switch below. */
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "mode mode";
+    align-items: center;
+    gap: 10px 8px;
+    min-height: 0;
+    padding: 10px 12px 12px 16px;
+  }
+
   .brand-block {
-    align-items: start;
+    grid-area: brand;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+  }
+
+  .brand-meta {
+    margin-top: 3px;
+    min-height: 0;
+  }
+
+  .ufal-logo {
+    height: 22px;
+  }
+
+  .mode-switch {
+    grid-area: mode;
+  }
+
+  .topbar-actions {
+    grid-area: actions;
+    flex-wrap: nowrap;
+    gap: 2px;
+    width: auto;
+  }
+
+  .topbar-button {
+    flex: none;
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+
+  .topbar-button > span:not([aria-hidden]) {
+    display: none;
   }
 
   .history-dialog-header,
@@ -4046,35 +4101,60 @@ body[data-theme="dark"] .source-highlight {
     display: grid;
   }
 
-  .topbar-button {
-    flex: 1 1 calc(50% - 6px);
-    width: auto;
-    min-height: 40px;
-    padding: 0 9px;
-    font-size: 13px;
-  }
-
-  .topbar-button svg,
-  .topbar-button > span[aria-hidden="true"] {
-    width: 17px;
-    height: 17px;
-    padding: 0;
-    align-self: center;
-  }
-
-  .topbar-button > span[aria-hidden="true"] svg {
+  /* Dialogs take the whole screen: a phone has no room for a margin around
+     them, and an opaque sheet keeps the page from showing through. */
+  .help-dialog,
+  .settings-dialog,
+  .history-dialog {
     width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: var(--bg);
+    background-image: linear-gradient(var(--surface), var(--surface));
+  }
+
+  .help-content,
+  .settings-shell,
+  .placeholder-def-dialog form,
+  .storage-shell {
     height: 100%;
-    padding: 0;
+    max-height: 100dvh;
   }
 
-  .placeholder-def-dialog {
-    width: calc(100% - 20px);
-    max-height: 94dvh;
+  .help-content,
+  .settings-shell {
+    padding: 12px 14px 14px;
   }
 
-  .placeholder-def-dialog form {
-    max-height: 94dvh;
+  .help-body,
+  .settings-body,
+  .history-list-panel,
+  .history-detail,
+  .storage-body {
+    overscroll-behavior: contain;
+  }
+
+  .settings-shell > .history-dialog-header {
+    padding: 0 0 10px;
+  }
+
+  .settings-shell > .history-dialog-header p {
+    display: none;
+  }
+
+  /* iOS zooms the page into any text field under 16px when it gets focus. */
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .answer-welcome-example {
+    font-size: 15px;
   }
 
   .placeholder-def-option-row {
@@ -4095,9 +4175,16 @@ body[data-theme="dark"] .source-highlight {
     flex: 1 1 auto;
   }
 
+  /* Still one row: a stacked column of three tabs took a third of the screen. */
   .settings-category-tabs {
-    position: static;
-    flex-direction: column;
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .settings-category-tab {
+    padding: 7px 4px;
+    font-size: 12px;
+    line-height: 1.25;
   }
 }
 
