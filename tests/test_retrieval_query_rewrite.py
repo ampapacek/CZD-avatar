@@ -323,6 +323,8 @@ class RetrievalQueryRewriteTests(unittest.TestCase):
         self.assertIn('"phase": "retrieval"', response.text)
         self.assertIn('"phase": "conversation_compaction"', response.text)
         self.assertIn('"retrieval_query_rewrite_attempted": true', response.text)
+        self.assertIn("event: done", events)
+        self.assertNotIn("event: error", events)
 
     def test_stream_rejects_oversized_prompt_before_rewrite_or_retrieval(self) -> None:
         from app import main

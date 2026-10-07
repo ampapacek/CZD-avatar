@@ -15,7 +15,18 @@ class LLMProviderTests(unittest.TestCase):
         clear_model_discovery_cache()
 
     def test_provider_public_models_are_scoped_per_provider(self) -> None:
-        providers = available_llm_providers(
+        # Discovery fails as it would offline; the configured lists are what is tested.
+        with patch("app.rag.llm_providers.httpx.get", side_effect=OSError("no network in tests")):
+            providers = self._scoped_providers()
+
+        openrouter = next(provider for provider in providers if provider["id"] == "openrouter")
+
+        self.assertEqual(openrouter["public_models"], ["openrouter/free"])
+        self.assertIn("openrouter/free", openrouter["model_presets"])
+
+    @staticmethod
+    def _scoped_providers() -> list[dict]:
+        return available_llm_providers(
             {
                 "LLM_PROVIDER": "aiufal",
                 "LLM_PROVIDERS": "aiufal,openrouter",
@@ -31,11 +42,6 @@ class LLMProviderTests(unittest.TestCase):
                 "LLM_PROVIDER_OPENROUTER_MODELS": "openrouter/free,openai/gpt-oss-20b",
             }
         )
-
-        openrouter = next(provider for provider in providers if provider["id"] == "openrouter")
-
-        self.assertEqual(openrouter["public_models"], ["openrouter/free"])
-        self.assertIn("openrouter/free", openrouter["model_presets"])
 
     def test_excluded_model_names_are_filtered(self) -> None:
         providers = available_llm_providers(

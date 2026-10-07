@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class EmbeddingProvider:
@@ -22,6 +25,10 @@ class SentenceTransformerEmbeddings(EmbeddingProvider):
 
     @cached_property
     def model(self) -> SentenceTransformer:
+        # Imported here so the app, and its tests, load without torch:
+        # only local retrieval ever builds this model.
+        from sentence_transformers import SentenceTransformer
+
         return SentenceTransformer(self.model_name)
 
     @cached_property
