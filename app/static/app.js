@@ -190,6 +190,8 @@ const historyFilterModel = document.querySelector("#historyFilterModel");
 const historyFilterPeriod = document.querySelector("#historyFilterPeriod");
 const historyFilterGroup = document.querySelector("#historyFilterGroup");
 const historyFilterCount = document.querySelector("#historyFilterCount");
+const historyFiltersToggle = document.querySelector("#historyFiltersToggle");
+const historyBackButton = document.querySelector("#historyBackButton");
 const conversationList = document.querySelector("#conversationList");
 const conversationMeta = document.querySelector("#conversationMeta");
 const conversationMessages = document.querySelector("#conversationMessages");
@@ -1793,8 +1795,30 @@ historyButton.addEventListener("click", () => {
   syncedSharedIds.clear();
   renderAuthorName();
   historyFilters.wp = activeWpId;
+  setHistoryFiltersOpen(false);
   setHistoryTab("mine");
   historyDialog.showModal();
+});
+// On a narrow screen the list and the detail are two screens and the filters
+// fold away behind one button; on a wide one the CSS ignores both states.
+function showHistoryPane(pane) {
+  historyDialog.dataset.pane = pane === "detail" ? "detail" : "list";
+  if (pane === "detail") {
+    historyDetail.scrollTop = 0;
+  }
+}
+
+function setHistoryFiltersOpen(open) {
+  historyDialog.dataset.filters = open ? "open" : "";
+  historyFiltersToggle?.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+historyFiltersToggle?.addEventListener("click", () => {
+  setHistoryFiltersOpen(historyDialog.dataset.filters !== "open");
+});
+historyBackButton?.addEventListener("click", () => {
+  showHistoryPane("list");
+  historyList.querySelector(".history-item.active")?.scrollIntoView({ block: "nearest" });
 });
 closeHistoryButton.addEventListener("click", () => {
   historyDialog.close();
@@ -8364,6 +8388,10 @@ function applyHistoryFilters(items) {
   if (historyFilterCount) {
     historyFilterCount.textContent = `${filtered.length} z ${items.length}`;
   }
+  if (historyFiltersToggle) {
+    historyFiltersToggle.textContent =
+      filtered.length < items.length ? `Filtry · ${filtered.length} z ${items.length}` : "Filtry";
+  }
   const groups = Avatar.groupHistory(filtered, historyFacets, historyFilters.groupBy, {
     emptyLabel: "—",
     dayLabel: historyDayLabel,
@@ -8458,6 +8486,7 @@ function renderHistory() {
     item.addEventListener("click", () => {
       selectedHistoryId = Number(item.dataset.historyId);
       renderHistory();
+      showHistoryPane("detail");
     });
   }
 
@@ -8645,6 +8674,7 @@ function clearLocalSharedMarker(sharedId) {
 function setHistoryTab(tab, { loadShared = true } = {}) {
   activeHistoryTab = tab === "shared" ? "shared" : "mine";
   const mine = activeHistoryTab === "mine";
+  showHistoryPane("list");
   historyTabMine.classList.toggle("active", mine);
   historyTabShared.classList.toggle("active", !mine);
   historyTabMine.setAttribute("aria-selected", mine ? "true" : "false");
@@ -8733,6 +8763,7 @@ function renderSharedHistory() {
     button.addEventListener("click", () => {
       selectedSharedId = button.dataset.sharedId;
       renderSharedHistory();
+      showHistoryPane("detail");
     });
   }
 
@@ -8984,6 +9015,8 @@ async function openSharedItemFromUrl(itemRequest, settingsReady) {
     historyFilters.wp = "";
     if (activeHistoryTab === "shared") {
       renderSharedHistory();
+      // The link is for this one item, so a narrow screen opens on it.
+      showHistoryPane("detail");
     }
   } else if (activeHistoryTab === "shared") {
     setHistoryShareStatus(itemError.message, "error");
@@ -9420,6 +9453,7 @@ function renderHistoryDetail(entry) {
     const next = filtered[index + 1] || filtered[index - 1];
     selectedHistoryId = next ? next.id : null;
     renderHistory();
+    showHistoryPane("list");
   });
 
   mountHistoryDetailSources(entry);

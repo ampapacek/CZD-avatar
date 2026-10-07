@@ -1311,6 +1311,12 @@ button:hover {
   display: none;
 }
 
+/* Narrow-screen controls; the wide layout shows list, detail and filters at once. */
+.history-filters-toggle,
+.history-back-button {
+  display: none;
+}
+
 .history-filter-count {
   margin-left: auto;
   font-size: 12px;
@@ -3911,10 +3917,69 @@ body[data-theme="dark"] .source-highlight {
     grid-template-columns: 1fr;
   }
 
+  /* List and detail are two screens: an item opens its detail over the list
+     and the back button returns, so neither is squeezed into half the height. */
+  .history-shell > .history-dialog-body {
+    display: flex;
+    flex-direction: column;
+  }
+
   .history-list-panel {
+    flex: 1 1 auto;
+    min-height: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
-    max-height: 220px;
+  }
+
+  .history-dialog-body > .history-detail {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .history-dialog:not([data-pane="detail"]) .history-detail,
+  .history-dialog[data-pane="detail"] .history-list-panel,
+  .history-dialog[data-pane="detail"] .history-toolbar,
+  .history-dialog[data-pane="detail"] .history-tabs,
+  .history-dialog[data-pane="detail"] .history-author-line,
+  .history-dialog[data-pane="detail"] .history-dialog-actions > :not(.help-close) {
+    display: none;
+  }
+
+  .history-dialog[data-pane="detail"] .history-back-button {
+    display: block;
+    flex: none;
+    align-self: start;
+    margin: 10px 14px 0;
+    padding: 7px 12px;
+    font-size: 14px;
+  }
+
+  /* The search box stays; the rest of the filters fold behind a toggle that
+     carries the "shown of all" count. */
+  .history-filters-toggle {
+    display: block;
+    flex: none;
+    padding: 8px 12px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .history-dialog:not([data-filters="open"]) .history-filters > select,
+  .history-filter-count {
+    display: none;
+  }
+
+  /* Search and the toggle share the first row; the selects wrap below. */
+  #historyFilterText {
+    order: -2;
+    flex: 1 1 calc(100% - 140px);
+  }
+
+  .history-filters-toggle {
+    order: -1;
+  }
+
+  .history-dialog[data-pane="detail"] .history-detail {
+    padding-top: 10px;
   }
 
   /* A touch scroll that reaches the end of a dialog would otherwise carry on
@@ -4239,6 +4304,50 @@ body[data-theme="dark"] .source-highlight {
   .history-filters select,
   .history-filters input[type="search"] {
     flex: 1 1 140px;
+  }
+
+  /* The close button keeps the top-right corner; the storage and batch
+     buttons move under the tabs instead of pushing it to a row of its own. */
+  .history-shell > .history-dialog-header {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    gap: 8px;
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .history-shell > .history-dialog-header > div:first-child {
+    grid-column: 1 / 4;
+    grid-row: 1;
+  }
+
+  .history-shell .history-dialog-actions {
+    display: contents;
+  }
+
+  .history-shell #closeHistoryButton {
+    grid-column: 4;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  #historyStorageButton,
+  #historyBatchToggle {
+    grid-row: 2;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .history-shell > .history-dialog-header h2 + p {
+    display: none;
+  }
+
+  .history-tabs {
+    margin-top: 8px;
+  }
+
+  .history-shell .history-share-status:empty {
+    display: none;
   }
 }
 

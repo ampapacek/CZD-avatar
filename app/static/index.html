@@ -532,6 +532,7 @@
           <details class="help-details">
             <summary>Historie a sdílení odpovědí</summary>
             <p>Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči. Tlačítko „Sdílet“ vedle kopírovacích tlačítek (u odpovědi i v historii) nabídne sdílení všem, kdy se položka objeví v záložce Sdílené, nebo jen odkazem, kdy ji otevře jen ten, komu odkaz pošleš. U sdílené položky ukáže odkaz a umožní sdílení změnit nebo zrušit; víc položek najednou sdílíš přes Hromadné akce. API klíče, lokální profily a historie zůstávají v prohlížeči, dokud je nesdílíš.</p>
+            <p>Na telefonu se seznam a detail střídají: klepnutím na položku otevřeš její detail a tlačítkem <code>← Zpět na seznam</code> se vrátíš. Filtry kromě hledání jsou schované pod tlačítkem <code>Filtry</code>, které ukazuje, kolik položek z celkového počtu filtr zobrazuje.</p>
           </details>
           <details class="help-details">
             <summary>Pouze vyhledat zdroje</summary>
@@ -992,6 +993,7 @@
         <div id="historyFilters" class="history-filters">
           <select id="historyFilterWp" aria-label="Oblast"></select>
           <input id="historyFilterText" type="search" placeholder="Hledat v otázce, odpovědi, poznámce…" aria-label="Hledat v historii" />
+          <button id="historyFiltersToggle" class="history-filters-toggle" type="button" aria-expanded="false" aria-controls="historyFilters">Filtry</button>
           <select id="historyFilterAuthor" aria-label="Autor"></select>
           <select id="historyFilterPrompt" aria-label="Prompt"></select>
           <select id="historyFilterModel" aria-label="Model"></select>
@@ -1009,6 +1011,7 @@
         </div>
         </div>
         <div class="history-dialog-body">
+          <button id="historyBackButton" class="history-back-button" type="button">← Zpět na seznam</button>
           <aside id="historyList" class="history-list history-list-panel"></aside>
           <section id="historyDetail" class="history-detail">
             <p class="history-empty">Vyber položku z historie.</p>
