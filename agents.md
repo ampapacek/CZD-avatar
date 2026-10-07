@@ -32,6 +32,7 @@ Stack: FastAPI · hosted `msearch` retrieval (default) · local/remote Qdrant ·
   **Rebuild the bundle after editing any of them** and commit it; the deployed app
   serves the built file and needs no Node.
 - `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
+- `deploy/` — pull-based auto-deploy: `deploy.sh` run every minute by a systemd timer on the server, deploying whatever the `production` branch points at (README "Deployment"). `tests/test_deploy_script.py` drives it against a throwaway origin.
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/models.json` — the one tracked file describing models: context window, reasoning support, room for more. `MODEL_METADATA_PATH` overrides it.
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)
@@ -61,6 +62,8 @@ Local retrieval: `RETRIEVAL_BACKEND=local`, add docs under `data/raw/`, then `uv
 CLI test: `uv run python scripts/ask.py "Jaký byl význam husitských válek?"`
 
 Tests: `uv run pytest` (Python; the `dev` dependency group and `pythonpath`/`testpaths` come from `pyproject.toml`) and `npm test` (frontend vitest).
+
+- `tests/conftest.py` swaps `.env` for a fixed fake provider before `app.main` is imported. Tests must not depend on `.env`, gitignored files, the network or torch: CI (`.github/workflows/tests.yml`) runs from a clean checkout and installs everything from `uv.lock` except sentence-transformers. Keep torch imports lazy (see `app/rag/embeddings.py`, `app/rag/reranker.py`).
 
 ## WP config, prompts, placeholders
 

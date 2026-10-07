@@ -1,0 +1,13 @@
+[Unit]
+Description=Deploy the avatar app when the production branch moves
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=papacek
+Group=papacek
+WorkingDirectory=/home/papacek/rag-avatar
+ExecStart=/usr/bin/bash /home/papacek/rag-avatar/deploy/deploy.sh
+# Reinstalling dependencies plus the health check can take a few minutes.
+TimeoutStartSec=15min
