@@ -5213,7 +5213,21 @@ async function deleteServerPromptPreset(presetId) {
   }
 }
 
+function confirmPromptDelete(presetId) {
+  const name = getPromptPresetById(presetId)?.name || "";
+  let detail = "Tuto akci nelze vrátit zpět.";
+  if (isServerPromptPreset(presetId)) {
+    detail = isOwnedServerPromptPreset(presetId)
+      ? "Profil je sdílený, zmizí i ostatním uživatelům. Tuto akci nelze vrátit zpět."
+      : "Profil patří jinému uživateli a zmizí všem, i jeho autorovi. Tuto akci nelze vrátit zpět.";
+  }
+  return window.confirm(`Smazat profil „${name}“?\n\n${detail}`);
+}
+
 async function deleteSelectedPromptPreset() {
+  if (!confirmPromptDelete(promptPreset.value)) {
+    return;
+  }
   if (isLocalPromptPreset(promptPreset.value)) {
     localPromptPresets = localPromptPresets.filter((preset) => preset.id !== promptPreset.value);
     persistLocalPromptPresets();
