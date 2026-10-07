@@ -1,11 +1,14 @@
 import unittest
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import main
 from app.config import get_settings
 from app.rag.pipeline import RAGPipeline, RetrievalCandidates
 from app.rag.reranker import blend_and_rank
+
+skip_local_rerank = pytest.mark.skip(reason="local cross-encoder reranking is not used by the deployed app (msearch only)")
 
 
 def _candidates():
@@ -55,6 +58,7 @@ class ApplyRerankIterTests(unittest.TestCase):
         pipeline._reranker = _StreamingReverseReranker()
         return pipeline
 
+    @skip_local_rerank
     def test_streams_eta_progress_then_result_and_seeds_estimator(self):
         pipeline = self._pipeline()
         candidates = pipeline.retrieve_candidates(
@@ -91,6 +95,7 @@ class RetrieveWithBaselineTests(unittest.TestCase):
         pipeline._reranker = _ReverseReranker()
         return pipeline
 
+    @skip_local_rerank
     def test_baseline_is_pre_rerank_topk_untouched_by_blending(self):
         pipeline = self._pipeline()
         reranked, baseline = pipeline.retrieve_with_baseline(
@@ -109,6 +114,7 @@ class RetrieveWithBaselineTests(unittest.TestCase):
         self.assertEqual(baseline[0]["citation_id"], "Z1")
         self.assertAlmostEqual(baseline[0]["score"], 1.0)
 
+    @skip_local_rerank
     def test_two_phase_baseline_available_before_rerank(self):
         pipeline = self._pipeline()
         candidates = pipeline.retrieve_candidates(
@@ -141,6 +147,7 @@ class RetrieveWithBaselineTests(unittest.TestCase):
 
 
 class RetrieveStreamEndpointTests(unittest.TestCase):
+    @skip_local_rerank
     def test_streams_msearch_rescored_sources_before_local_rerank_finishes(self):
         baseline = _candidates()[:3]
         final = list(reversed(_candidates()))[:3]

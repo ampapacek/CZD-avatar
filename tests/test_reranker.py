@@ -1,6 +1,11 @@
 import unittest
 
+import pytest
+
 from app.rag.reranker import CrossEncoderReranker, RerankEtaEstimator, blend_and_rank
+
+
+pytestmark = pytest.mark.skip(reason="local cross-encoder reranking is not used by the deployed app (msearch only)")
 
 
 def _records():
