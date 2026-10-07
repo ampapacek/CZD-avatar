@@ -6389,7 +6389,22 @@ function pulseSourceCardFromCitation(event) {
   window.setTimeout(() => {
     sourceCard.classList.remove("source-pulse");
   }, 1400);
+  // Stacked, the sources are a long way below the sentence that cited them.
+  if (stackedLayoutQuery.matches) {
+    citationReturn.arm(trigger);
+  }
 }
+
+// The width at which styles.css stacks the sources under the answer.
+const stackedLayoutQuery = window.matchMedia("(max-width: 860px)");
+const citationReturnButton = document.querySelector("#citationReturnButton");
+const citationReturn = Avatar.createCitationReturn({
+  button: citationReturnButton,
+  viewportHeight: () => window.innerHeight || document.documentElement.clientHeight,
+});
+citationReturnButton.addEventListener("click", () => citationReturn.returnToMarker());
+// Capture catches the scrolling of the page and of dialogs' own scroll boxes.
+document.addEventListener("scroll", () => citationReturn.update(), { capture: true, passive: true });
 
 // The reverse of pulseSourceCardFromCitation: clicking a source card lights up
 // every superscript in the answer that cites it. Each scope pairs a panel of
