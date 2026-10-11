@@ -4484,44 +4484,72 @@ body[data-theme="dark"] .source-highlight {
     flex: 1 1 140px;
   }
 
-  /* The close button keeps the top-right corner; the storage and batch
-     buttons move under the tabs instead of pushing it to a row of its own. */
+  /* Title, tabs and the close button share the first row; the storage and
+     batch buttons and the author line wrap onto the rows below. The title
+     block and the actions are unwrapped (display: contents) so they can all
+     be ordered as siblings. */
   .history-shell > .history-dialog-header {
-    display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) auto;
-    gap: 8px;
-    padding-top: 12px;
-    padding-bottom: 10px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    padding-top: 10px;
+    padding-bottom: 8px;
   }
 
-  .history-shell > .history-dialog-header > div:first-child {
-    grid-column: 1 / 4;
-    grid-row: 1;
-  }
-
+  .history-shell > .history-dialog-header > div:first-child,
   .history-shell .history-dialog-actions {
     display: contents;
   }
 
+  .history-shell > .history-dialog-header h2 {
+    order: 1;
+    margin: 0;
+  }
+
+  .history-shell .history-tabs {
+    order: 2;
+    margin: 0;
+  }
+
+  /* Tighter tabs keep the close button on the title row at 320 px. */
+  .history-shell .history-tab {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
   .history-shell #closeHistoryButton {
-    grid-column: 4;
-    grid-row: 1;
-    align-self: start;
+    order: 3;
+    margin-left: auto;
   }
 
   #historyStorageButton,
   #historyBatchToggle {
-    grid-row: 2;
     padding: 6px 10px;
     font-size: 13px;
   }
 
-  .history-shell > .history-dialog-header h2 + p {
-    display: none;
+  #historyStorageButton {
+    order: 4;
   }
 
-  .history-tabs {
-    margin-top: 8px;
+  #historyBatchToggle {
+    order: 5;
+  }
+
+  .history-shell .history-author-line {
+    order: 6;
+    margin: 0;
+  }
+
+  .history-shell .history-share-status {
+    order: 7;
+    flex-basis: 100%;
+    margin: 0;
+  }
+
+  .history-shell > .history-dialog-header h2 + p {
+    display: none;
   }
 
   .history-shell .history-share-status:empty {
