@@ -1,12 +1,40 @@
 # CZD-avatar
 
-`czd-avatar` is a web app for asking questions over a document collection. It finds relevant source passages, streams an answer, shows the retrieved documents beside the answer, and keeps citations visible so you can inspect what the answer is based on.
+CZD-avatar is a web app for asking questions over document collections in the
+[CZDEMOS4AI project](https://prg.ai/projekty/czdemos4ai/). It retrieves source
+passages, streams an answer, and shows citations and documents for inspection.
 
-The app is organized around a top-level **WP (work package) selector** (`WP1-historie`, `WP2-média`, `WP3-právo`, `WP4-adiktologie`). Each WP scopes its own built-in prompts, document collections, and optional prepared/random question file. WP1 carries the Czech-history setup; the other WPs ship neutral starter prompts. A few places are still hardcoded for the Czech-history collection (some collection assets, example questions, helper scripts). The underlying RAG pipeline is topic-agnostic.
+**The current setup requires access to the private mSearch service from MAMA AI
+and an OpenAI-compatible LLM provider.** Cloning this repository alone is not
+enough to use the supported setup. The main audience is ÚFAL colleagues and
+deployment operators.
 
-## Quick Start
+The app provides prompts, configurable placeholders, model selection,
+conversation mode, browser history, and answer sharing. It is organized around
+four work packages:
 
-Use Python 3.12. The system `python` command may not exist on this machine, so the examples use `uv`.
+- WP1: history
+- WP2: media
+- WP3: law
+- WP4: addiction studies
+
+WP1 includes Czech-history prompts and assets; the other work packages include
+neutral starter prompts. Retrieval and collection configuration remain tied to
+mSearch, so the app does not currently offer a general interface for arbitrary
+retrieval backends.
+
+## Requirements
+
+- Python 3.12 and [uv](https://docs.astral.sh/uv/)
+- mSearch credentials and access to the relevant collections
+- An API key for an OpenAI-compatible LLM provider
+
+Node.js is needed only for frontend development. The repository includes the
+built frontend bundle.
+
+## Quick start
+
+Create a virtual environment and install the app:
 
 ```bash
 uv venv --python python3.12
@@ -15,558 +43,35 @@ uv pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env`.
+Edit `.env` with your mSearch and LLM provider credentials. See
+[Configuration and LLM providers](docs/configuration.md) for details.
 
-For the default hosted `msearch` flow, define one or more providers in `.env`. A minimal example looks like this:
-
-```env
-LLM_PROVIDER=aiufal
-LLM_MODELS_CACHE_TTL_SECONDS=172800
-LLM_PROVIDERS=aiufal,openrouter,einfra
-
-LLM_PROVIDER_AIUFAL_NAME=AI Ufal
-LLM_PROVIDER_AIUFAL_BASE_URL=https://ai.ufal.mff.cuni.cz/api
-LLM_PROVIDER_AIUFAL_API_KEY=your_ai_ufal_key
-LLM_PROVIDER_AIUFAL_DEFAULT_MODEL=LLM1-A40.llama3.3:latest
-LLM_PROVIDER_AIUFAL_PUBLIC_MODELS=*
-LLM_PROVIDER_AIUFAL_DISCOVER_MODELS=true
-
-LLM_PROVIDER_OPENROUTER_NAME=OpenRouter
-LLM_PROVIDER_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-LLM_PROVIDER_OPENROUTER_API_KEY=your_openrouter_key
-LLM_PROVIDER_OPENROUTER_DEFAULT_MODEL=openrouter/free
-LLM_PROVIDER_OPENROUTER_PUBLIC_MODELS=openrouter/free
-LLM_PROVIDER_OPENROUTER_DISCOVER_MODELS=true
-
-LLM_PROVIDER_EINFRA_NAME=e-infra
-LLM_PROVIDER_EINFRA_BASE_URL=https://llm.ai.e-infra.cz/v1
-LLM_PROVIDER_EINFRA_API_KEY=your_einfra_key
-LLM_PROVIDER_EINFRA_DEFAULT_MODEL=mini
-LLM_PROVIDER_EINFRA_PUBLIC_MODELS=*
-LLM_PROVIDER_EINFRA_DISCOVER_MODELS=true
-
-RETRIEVAL_BACKEND=msearch
-MSEARCH_USERNAME=your_username
-MSEARCH_PASSWORD=your_password
-```
-
-`MSEARCH_BASE_URL`, `MSEARCH_COLLECTION`, `MSEARCH_MODE`, and the other mSearch defaults are already present in `.env.example`.
-
-## LLM Providers
-
-Generation uses OpenAI-compatible chat-completions APIs. You can point the app at any number of compatible providers by giving each one its own block of environment variables.
-
-Each provider can define:
-
-- a display name
-- a base URL
-- an API key
-- a default model
-- a static model list, or `DISCOVER_MODELS=true` to fetch models from `MODELS_URL` or the provider’s `/models` endpoint
-- optional context-window discovery from `MODEL_INFO_URL` or the provider’s `/model/info` endpoint, using `model_info.context_size`
-- an optional public model list for browser use without an API key
-- an optional API key label for the UI
-
-If `LLM_PROVIDER` is set, that provider is selected by default in the UI. If it is empty, the first provider in `LLM_PROVIDERS` is used.
-
-Discovered model lists and the live mSearch collections are fetched at startup and re-fetched in the background every `DISCOVERY_REFRESH_INTERVAL_SECONDS` (default `86400`, one day), so opening the app never waits on them. A failed refresh keeps the previous lists. `LLM_MODELS_CACHE_TTL_SECONDS` and `MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS` (default `172800`) are the request-side fallback for when that refresh keeps failing; the Settings dialog also has an `Obnovit seznam modelů` button that forces an immediate server-side refresh without exposing provider API keys to the browser.
-
-If you also set `ADMIN_PASSWORD`, the browser can enter that shared admin password to unlock the full model list and to modify or delete shared prompt presets owned by another browser (creating a new shared prompt stays open). Without it, only the public models configured for the selected provider appear in the selector. Future public deployments may also require this password for creating shared/server prompts.
-
-Set `LLM_PROVIDER_<ID>_PUBLIC_MODELS=*` to make every resolved model for that provider public. If discovery succeeds, this means all discovered models. If discovery fails, it means the fallback configured models from `MODELS` plus `DEFAULT_MODEL`.
-
-When `DISCOVER_MODELS=true`, discovered models are treated as authoritative. `MODELS` is used only as a fallback if discovery fails, so stale explicit model names do not appear while provider discovery is working.
-
-The unlocked OpenRouter selector defaults to a compact view: latest numeric
-versions of GPT, Gemini, Claude Sonnet/Haiku, and DeepSeek within each recognized
-variant. GPT mini/nano, Sol/Luna/Astra/Terra, GPT-OSS sizes,
-Gemini Pro/Flash/Flash Lite, Claude Sonnet/Haiku, and DeepSeek Pro/Flash/reasoning
-remain separate choices. Generic DeepSeek V-series models share the Pro slot.
-Equal versions prefer stable over preview and unpinned routes over dated
-snapshots; newer previews can replace older stable versions. Batch/free variants,
-GPT models with the `-pro` suffix, image/audio models, Codex, and unfamiliar naming schemes are omitted from this
-view. Public models and the current allowed selection remain visible.
-**Zobrazit v seznamu všechny modely** restores the full allowed catalogue,
-including older versions and other families; it never unlocks non-public models.
-The toggle applies for the current page session. This is a naming-based display
-filter, not a claim that each newer model is better; discovery and model metadata
-still retain the full catalogue. Other providers are unaffected.
-
-Provider API keys go into `LLM_PROVIDER_<ID>_API_KEY`, where `<ID>` is the uppercase provider id from `LLM_PROVIDERS`. For example, `aiufal` uses `LLM_PROVIDER_AIUFAL_API_KEY`, and `openrouter` uses `LLM_PROVIDER_OPENROUTER_API_KEY`.
-
-AI Ufal exposes models at:
-
-```bash
-curl -H "Authorization: Bearer $TOKEN" https://ai.ufal.mff.cuni.cz/api/models | jq ".data[].id"
-```
-
-OpenRouter has the same OpenAI-compatible shape and can usually list models without a key:
-
-```bash
-curl https://openrouter.ai/api/v1/models | jq ".data[].id"
-```
-
-The app filters internal/non-chat model ids matching `rag-*` and `openwebuidocs` from configured and discovered model lists.
-
-## Run The App
-
-Start the API and frontend:
+Start the app:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Open:
+Open http://127.0.0.1:8000.
 
-```text
-http://127.0.0.1:8000
-```
+Select a work package, collection, model, and prompt, then ask a question.
+For WP1, try `Jaký byl význam husitských válek?` and inspect the answer's
+citations and retrieved passages. Ask a question weakly covered by the collection
+and check whether the answer makes its limited evidence clear.
 
-The default experience uses hosted `msearch` retrieval, so you can run the app without ingesting local documents first.
+Prepared and random questions require private per-WP files under
+`data/questions/`. These files are optional and are not included in the repository.
 
-## Usage Analytics
+## Development and tests
 
-Usage analytics are enabled by default and written as append-only monthly JSONL
-files under `logs/events/` (which is gitignored). They record app opens, completed
-or failed turns, actual upstream LLM calls, configuration choices, timings, and
-text lengths. They do not record question text, answer text, prompt text, source
-text, IP addresses, User-Agent strings, or API keys. Questions are represented
-by an unsalted SHA-256 hash plus prepared/default-question classification.
+See [Architecture and development](docs/architecture.md) for development setup,
+tests, and frontend builds.
 
-Configure the writer in `.env`:
+## Documentation
 
-```env
-ANALYTICS_ENABLED=true
-ANALYTICS_DIR=logs/events
-ANALYTICS_INSTANCE_ID=czd-avatar
-```
-
-Retention is indefinite and manual. To inspect all available monthly files:
-
-```bash
-uv run python scripts/usage_report.py
-uv run python scripts/usage_report.py --from 2026-08-01 --wp WP1-historie
-uv run python scripts/usage_report.py --json
-uv run python scripts/usage_report.py --csv > usage.csv
-```
-
-The report skips malformed or unknown-schema lines and prints how many it
-skipped. It supports filters for event, WP, operation, provider, model, endpoint,
-collection, prompt, key source, status, error code, date range, and browser ID.
-
-## Ask A Question
-
-From the browser, try a Czech-history question such as:
-
-- `Jaký byl význam husitských válek?`
-- `Co znamenalo Pražské jaro?`
-
-From the CLI:
-
-```bash
-uv run python scripts/ask.py "Jaký byl význam husitských válek?"
-```
-
-Optional controls. Parameter placeholders are set generically with `--selection name=value` (repeatable); `--length` is a shortcut for `--selection length=value`:
-
-```bash
-uv run python scripts/ask.py "Co znamenala bitva na Bílé hoře pro české země?" \
-  --length long \
-  --selection custom_instructions="Zaměř se na příčiny a důsledky."
-```
-
-## Use A Local Database Instead
-
-If you want to use local Qdrant + BM25 retrieval instead of hosted `msearch`, do this:
-
-1. Set `RETRIEVAL_BACKEND=local` in `.env`.
-2. Put your `.txt`, `.md`, or `.pdf` files under `data/raw/`.
-3. Ingest the files into the local index.
-4. Run the app or ask questions from the CLI.
-
-Example:
-
-```env
-RETRIEVAL_BACKEND=local
-```
-
-```bash
-uv run python scripts/ingest.py --path data/raw
-uvicorn app.main:app --reload
-```
-
-The ingest step creates/updates:
-
-- local Qdrant storage in `data/qdrant/`
-- BM25/debug chunk catalog in `data/processed/chunks.jsonl`
-
-## Add Local Documents
-
-Put `.txt`, `.md`, or `.pdf` files under:
-
-```text
-data/raw/
-```
-
-Text and Markdown files may include simple metadata frontmatter:
-
-```md
----
-title: Bitva na Bílé hoře
-url: https://example.org/source
-source_name: archive
-document_type: article
-historical_period: raný novověk
----
-
-Document text...
-```
-
-## Czech Wikipedia Test Data
-
-Czech Wikipedia is only for testing the current Czech-history collection before your own document collection is ready.
-
-```bash
-uv run python scripts/download_wikipedia.py --limit 100
-```
-
-By default, the script reads the legacy downloader seed file at `data/collections/czech_history/questions/questions.txt`, searches Czech Wikipedia, and saves Markdown files with metadata into `data/raw/wikipedia/`. You can point it at another seed file with `--questions`; the app's own random/prepared questions now live separately under `data/questions/`.
-
-## Ingest Local Documents
-
-```bash
-uv run python scripts/ingest.py --path data/raw
-```
-
-This creates/updates:
-
-- local Qdrant storage in `data/qdrant/`
-- BM25/debug chunk catalog in `data/processed/chunks.jsonl`
-
-## API
-
-API endpoints:
-
-- `GET /health`
-- `GET /settings`
-- `GET /questions/random` (per-WP; reads the private files under `data/questions/`, see [Random Questions](#random-questions))
-- `GET /questions` (per-WP prepared-question list)
-- `POST /llm-providers/refresh`
-- `GET /prompt-presets`
-- `POST /prompt-presets`
-- `DELETE /prompt-presets/{preset_id}`
-- `GET /placeholders`
-- `POST /placeholders`
-- `DELETE /placeholders/{name}`
-- `POST /unlock`
-- `POST /ingest`
-- `POST /retrieve`
-- `POST /chat`
-- `POST /chat/stream`
-
-Example `/chat` body. Parameter placeholders (e.g. `length`, `custom_instructions`) travel as a generic `selections` map; `placeholder_defs` carries the frontend's fully-resolved effective definitions for the placeholders the selected prompt uses (so the server substitutes exactly what the browser configured):
-
-```json
-{
-  "question": "Jaký byl význam husitských válek?",
-  "wp_id": "WP1-historie",
-  "retrieval_backend": "msearch",
-  "selections": {
-    "length": "medium",
-    "custom_instructions": "Focus mainly on causes and consequences."
-  },
-  "placeholder_defs": {
-    "length": {
-      "label": "Délka",
-      "kind": "select",
-      "default": "medium",
-      "options": [
-        {"name": "short", "label": "Krátká", "text": "Odpověz stručně."},
-        {"name": "medium", "label": "Střední", "text": "Odpověz středně dlouze."},
-        {"name": "long", "label": "Dlouhá", "text": "Odpověz podrobněji."}
-      ]
-    }
-  }
-}
-```
-
-`selections` and `placeholder_defs` may be omitted; the server then falls back to the shared `data/placeholders.json` overlay and the `DEFAULT_PLACEHOLDERS` code floor.
-
-## Answer Grounding
-
-The prompt instructs the model to separate:
-
-- claims supported by retrieved chunks,
-- general historical knowledge,
-- uncertainty or insufficient coverage in the retrieved documents.
-
-The model should first decide whether retrieved chunks are actually relevant. It should cite only chunks that support the answer, avoid forced citations from weak matches, and may add general historical context without pretending it came from the retrieved documents.
-
-The answer cites retrieved chunks with Markdown footnotes. In the answer text these appear as simple footnote numbers, while the generated source list keeps stable source ids such as `[Z1]`, `[Z2]`, etc. The frontend displays source metadata and excerpts, highlights cited sources on the right, and lets you expand retrieved chunks.
-
-## Retrieval Controls
-
-The web UI lets you tune retrieval while testing:
-
-- `top-k` from 0 to 50
-- embedding vs. BM25 weighting
-- minimum combined score
-- minimum score relative to the best retrieved chunk
-- cross-encoder reranker weight (0 disables it; moving the slider above 0 enables reranking and warns that it slows retrieval)
-- retrieval backend: `msearch` or `local`
-- mSearch collection, mode, and optional confidence floor
-- retrieve-only mode, which shows chunks without calling the LLM
-- LLM model preset or custom model id
-- context-window size, with known model defaults from `data/models.json`
-- optional custom OpenAI-compatible LLM base URL and API key in the `LLM API` panel
-- editable prompts (see [Prompts And Placeholders](#prompts-and-placeholders))
-
-## Reranking
-
-After first-stage retrieval (`msearch` or `local`), an optional cross-encoder reranker can reorder the candidates. The cross-encoder scores each `(question, chunk)` pair jointly, which is more accurate than the bi-encoder/BM25 first stage but slower, so it only runs on a larger candidate pool (`RERANKER_CANDIDATES`) which is then truncated back to `top-k`.
-
-It is **disabled by default**. Set the `Váha re-rankingu` slider above 0 (or `RERANKER_WEIGHT>0` with `RERANKER_ENABLED=true`) to enable it. The weight blends the reranker score with the first-stage score: `0` ignores the reranker, `1` trusts it entirely, and intermediate values mix both (each signal is min-max normalized across the candidates first). The default model is `BAAI/bge-reranker-v2-m3` (multilingual, covers Czech), run locally. Reranking happens before the conversation/token-budget step, so the chunks dropped to fit the context window are chosen from the reranked order.
-
-### Downloading the model
-
-The model is **never downloaded on demand** — the reranker loads with `local_files_only=True`, so a request can never trigger a multi-gigabyte download, and an end user cannot fetch it from the UI. A **developer must download it ahead of time**; until it is present, `reranker_model_available()` returns false and the rerank controls stay hidden.
-
-Download it once (needs internet, ~2.3 GB):
-
-```bash
-# into the default Hugging Face cache (~/.cache/huggingface/hub)
-python3 -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-reranker-v2-m3')"
-# or with the CLI:
-huggingface-cli download BAAI/bge-reranker-v2-m3
-```
-
-For another server (e.g. air-gapped), download to a directory and point `RERANKER_MODEL` at it:
-
-```bash
-huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir /models/bge-reranker-v2-m3
-# copy /models/bge-reranker-v2-m3 to the target machine, then set in .env:
-#   RERANKER_MODEL=/models/bge-reranker-v2-m3
-```
-
-`reranker_model_available()` accepts either a populated HF cache entry or a local directory path.
-
-When reranking is active, the response also carries the pre-rerank top-k (`baseline_chunks`) — the chunks that would have been shown without the cross-encoder. The Sources panel exposes a **Porovnat s pořadím bez re-rankingu** button that reveals a second column with that baseline ordering, so you can compare what reranking changed.
-
-To hide the reranker's latency, the streaming endpoint (`/chat/stream`) reveals progressively: it emits a `preliminary_sources` event with the first-stage hits as soon as retrieval finishes, then runs the cross-encoder and emits the final `sources` event, which replaces them with the reranked order.
-
-## Configuration
-
-Important `.env` variables:
-
-- `LLM_PROVIDER`
-- `LLM_PROVIDERS`
-- `ADMIN_PASSWORD`
-- `LLM_MODELS_CACHE_TTL_SECONDS`
-- `LLM_PROVIDER_<ID>_NAME`
-- `LLM_PROVIDER_<ID>_BASE_URL`
-- `LLM_PROVIDER_<ID>_API_KEY`
-- `LLM_PROVIDER_<ID>_DEFAULT_MODEL`
-- `LLM_PROVIDER_<ID>_PUBLIC_MODELS`
-- `LLM_PROVIDER_<ID>_MODELS`
-- `LLM_PROVIDER_<ID>_MODELS_URL`
-- `LLM_PROVIDER_<ID>_MODEL_INFO_URL`
-- `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
-- `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
-- `LLM_PROVIDER_<ID>_API_KEY_LABEL`
-- `MODEL_METADATA_PATH` (context windows and reasoning support per model; see `data/models.json`)
-- `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
-- `QDRANT_PATH`
-- `QDRANT_COLLECTION`
-- `EMBEDDING_MODEL`
-- `CHUNK_SIZE`
-- `CHUNK_OVERLAP`
-- `TOP_K`
-- `MIN_SCORE`
-- `MIN_RELATIVE_SCORE`
-- `RETRIEVAL_BACKEND`
-- `RERANKER_ENABLED`
-- `RERANKER_MODEL`
-- `RERANKER_WEIGHT`
-- `RERANKER_CANDIDATES`
-- `RERANKER_MAX_LENGTH`
-- `RERANKER_BATCH_SIZE`
-- `RERANKER_DEVICE`
-- `MSEARCH_BASE_URL`
-- `MSEARCH_USERNAME`
-- `MSEARCH_PASSWORD`
-- `MSEARCH_COLLECTION`
-- `MSEARCH_MAX_RESULTS`
-- `MSEARCH_MODE`
-- `MSEARCH_MIN_CONFIDENCE`
-- `MSEARCH_TIMEOUT`
-- `CONTEXT_WINDOW_TOKENS`
-- `OUTPUT_TOKEN_BUDGET_SHORT`
-- `OUTPUT_TOKEN_BUDGET_MEDIUM`
-- `OUTPUT_TOKEN_BUDGET_LONG`
-- `MIN_PROMPT_CHUNKS`
-- `TOKEN_BUDGET_SAFETY_MARGIN`
-- `CONVERSATION_SUMMARY_TRIGGER_TOKENS`
-- `CONVERSATION_SUMMARY_TRIGGER_MESSAGES`
-- `CONVERSATION_RECENT_MESSAGES`
-- `RAW_DATA_DIR`
-- `CHUNK_CATALOG_PATH`
-- `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
-- `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
-
-`MODEL_METADATA_PATH` replaces the earlier `MODEL_CONTEXT_WINDOWS_PATH` and `MODEL_REASONING_PATH`. It is not just a rename: the two files merged into one, with `models` and `provider_defaults` sections and `context_window` / `max_context_window` / `reasoning` per entry. `data/models.json` documents the shape in its own `_comment`.
-
-## Basic Test Run
-
-```bash
-uv run python scripts/download_wikipedia.py --limit 20
-uv run python scripts/ingest.py --path data/raw
-uv run python scripts/ask.py "Jaký byl význam husitských válek?"
-uvicorn app.main:app --reload
-```
-
-Then test in the browser:
-
-- WP `WP1-historie`, prompt `Učitel`, length `Střední`
-- question `Jaký byl význam husitských válek?`
-- confirm the answer is Czech and shows citations
-- ask a question weakly covered by the indexed files and confirm the answer marks limited evidence
-
-## Logs
-
-Each server or script start creates a new timestamped log file in:
-
-```text
-logs/
-```
-
-Examples:
-
-```text
-logs/api-20260424-104255.log
-logs/ingest-20260424-104501.log
-logs/ask-20260424-104712.log
-logs/download-wikipedia-20260424-104900.log
-```
-
-Console output stays shorter, while the file logs persist questions, retrieval metadata, selected model, response timing, and generated answers.
-
-## Prompts And Placeholders
-
-The app picks a **WP** first; that scopes which prompts and collections you see. Selecting a WP loads its default prompt and collection.
-
-### Prompts: local vs shared
-
-A prompt is one concept to the UI (the dropdown merges built-ins + local + shared), but has two storage lifecycles:
-
-- **Built-in prompts** ship read-only in code (`app/rag/wp_config.py`), including the WP1 personas (`Učitel`/`Historik`/`Laik`). Editing their prompt text is a **save as new**. An administrator can attach a transformation-only override to a built-in prompt from Settings without copying or replacing its prompt text.
-- **Local prompts** live in browser `localStorage` (key `czdemos4ai-local-prompt-presets`). They are private to that browser and need no password to edit or delete.
-- **Shared/server prompts** live in `data/prompt_presets.json` (gitignored mutable overlay; may be absent). The same file stores built-in transformation overrides under `builtin_overrides`; these are merged onto the code-defined prompt at runtime. Creating a shared prompt is open. Updating or deleting one requires either an `owner_id` match (the browser that created it) or the shared `ADMIN_PASSWORD`; changing a built-in override always requires the admin password.
-
-### Placeholders
-
-Every user-facing template variable is a declared **placeholder**, written as `{name}` in a prompt. Two groups:
-
-- **System placeholders** — filled automatically by the server, no control: `{question}`, `{retrieved_snippets}`, `{current_date}` (server-local date).
-- **Parameter placeholders** — surfaced as a control on the main page, data-driven from the tokens the selected prompt uses. Each has a `kind`:
-  - `select` — named options `{name, label, text}`; substitutes the chosen option's `text` (e.g. `{length}` → short/medium/long).
-  - `text` — free text; substitutes the typed string, or a `default` when empty (e.g. `{custom_instructions}` → `Žádné.`). Omitted if the placeholder is absent from the template.
-
-A placeholder definition is taken **wholesale** from the most specific source that declares it (options are never merged across sources). Resolution order, most specific first:
-
-1. **inline on the selected prompt** (a preset's or built-in's inline `placeholders` map)
-2. **browser-local global defs** (`localStorage` key `czdemos4ai-local-placeholder-defs`)
-3. **shared overlay** (`data/placeholders.json`, gitignored mutable overlay; may be absent; edits need `owner_id` or `ADMIN_PASSWORD`)
-4. **code-default floor** (`DEFAULT_PLACEHOLDERS` in `app/rag/placeholders.py`, ships `length` + `custom_instructions`)
-5. otherwise the token is **undeclared**: it renders literally and the UI warns — it never crashes.
-
-The chat request carries `selections` (a generic `{name: value}` map) and `placeholder_defs` (the frontend's fully-resolved effective defs for the placeholders the prompt uses), so the server is stateless about `localStorage` and substitutes exactly what the browser configured.
-
-> Inline placeholder defs edited on a **server** preset persist only when the prompt is saved; the UI shows an amber warning until then.
-
-Browser state lives in `localStorage`. Important keys include `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, `czdemos4ai-history-v2`, `czdemos4ai-conversations`, `czdemos4ai-llm-settings`, `czdemos4ai-token-budget`, `czdemos4ai-browser-owner-id`, and `theme`.
-
-## Random Questions
-
-The "Náhodná otázka" button (`GET /questions/random?wp_id=...`) and the "Připravené otázky" dropdown (`GET /questions?wp_id=...`) read a per-WP plain-text file (one question per line) configured by `questions_path` in `app/rag/wp_config.py`:
-
-- `data/questions/wp1-historie.txt`
-- `data/questions/wp2-media.txt`
-- `data/questions/wp3-pravo.txt`
-- `data/questions/wp4-adiktologie.txt`
-
-These files are **private and gitignored** (`data/questions/` in `.gitignore`), so they are not in the repo. They must be provisioned separately on each machine/deploy (rsync, mounted volume, or your data-deploy step). When a WP's file is missing, `GET /questions/random` and `GET /questions` return a localized 404 and the rest of the app keeps working — only that WP's random-question button and prepared-questions dropdown are unavailable.
-
-## Collections And Prompts
-
-For now, `data/raw/` acts as the active indexed document collection for local retrieval. Built-in prompts and placeholder defaults ship in code (`app/rag/wp_config.py`, `app/rag/placeholders.py`). The Czech-history app metadata and UI assets are kept under `data/collections/czech_history/`.
-
-Collection-specific app assets currently live under `data/collections/czech_history/`:
-
-- topic list: `topics/topics.txt`
-- UFAL logo asset: `app/static/logo_ufal_110u.png`
-
-Random-question seed files have moved to the private, per-WP files under `data/questions/` (see [Random Questions](#random-questions)).
-
-## Frontend Development
-
-The deployed app serves committed static JavaScript and does not need Node.js. When changing the Markdown renderer, install its development dependencies and rebuild the browser bundle locally:
-
-```bash
-npm install
-npm test
-npm run build
-```
-
-Renderer source and focused tests live under `frontend/`; the generated bundle is `app/static/markdown-renderer.bundle.js`.
-
-The app can be adapted to any topic, but this is not fully configuration-driven yet. When creating a new avatar/domain, check and update the default prompts, random-question file, frontend labels, collection asset paths in `app/main.py`, example questions, and any collection-specific helper scripts. Future versions should make collections and prompts selectable, for example by using separate folders/config files per avatar.
-
-## Tests
-
-```bash
-uv run pytest
-npm test
-```
-
-The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake provider, so they behave the same on every machine and never see real API keys. GitHub Actions (`.github/workflows/tests.yml`) runs both suites on every push and pull request from a clean checkout, without torch and without any gitignored file, and fails when `app/static/avatar.bundle.js` was not rebuilt after a change under `frontend/`.
-
-## Deployment
-
-The server pulls; nothing pushes to it. A systemd timer runs `deploy/deploy.sh` every minute. When the `production` branch on GitHub points at a new commit, the script checks it out, reinstalls dependencies if `pyproject.toml` or `uv.lock` changed, restarts `czdemos.service` and waits up to 90 s for `/settings` to answer. If it does not, the script goes back to the previous commit and skips the bad one until the next push. It refuses to deploy over files edited by hand on the server. `.env`, `data/` and other untracked files are left alone.
-
-Deploy from any machine with push access:
-
-```bash
-git push origin main:production                         # what is on main
-git push origin <sha>:production                        # an older commit, keeping production behind main
-git push --force-with-lease origin <sha>:production     # roll back
-```
-
-Watch it on the server with `journalctl -u avatar-deploy -f`.
-
-One-time setup on the server, in `/home/papacek/rag-avatar`:
-
-```bash
-git remote set-url origin https://github.com/ampapacek/CZD-avatar.git
-git pull                                # brings in deploy/
-echo 'papacek ALL=(root) NOPASSWD: /usr/bin/systemctl restart czdemos.service' | sudo tee /etc/sudoers.d/avatar-deploy
-sudo chmod 440 /etc/sudoers.d/avatar-deploy && sudo visudo -cf /etc/sudoers.d/avatar-deploy
-sudo -n systemctl restart czdemos.service   # must work without a password prompt
-sudo cp deploy/avatar-deploy.service deploy/avatar-deploy.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now avatar-deploy.timer
-```
-
-Paths, user and service name are defaults at the top of `deploy/deploy.sh` and in the two unit files; change them there for another server.
-
-## Notes For Future Extensions
-
-- Configure additional providers by adding another `LLM_PROVIDER_<ID>_*` block.
-- Manage context-window size more explicitly for providers with large model catalogs:
-  - the Settings dialog already has manual token-budget/context-window controls
-  - later, derive defaults from the selected model and its known maximum context length
-  - for now, keep the retrieval set small, roughly Top10, and trim it to the model's context window
-  - ideally use the same tokenizer as the selected model when counting tokens
-- Add richer metadata extraction for your real historical archive.
-- Add evaluation sets and automated citation-grounding checks.
-- Add selectable collections and system prompts for different avatars.
+- [Configuration and LLM providers](docs/configuration.md)
+- [Prompts, placeholders, and work packages](docs/prompts.md)
+- [Retrieval, reranking, and local reference implementation](docs/retrieval.md)
+- [Usage analytics and logging](docs/analytics.md)
+- [Deployment](docs/deployment.md)
+- [Architecture and development conventions](docs/architecture.md)

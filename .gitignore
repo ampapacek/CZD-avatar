@@ -37,3 +37,6 @@ data/collections/czech_history/topics/
 data/collections/czech_history/wiki/
 
 scripts/run_wp1_experiments.py
+
+# Local agent instructions; shared technical guidance lives in docs/.
+/agents.md
