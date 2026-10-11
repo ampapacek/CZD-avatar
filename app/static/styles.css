@@ -3970,31 +3970,6 @@ body[data-theme="dark"] .source-highlight {
     font-size: 14px;
   }
 
-  /* The search box stays; the rest of the filters fold behind a toggle that
-     carries the "shown of all" count. */
-  .history-filters-toggle {
-    display: block;
-    flex: none;
-    padding: 8px 12px;
-    font-size: 14px;
-    white-space: nowrap;
-  }
-
-  .history-dialog:not([data-filters="open"]) .history-filters > select,
-  .history-filter-count {
-    display: none;
-  }
-
-  /* Search and the toggle share the first row; the selects wrap below. */
-  #historyFilterText {
-    order: -2;
-    flex: 1 1 calc(100% - 140px);
-  }
-
-  .history-filters-toggle {
-    order: -1;
-  }
-
   .history-dialog[data-pane="detail"] .history-detail {
     padding-top: 10px;
   }
@@ -4119,6 +4094,88 @@ body[data-theme="dark"] .source-highlight {
     top: 0;
     z-index: 1;
     background: var(--surface-3);
+  }
+}
+
+/* The search box stays; the rest of the filters fold behind a toggle that
+   carries the "shown of all" count. Narrow screens need it for width, short
+   ones (a small laptop, a phone on its side) for height. */
+@media (max-width: 860px), (max-height: 760px) {
+  .history-filters-toggle {
+    display: block;
+    flex: none;
+    padding: 8px 12px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .history-dialog:not([data-filters="open"]) .history-filters > select,
+  .history-filter-count {
+    display: none;
+  }
+
+  /* Search and the toggle share the first row; the selects wrap below. */
+  #historyFilterText {
+    order: -2;
+    flex: 1 1 calc(100% - 140px);
+  }
+
+  .history-filters-toggle {
+    order: -1;
+  }
+}
+
+/* Short but not phone-narrow: on a small laptop the centred dialog's margin
+   and its stacked header left the list a few rows. History takes the whole
+   screen and the header becomes one row (title, tabs, author, tools). The
+   phone block below handles narrow screens, so it is left out of this one. */
+@media (max-height: 760px) and (min-width: 561px) {
+  #historyDialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: var(--bg);
+    background-image: linear-gradient(var(--surface), var(--surface));
+  }
+
+  .history-list-panel,
+  .history-detail {
+    overscroll-behavior: contain;
+  }
+
+  .history-shell > .history-dialog-header {
+    align-items: center;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .history-shell > .history-dialog-header > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+  }
+
+  .history-shell > .history-dialog-header h2 {
+    margin: 0;
+  }
+
+  .history-shell > .history-dialog-header h2 + p,
+  .history-shell .history-share-status:empty {
+    display: none;
+  }
+
+  .history-shell .history-tabs,
+  .history-shell .history-author-line {
+    margin: 0;
+  }
+
+  .history-shell .history-dialog-actions button {
+    white-space: nowrap;
   }
 }
 
