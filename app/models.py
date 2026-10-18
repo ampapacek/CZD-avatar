@@ -273,6 +273,7 @@ class Source(BaseModel):
     document_url: str | None = None
     source_url: str | None = None
     source_name: str | None = None
+    source_citation: str | None = None
     score: float | None = None
 
 

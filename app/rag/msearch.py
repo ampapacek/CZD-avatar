@@ -175,7 +175,12 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
             continue
 
         url = _string(document.get("url")).replace("https://storage.ufal.mff.cuni.cz//", "https://storage.ufal.mff.cuni.cz/")
-        title = _string(document.get("title")) or _string(document.get("Název")) or display_id or "mSearch dokument"
+        # `Název` is the collection-level name curated in MAMA (e.g. "Archiv
+        # časopisu Soudobé dějiny"); `title` is usually just the file name. Only
+        # some collections carry `Název` and `Citace`; `Citace` is often empty
+        # even when `Název` is set.
+        title = _string(document.get("Název")) or _string(document.get("title")) or display_id or "mSearch dokument"
+        source_citation = _string(document.get("Citace")) or None
         page_number = _page_number(document.get("page_number"))
         url = _url_with_page(url, page_number)
         # Which mSearch channel found the hit: "sem", "key" or, in hybrid mode,
@@ -199,6 +204,7 @@ def _records_from_response(data: dict[str, Any], limit: int) -> list[dict[str, A
                     "document_url": url,
                     "source_url": url,
                     "source_name": "mSearch",
+                    "source_citation": source_citation,
                     "retrieval_channel": retrieval_channel,
                 },
                 "score": score,

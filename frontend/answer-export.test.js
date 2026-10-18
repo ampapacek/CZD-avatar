@@ -39,6 +39,25 @@ describe("answerForCopy", () => {
     );
   });
 
+  it("uses the full citation in place of the title when a source has one", () => {
+    const cited = [
+      {
+        citation_id: "Z1",
+        title: "Svazek StB Jako Historický Pramen",
+        source_citation: "Tomek, P. (2005). Svazek StB jako historicky pramen. Soudobe Dejiny, 12(1), 208–214.",
+        page_number: 3,
+      },
+    ];
+    expect(answerForCopy("Veta.[^Z1]", cited, { includeSources: true })).toBe(
+      [
+        "Veta.[1]",
+        "",
+        "Zdroje:",
+        "1. Tomek, P. (2005). Svazek StB jako historicky pramen. Soudobe Dejiny, 12(1), 208–214., str. 3",
+      ].join("\n"),
+    );
+  });
+
   it("omits the source key when the answer cites nothing", () => {
     expect(answerForCopy("Odpověď bez citací.", sources, { includeSources: true })).toBe(
       "Odpověď bez citací.",

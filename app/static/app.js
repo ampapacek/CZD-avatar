@@ -5800,6 +5800,7 @@ function chunksToSources(chunks) {
     document_url: chunk.metadata?.document_url,
     source_url: chunk.metadata?.source_url,
     source_name: chunk.metadata?.source_name,
+    source_citation: chunk.metadata?.source_citation,
     score: chunk.score,
   }));
 }
@@ -6187,12 +6188,20 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
       const source = entry.source;
       const chunk = chunkById.get(source.chunk_id);
       const title = escapeHtml(source.title || "Neznámý dokument");
-      const path = escapeHtml(source.source_path_display || trimSourcePath(source.source_path || ""));
-      const page = source.page_number ? ` · str. ${source.page_number}` : "";
+      // mSearch ids are storage paths (version folder, `_page_N` suffix) that
+      // mean nothing next to the title; the card keeps only the page and links.
+      const path =
+        source.source_kind === "msearch"
+          ? ""
+          : escapeHtml(source.source_path_display || trimSourcePath(source.source_path || ""));
+      const page = source.page_number ? `str. ${source.page_number}` : "";
+      const citationText = source.source_citation || chunk?.metadata?.source_citation || "";
+      const citationLine = citationText ? `<p class="source-citation">${escapeHtml(citationText)}</p>` : "";
       const documentUrl = source.document_url || source.url;
       const sourceUrl = source.source_url && source.source_url !== documentUrl ? source.source_url : null;
-      const url = documentUrl ? ` · <a href="${escapeHtml(documentUrl)}" target="_blank" rel="noreferrer">Dokument</a>` : "";
-      const metaUrl = sourceUrl ? ` · <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">Zdroj</a>` : "";
+      const url = documentUrl ? `<a href="${escapeHtml(documentUrl)}" target="_blank" rel="noreferrer">Dokument</a>` : "";
+      const metaUrl = sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">Zdroj</a>` : "";
+      const locationLine = [path, page, url, metaUrl].filter(Boolean).join(" · ");
       const fullText = chunk?.text || "";
       const excerptText = fullText.slice(0, 420);
       const excerpt = highlightText(excerptText, highlightTerms);
@@ -6222,7 +6231,8 @@ function renderSourceCards(container, sources, chunks, highlightQuery, layout, i
       return `
         <article class="source${citedClass}${usedClass}" id="${escapeHtml(idPrefix)}-${escapeHtml(citationId)}" data-citation-id="${escapeHtml(citationId)}">
           <strong>${citeButton}${title} ${trimmedBadge}${omittedBadge}</strong>
-          <p>${path}${page}${url}${metaUrl}</p>
+          ${citationLine}
+          ${locationLine ? `<p>${locationLine}</p>` : ""}
           <p class="score">${escapeHtml(scoreLine)}</p>
           <p class="excerpt">${excerpt}${excerptText.length >= 420 ? "..." : ""}</p>
           ${

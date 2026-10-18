@@ -19,9 +19,12 @@ function citationNumbers(text, sources) {
   return new Map(ordered.map((citationId, index) => [citationId, index + 1]));
 }
 
-/** One source line: "1. Titul, str. 12 — https://…" */
+/**
+ * One source line: "1. Titul, str. 12 — https://…". A full citation, when the
+ * source has one, replaces the title: it already names the work.
+ */
 function sourceLine(number, source) {
-  const parts = [source.title || source.citation_id || "Neznámý dokument"];
+  const parts = [source.source_citation || source.title || source.citation_id || "Neznámý dokument"];
   if (source.page_number) {
     parts.push(`str. ${source.page_number}`);
   }

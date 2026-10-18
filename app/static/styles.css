@@ -3246,6 +3246,11 @@ body[data-theme="dark"] .source.used-source strong {
   overflow-wrap: anywhere;
 }
 
+.source .source-citation {
+  margin-bottom: 2px;
+  font-style: italic;
+}
+
 .source .excerpt {
   margin-top: 8px;
   color: var(--text);
@@ -3381,7 +3386,7 @@ body[data-theme="dark"] .source-highlight {
 }
 
 .score,
-.source > p:not(.excerpt):not(.full-chunk),
+.source > p:not(.excerpt):not(.full-chunk):not(.source-citation),
 .source-cite-btn,
 .source-badge,
 .sources-count,

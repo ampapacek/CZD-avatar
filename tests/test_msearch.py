@@ -6,6 +6,7 @@ from app.config import Settings, get_settings
 from app.rag import msearch
 from app.rag.msearch import MSearchRetriever, _group_collections_by_prefix, _records_from_response
 from app.rag.pipeline import RAGPipeline
+from app.rag.prompts import format_context
 
 
 # Shape mirrors a real mSearch hybrid response: when `highlight: true` is sent,
@@ -41,6 +42,86 @@ KEYWORD_HIT_RESPONSE = {
         }
     ]
 }
+
+
+# Shapes from live `wp1-histoedu-v2026-02` hits (2026-10-18): `Název` is the
+# collection name, `Citace` a full citation that is often empty. Older collections
+# carry neither field, and `title` is just the file name.
+NAMED_COLLECTION_RESPONSE = {
+    "documents": [
+        {
+            "document_id": "doc-cited",
+            "score": 0.9,
+            "source": "sem",
+            "document": {
+                "id": "lib:/v2026-02/svazek-stb-jako-historicky-pramen/tomek.pdf_page_3",
+                "title": "tomek.pdf",
+                "file_name": "tomek.pdf",
+                "page_number": 3,
+                "Název": "Svazek StB Jako Historický Pramen",
+                "Citace": "Tomek, P. (2005). Svazek StB jako historicky pramen. Soudobe Dejiny, 12(1), 208–214.",
+                "content": "Svazky StB jsou historickým pramenem, který vyžaduje kritický přístup badatele.",
+            },
+        },
+        {
+            "document_id": "doc-named",
+            "score": 0.8,
+            "source": "key",
+            "document": {
+                "id": "lib:/v2026-02/soudobe-dejiny-cele/2015-03.pdf_page_232",
+                "title": "2015-03.pdf",
+                "file_name": "2015-03.pdf",
+                "page_number": 232,
+                "Citace": "",
+                "Název": "Archiv časopisu Soudobé dějiny",
+                "content": "Soudobé dějiny přinášejí studie o normalizaci a jejích společenských dopadech.",
+            },
+        },
+        {
+            "document_id": "doc-plain",
+            "score": 0.7,
+            "source": "sem",
+            "document": {
+                "id": "lib:/zdroje/73/rozdeleni_minulosti.pdf_page_90",
+                "title": "rozdeleni_minulosti.pdf",
+                "file_name": "rozdeleni_minulosti.pdf",
+                "page_number": 90,
+                "content": "Rozděleni minulostí popisuje vytváření politických identit po roce 1989.",
+            },
+        },
+    ]
+}
+
+
+class MSearchCollectionNameTests(unittest.TestCase):
+    def test_collection_name_becomes_title_and_citation_is_carried(self) -> None:
+        records = _records_from_response(NAMED_COLLECTION_RESPONSE, limit=10)
+        cited, named, plain = (record["metadata"] for record in records)
+
+        self.assertEqual(cited["title"], "Svazek StB Jako Historický Pramen")
+        self.assertTrue(cited["source_citation"].startswith("Tomek, P. (2005)."))
+
+        self.assertEqual(named["title"], "Archiv časopisu Soudobé dějiny")
+        self.assertIsNone(named["source_citation"])
+
+        self.assertEqual(plain["title"], "rozdeleni_minulosti.pdf")
+        self.assertIsNone(plain["source_citation"])
+
+    def test_msearch_citation_is_kept_out_of_the_prompt(self) -> None:
+        records = _records_from_response(NAMED_COLLECTION_RESPONSE, limit=10)
+        context = format_context(records)
+
+        self.assertIn("Svazek StB Jako Historický Pramen", context)
+        self.assertNotIn("Citace zdroje", context)
+        self.assertNotIn("Tomek, P. (2005)", context)
+
+    def test_local_citation_still_reaches_the_prompt(self) -> None:
+        chunk = {
+            "citation_id": "Z1",
+            "text": "Text.",
+            "metadata": {"title": "Kniha", "source_citation": "Autor, A. (2020). Kniha."},
+        }
+        self.assertIn("Citace zdroje: Autor, A. (2020). Kniha.", format_context([chunk]))
 
 
 class MSearchTextTests(unittest.TestCase):

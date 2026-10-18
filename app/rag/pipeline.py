@@ -1050,5 +1050,6 @@ def _source_from_chunk(record: dict[str, Any]) -> Source:
         document_url=metadata.get("document_url"),
         source_url=metadata.get("source_url"),
         source_name=metadata.get("source_name"),
+        source_citation=metadata.get("source_citation"),
         score=float(record.get("score") or 0.0),
     )

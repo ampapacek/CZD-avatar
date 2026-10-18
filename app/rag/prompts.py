@@ -234,7 +234,9 @@ def format_context(chunks: list[dict[str, Any]]) -> str:
         title = metadata.get("title") or "Neznámý dokument"
         source_path = metadata.get("source_path") or ""
         source_name = metadata.get("source_name")
-        source_citation = metadata.get("source_citation")
+        # mSearch citations are shown to the reader only, not to the model, for
+        # now (see notes.md); local-backend citations still reach the prompt.
+        source_citation = None if metadata.get("source_kind") == "msearch" else metadata.get("source_citation")
         page = metadata.get("page_number")
         page_label = f", str. {page}" if page else ""
         header_parts = [f"[{citation_id}] {title}{page_label} ({source_path})"]

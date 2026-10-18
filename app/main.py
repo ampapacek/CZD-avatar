@@ -1944,5 +1944,6 @@ def _serialize_source(chunk: dict[str, object]) -> dict[str, object]:
         "document_url": metadata.get("document_url"),
         "source_url": metadata.get("source_url"),
         "source_name": metadata.get("source_name"),
+        "source_citation": metadata.get("source_citation"),
         "score": float(chunk.get("score") or 0.0),
     }
