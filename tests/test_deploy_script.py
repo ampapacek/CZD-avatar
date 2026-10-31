@@ -14,7 +14,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "deploy.sh"
+DEPLOY_DIR = Path(__file__).resolve().parents[1] / "deploy"
+SCRIPT = DEPLOY_DIR / "deploy.sh"
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "Test",
@@ -161,6 +162,55 @@ class DeployScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.head(), second)
         self.assertTrue((self.server / "usage.csv").exists())
+
+    def test_repo_dir_defaults_to_the_checkout_holding_the_script(self) -> None:
+        (self.server / "deploy").mkdir()
+        shutil.copy(SCRIPT, self.server / "deploy" / "deploy.sh")
+        second = self.commit({"app.py": "v2\n"})
+        self.push_production(second)
+        env = {
+            **os.environ,
+            **GIT_ENV,
+            "RESTART_CMD": "true",
+            "INSTALL_CMD": "true",
+            "HEALTH_CMD": "true",
+        }
+        env.pop("REPO_DIR", None)
+        result = subprocess.run(
+            ["bash", str(self.server / "deploy" / "deploy.sh")],
+            cwd=self.tmp, env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.head(), second)
+
+
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+class InstallScriptTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.checkout = self.tmp / "czd-demo"
+        shutil.copytree(DEPLOY_DIR, self.checkout / "deploy")
+
+    def dry_run(self) -> str:
+        result = subprocess.run(
+            ["bash", str(self.checkout / "deploy" / "install.sh"), "--dry-run"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_units_point_at_the_checkout(self) -> None:
+        out = self.dry_run()
+        self.assertNotRegex(out, r"@[A-Z_]+@")
+        self.assertIn(f"WorkingDirectory={self.checkout}\n", out)
+        self.assertIn(f"ExecStart=/usr/bin/bash {self.checkout}/deploy/deploy.sh\n", out)
+        self.assertIn(f"EnvironmentFile=-{self.checkout}/deploy/deploy.env\n", out)
+        self.assertIn("NOPASSWD: /usr/bin/systemctl restart czdemos.service", out)
+
+    def test_service_comes_from_deploy_env(self) -> None:
+        (self.checkout / "deploy" / "deploy.env").write_text("SERVICE=czd-demo.service\n")
+        self.assertIn("NOPASSWD: /usr/bin/systemctl restart czd-demo.service", self.dry_run())
 
 
 if __name__ == "__main__":

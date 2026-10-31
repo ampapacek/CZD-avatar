@@ -8,13 +8,15 @@
 # the bad commit so it is not retried every minute; a new push clears that.
 #
 # Every setting can be overridden from the environment (the tests do this).
+# On a server, the systemd unit loads them from deploy/deploy.env.
 
 set -uo pipefail
 
-REPO_DIR=${REPO_DIR:-/home/papacek/rag-avatar}
+# The checkout this script lives in.
+REPO_DIR=${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 DEPLOY_BRANCH=${DEPLOY_BRANCH:-production}
 SERVICE=${SERVICE:-czdemos.service}
-UV=${UV:-/home/papacek/.local/bin/uv}
+UV=${UV:-$(command -v uv || echo "$HOME/.local/bin/uv")}
 RESTART_CMD=${RESTART_CMD:-sudo -n systemctl restart $SERVICE}
 INSTALL_CMD=${INSTALL_CMD:-$UV pip install --quiet --python .venv/bin/python -e .}
 HEALTH_URL=${HEALTH_URL:-http://127.0.0.1/settings}

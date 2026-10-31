@@ -121,7 +121,7 @@ The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake 
   **Rebuild the bundle after editing any of them** and include it with source changes; the deployed app
   serves the built file and needs no Node.
 - `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
-- `deploy/` — pull-based auto-deploy: `deploy.sh` run every minute by a systemd timer on the server, deploying whatever the `production` branch points at (see [Deployment](deployment.md)). `tests/test_deploy_script.py` drives it against a throwaway origin.
+- `deploy/` — pull-based auto-deploy: `deploy.sh` run every minute by a systemd timer that `install.sh` sets up on the server, deploying whatever the `production` branch points at (see [Deployment](deployment.md)). `tests/test_deploy_script.py` drives it against a throwaway origin.
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/models.json` — the one tracked file describing models: context window, reasoning support, room for more. `MODEL_METADATA_PATH` overrides it.
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)

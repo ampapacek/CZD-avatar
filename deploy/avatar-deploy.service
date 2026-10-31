@@ -5,9 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=papacek
-Group=papacek
-WorkingDirectory=/home/papacek/rag-avatar
-ExecStart=/usr/bin/bash /home/papacek/rag-avatar/deploy/deploy.sh
+# deploy/install.sh fills in the user and paths when it installs this unit.
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO_DIR@
+EnvironmentFile=-@REPO_DIR@/deploy/deploy.env
+ExecStart=/usr/bin/bash @REPO_DIR@/deploy/deploy.sh
 # Reinstalling dependencies plus the health check can take a few minutes.
 TimeoutStartSec=15min

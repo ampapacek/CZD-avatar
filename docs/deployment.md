@@ -16,17 +16,16 @@ git push --force-with-lease origin <sha>:production     # roll back
 
 Watch it on the server with `journalctl -u avatar-deploy -f`.
 
-One-time setup on the server, in `/home/papacek/rag-avatar`:
+One-time setup on the server, in the checkout the app runs from (`/home/papacek/rag-avatar` on czdemos-avatar):
 
 ```bash
 git remote set-url origin https://github.com/ampapacek/CZD-avatar.git
 git pull                                # brings in deploy/
-echo 'papacek ALL=(root) NOPASSWD: /usr/bin/systemctl restart czdemos.service' | sudo tee /etc/sudoers.d/avatar-deploy
-sudo chmod 440 /etc/sudoers.d/avatar-deploy && sudo visudo -cf /etc/sudoers.d/avatar-deploy
+cp deploy/deploy.env.example deploy/deploy.env   # optional: only for settings that differ
+sudo deploy/install.sh                  # units + sudoers rule for this checkout and your user
 sudo -n systemctl restart czdemos.service   # must work without a password prompt
-sudo cp deploy/avatar-deploy.service deploy/avatar-deploy.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now avatar-deploy.timer
 ```
 
-Paths, user and service name are defaults at the top of `deploy/deploy.sh` and in the two unit files; change them there for another server.
+`deploy/install.sh` writes `avatar-deploy.service`, `avatar-deploy.timer` and `/etc/sudoers.d/avatar-deploy` with the checkout's path and the user who ran `sudo`, then enables the timer. `deploy/install.sh --dry-run` prints them without installing anything.
+
+Per-server settings go in `deploy/deploy.env` (untracked; see `deploy/deploy.env.example`): the branch to follow, the app's systemd service, the health-check URL and the path to `uv`. The service loads that file; `deploy.sh` finds its checkout from its own location. Re-run `sudo deploy/install.sh` after changing `SERVICE` or moving the checkout.
