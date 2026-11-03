@@ -237,6 +237,22 @@ class PlaceholderEndpointTests(unittest.TestCase):
         )
         self.assertEqual(admin_update.status_code, 200, admin_update.text)
 
+    def test_name_variants_cannot_bypass_checks(self) -> None:
+        # Stored as "length" / "my_var", so the checks must see those names too.
+        for name in ("LENGTH ", "Length!"):
+            response = self.client.post(
+                "/placeholders", json={"name": name, "label": "EVIL", "kind": "text", "owner_id": "mallory"}
+            )
+            self.assertEqual(response.status_code, 403, name)
+        self._create("my var", owner_id="alice")
+        hijack = self.client.post(
+            "/placeholders", json={"name": "My-Var", "label": "EVIL", "kind": "text", "owner_id": "mallory"}
+        )
+        self.assertEqual(hijack.status_code, 403)
+        self.assertEqual(
+            self.client.post("/placeholders", json={"name": "!!", "label": "x", "kind": "text"}).status_code, 400
+        )
+
     def test_get_returns_saved(self) -> None:
         self._create("tone", owner_id="owner-a")
         response = self.client.get("/placeholders")

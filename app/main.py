@@ -86,6 +86,7 @@ from app.rag.placeholders import (
     load_placeholders,
     placeholder_def_from_record,
     placeholder_defs_from_records,
+    placeholder_name,
     save_placeholder,
 )
 from app.rag.llm_providers import (
@@ -1226,7 +1227,9 @@ def get_placeholders(owner_id: str | None = None) -> list[Placeholder]:
 
 @app.post("/placeholders", response_model=Placeholder)
 def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
-    name = request.name.strip()
+    # Checked under the name it will be stored as, so "LENGTH " cannot slip past
+    # the checks for "length".
+    name = placeholder_name(request.name)
     if not name:
         raise HTTPException(status_code=400, detail="Placeholder name is required.")
     existing = _find_placeholder(name)

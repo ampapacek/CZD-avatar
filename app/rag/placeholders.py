@@ -219,6 +219,11 @@ def _normalize_options(value: Any) -> list[dict[str, str]]:
     return options
 
 
+def placeholder_name(value: str) -> str:
+    """The form a name is stored under; empty when nothing usable is left."""
+
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", value.strip().lower()).strip("_")
+
+
 def _slugify(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", value.strip().lower()).strip("_")
-    return slug or f"placeholder_{int(datetime.now(timezone.utc).timestamp())}"
+    return placeholder_name(value) or f"placeholder_{int(datetime.now(timezone.utc).timestamp())}"
