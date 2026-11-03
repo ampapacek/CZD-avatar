@@ -1194,7 +1194,8 @@ async function loadSettings() {
 // generator stop retrieval / reranking / generation at its next yield.
 let activeQueryController = null;
 
-async function runQuery(retrieveOnlyMode) {
+// `bypassCache`: "Vygenerovat znovu" after an answer from the answer cache.
+async function runQuery(retrieveOnlyMode, { bypassCache = false } = {}) {
   const controller = new AbortController();
   const turnId = activeQueryTransformTurnId() || newAnalyticsId();
   activeQueryController = controller;
@@ -1304,7 +1305,7 @@ async function runQuery(retrieveOnlyMode) {
         system_prompt: systemPrompt.value,
         user_prompt_template: userPromptTemplate.value,
       };
-      const data = await chatRequest(payload, {
+      const data = await chatRequest(bypassCache ? { ...payload, bypass_cache: true } : payload, {
         onPreliminarySources(prelimData) {
           currentRetrievalQuery = prelimData.retrieval_query || currentRetrievalQuery;
           currentAnswerQuestion = prelimData.answer_question || currentAnswerQuestion;
@@ -1349,7 +1350,12 @@ async function runQuery(retrieveOnlyMode) {
           currentRetrievalQuery = doneData.retrieval_query || currentRetrievalQuery;
           currentAnswerQuestion = doneData.answer_question || currentAnswerQuestion;
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
-          statusEl.textContent = formatTimingLabel(doneData, modelLabel);
+          if (Avatar.isCachedAnswer(doneData)) {
+            statusEl.textContent = Avatar.cachedAnswerStatus(doneData, modelLabel);
+            statusEl.append(" ", regenerateAnswerButton());
+          } else {
+            statusEl.textContent = formatTimingLabel(doneData, modelLabel);
+          }
           statusEl.title = rawModelUsageLabel(doneData.model, doneData.upstream_model);
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
@@ -1421,6 +1427,7 @@ async function runQuery(retrieveOnlyMode) {
         response_time_seconds: data.response_time_seconds,
         rerank_time_seconds: data.rerank_time_seconds ?? null,
         generation_time_seconds: data.generation_time_seconds ?? null,
+        cache_hit: Avatar.isCachedAnswer(data),
       });
       renderAnswerShare();
     }
@@ -1449,6 +1456,16 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   runQuery(false);
 });
+
+function regenerateAnswerButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "status-action";
+  button.textContent = "Vygenerovat znovu";
+  button.title = "Nechat model odpovědět znovu místo uložené odpovědi. Nová odpověď uloženou nahradí.";
+  button.addEventListener("click", () => runQuery(false, { bypassCache: true }));
+  return button;
+}
 
 retrieveButton.addEventListener("click", () => runQuery(true));
 
@@ -7926,7 +7943,9 @@ function renderConversationMessage(message, index = 0, conversationSummary = "")
       `<span title="${escapeHtml(rawModelUsageLabel(message.model_used, message.upstream_model))}">${escapeHtml(formatModelUsageLabel(message.model_used, message.upstream_model))}</span>`,
     );
   }
-  if (message.role === "assistant" && message.response_time_seconds) {
+  if (message.role === "assistant" && message.cache_hit) {
+    metaParts.push(`<span title="Odpověď byla uložená z dřívějšího stejného dotazu, model se znovu neptal.">z mezipaměti</span>`);
+  } else if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
   }
   const budgetWarnings =
@@ -8280,6 +8299,7 @@ async function submitConversationTurn() {
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
+          cache_hit: Avatar.isCachedAnswer(data),
           createdAt: new Date().toISOString(),
         };
         if (messages[messages.length - 1]?.role === "assistant") {
@@ -8410,6 +8430,7 @@ function saveHistoryEntry(entry) {
     model_used: entry.model_used || null,
     upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
+    cache_hit: entry.cache_hit === true,
     createdAt: new Date().toISOString(),
   });
   const savedHistory = saveHistoryEntriesSafely(history);
@@ -9796,7 +9817,9 @@ function renderHistorySettings(entry) {
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
         ${renderSetting("Model", formatModelUsageLabel(modelId, entry.upstream_model), rawModelUsageLabel(modelId, entry.upstream_model))}
-        ${renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
+        ${entry.cache_hit
+          ? renderSetting("Doba odpovědi", "z mezipaměti")
+          : renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
         ${renderSetting("Vygenerováno", generatedAt ? formatHistoryTime(generatedAt) : null)}
         ${entry.shared_at ? renderSetting("Sdíleno", formatHistoryTime(entry.shared_at)) : ""}
       </div>
