@@ -3,6 +3,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+# The browser's id for the shared items it saved ("owner-" + a UUID). It is
+# stored with every item, so its length is bounded like the rest of the item.
+OWNER_ID_MAX_LENGTH = 128
 RetrievalBackend = Literal["msearch", "local"]
 MSearchMode = Literal["hybrid", "semantic", "keyword"]
 
@@ -134,7 +137,7 @@ class PromptPresetSaveRequest(BaseModel):
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
-    owner_id: str | None = None
+    owner_id: str | None = Field(default=None, max_length=OWNER_ID_MAX_LENGTH)
     admin_password: str | None = None
 
 
@@ -172,7 +175,7 @@ class SharedHistoryItem(BaseModel):
 
 
 class SharedHistorySaveRequest(BaseModel):
-    owner_id: str = ""
+    owner_id: str = Field(default="", max_length=OWNER_ID_MAX_LENGTH)
     author_name: str = ""
     note: str = ""
     question: str = ""
@@ -195,7 +198,7 @@ class SharedHistoryUpdateRequest(BaseModel):
     # Omitted fields are left unchanged.
     visibility: Literal["listed", "link"] | None = None
     note: str | None = None
-    owner_id: str = ""
+    owner_id: str = Field(default="", max_length=OWNER_ID_MAX_LENGTH)
     admin_password: str = ""
 
 
@@ -217,7 +220,7 @@ class PlaceholderSaveRequest(BaseModel):
     help: str | None = None
     default: str = ""
     options: list[OptionDef] = Field(default_factory=list)
-    owner_id: str | None = None
+    owner_id: str | None = Field(default=None, max_length=OWNER_ID_MAX_LENGTH)
     admin_password: str | None = None
 
 

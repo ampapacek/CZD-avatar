@@ -44,6 +44,34 @@ class SharedHistoryEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_saved_items_are_limited(self) -> None:
+        limits = {"max_item_bytes": 5000, "max_file_bytes": 20000}
+        with patch.dict(main.SHARED_HISTORY_LIMITS, limits):
+            too_big = self.client.post("/shared-history", json={"owner_id": "a", "answer": "x" * 6000})
+            self.assertEqual(too_big.status_code, 413)
+            # The owner id is stored with the item, so it is bounded too.
+            long_owner = self.client.post("/shared-history", json={"owner_id": "a" * 5000, "question": "q"})
+            self.assertEqual(long_owner.status_code, 422)
+            note = self.client.patch(
+                f"/shared-history/{self._create('mine', owner_id='c')['id']}",
+                json={"owner_id": "c", "note": "x" * 6000},
+            )
+            self.assertEqual(note.status_code, 413)
+            # A note within the limit on its own, but not together with the answer.
+            big = self.client.post("/shared-history", json={"owner_id": "c", "answer": "x" * 3000}).json()
+            joined = self.client.patch(f"/shared-history/{big['id']}", json={"owner_id": "c", "note": "x" * 3000})
+            self.assertEqual(joined.status_code, 413)
+            # Small as compact JSON, many times larger indented as it is stored.
+            nested = []
+            for _ in range(60):
+                nested = [nested]
+            deep = self.client.post("/shared-history", json={"owner_id": "c", "settings": {"x": nested}})
+            self.assertEqual(deep.status_code, 413)
+        with patch.dict(main.SHARED_HISTORY_LIMITS, {"max_file_bytes": self.path.stat().st_size + 10}):
+            full = self.client.post("/shared-history", json={"owner_id": "d", "question": "a long enough question"})
+            self.assertEqual(full.status_code, 409)
+            self.assertIn("Smaž", full.json()["detail"])
+
     def test_post_creates_and_returns_id_and_shared_at(self) -> None:
         created = self._create("What is history?", owner_id="owner-a")
         self.assertTrue(created["id"])

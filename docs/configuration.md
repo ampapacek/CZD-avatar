@@ -121,6 +121,8 @@ Important `.env` variables:
 - `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
 - `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
 
+Shared history, prompt presets and placeholders are saved by anyone who can reach the app, so `app/main.py` limits them (`SHARED_HISTORY_LIMITS`, `PROMPT_PRESET_LIMITS`, `PLACEHOLDER_LIMITS`): the size of one item as it is stored, indented and including its owner id (1 MB, 200 kB, 50 kB; 413 above; a note edit counts the whole item) and the size of the whole file (50 MB, 10 MB, 5 MB; 409 above). The owner id itself is at most 128 characters. There is no per-browser count: the browser makes up its own id, so a script would just use new ones. The file size is checked before the write lock, so parallel saves can overshoot it slightly.
+
 `MODEL_METADATA_PATH` replaces the earlier `MODEL_CONTEXT_WINDOWS_PATH` and `MODEL_REASONING_PATH`. It is not just a rename: the two files merged into one, with `models` and `provider_defaults` sections and `context_window` / `max_context_window` / `reasoning` per entry. `data/models.json` documents the shape in its own `_comment`.
 
 ## Multiple-provider example

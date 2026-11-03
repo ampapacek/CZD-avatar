@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from app.admin_password_guard import AdminPasswordGuard
 from app.config import get_settings
@@ -811,6 +812,39 @@ def _for_requester(record: dict[str, object], owner_id: str | None) -> dict[str,
     return public
 
 
+# What anyone can store through the shared lists. Each save rewrites the whole
+# JSON file, so the file is capped as well as each item. A per-browser count
+# would not help: the browser makes up its own id, so a script just uses new ones.
+SHARED_HISTORY_LIMITS = {"max_item_bytes": 1_000_000, "max_file_bytes": 50_000_000}
+PROMPT_PRESET_LIMITS = {"max_item_bytes": 200_000, "max_file_bytes": 10_000_000}
+PLACEHOLDER_LIMITS = {"max_item_bytes": 50_000, "max_file_bytes": 5_000_000}
+
+
+def _stored_fields(request: BaseModel) -> dict[str, object]:
+    # Everything that gets stored counts, the owner id included.
+    return request.model_dump(exclude={"admin_password"})
+
+
+def _check_saved_item(path: Path, item: dict[str, object], *, max_item_bytes: int, max_file_bytes: int) -> None:
+    # Measured as the files are written (indented): compact JSON would undercount
+    # a deeply nested value many times over.
+    size = len(json.dumps(item, ensure_ascii=False, indent=2).encode("utf-8"))
+    if size > max_item_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Položka je příliš velká ({size // 1000} kB, nejvýš {max_item_bytes // 1000} kB).",
+        )
+    try:
+        file_size = path.stat().st_size
+    except OSError:
+        file_size = 0
+    if file_size + size > max_file_bytes:
+        raise HTTPException(
+            status_code=409,
+            detail="Na serveru už není místo pro další položky. Smaž nějaké staré, nebo dej vědět správci.",
+        )
+
+
 def _can_modify_prompt_preset(
     preset: dict[str, object],
     owner_id: str | None,
@@ -880,6 +914,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
     existing = _find_prompt_preset(request.id) if request.id else None
     if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
+    _check_saved_item(settings.prompt_presets_path, _stored_fields(request), **PROMPT_PRESET_LIMITS)
     try:
         preset = save_prompt_preset(
             settings.prompt_presets_path,
@@ -1145,6 +1180,9 @@ def patch_shared_history_item(item_id: str, request: SharedHistoryUpdateRequest)
             status_code=403,
             detail="Tento sdílený záznam patří jinému prohlížeči. Odemkni ho sdíleným heslem, abys ho mohl změnit.",
         )
+    # The item as it will be stored: an edited note joins the existing answer.
+    merged = {**existing, "note": existing.get("note", "") if request.note is None else request.note}
+    _check_saved_item(settings.shared_history_path, merged, **SHARED_HISTORY_LIMITS)
     updated = update_shared_history_item(
         settings.shared_history_path,
         item_id,
@@ -1158,6 +1196,7 @@ def patch_shared_history_item(item_id: str, request: SharedHistoryUpdateRequest)
 
 @app.post("/shared-history", response_model=SharedHistoryItem)
 def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
+    _check_saved_item(settings.shared_history_path, _stored_fields(request), **SHARED_HISTORY_LIMITS)
     item = save_shared_history_item(
         settings.shared_history_path,
         owner_id=request.owner_id,
@@ -1239,6 +1278,7 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
         if name in DEFAULT_PLACEHOLDERS:
             raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
         raise HTTPException(status_code=403, detail=PLACEHOLDER_FORBIDDEN_DETAIL)
+    _check_saved_item(settings.placeholders_path, _stored_fields(request), **PLACEHOLDER_LIMITS)
     record = save_placeholder(
         settings.placeholders_path,
         name=name,

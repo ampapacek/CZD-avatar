@@ -37,6 +37,12 @@ class PromptPresetEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_oversized_preset_and_owner_id_are_refused(self) -> None:
+        payload = {"name": "big", "system_prompt": "x" * 300_000, "user_prompt_template": "{question}"}
+        self.assertEqual(self.client.post("/prompt-presets", json=payload).status_code, 413)
+        payload = {"name": "small", "system_prompt": "sys", "user_prompt_template": "{question}", "owner_id": "x" * 5000}
+        self.assertEqual(self.client.post("/prompt-presets", json=payload).status_code, 422)
+
     def test_owner_id_is_never_returned(self) -> None:
         created = self._create("Mine", owner_id="owner-a")
         self.assertTrue(created["mine"])

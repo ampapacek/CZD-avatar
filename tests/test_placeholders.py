@@ -161,6 +161,19 @@ class PlaceholderEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_oversized_placeholder_is_refused(self) -> None:
+        options = [{"name": f"o{index}", "label": "x" * 100, "text": "x" * 1000} for index in range(60)]
+        response = self.client.post(
+            "/placeholders",
+            json={"name": "big", "label": "Big", "kind": "select", "options": options, "owner_id": "owner-a"},
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(self.path.exists())
+        # A small item with a huge owner id must not get past the size limits.
+        response = self.client.post("/placeholders", json={"name": "small", "label": "S", "owner_id": "x" * 100_000})
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(self.path.exists())
+
     def test_owner_updates_and_deletes_without_password(self) -> None:
         created = self._create("tone", owner_id="owner-a")
         update = self.client.post(
