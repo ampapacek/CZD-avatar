@@ -7,7 +7,7 @@ sources are the ones the answer cites. Only first turns are cached: a
 follow-up depends on the whole conversation and would almost never repeat.
 
 Entries expire after a TTL and the least recently used ones are evicted above
-a size cap; pinned entries (written by scripts/warm_cache.py) are exempt from
+a size cap; pinned entries (pinned by scripts/warm_cache.py) are exempt from
 both. Like the account store, every operation opens its own short-lived SQLite
 connection.
 """
@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 # Bump to invalidate every entry when the key input or payload shape changes.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 # Request fields left out of the key. Everything else is in it: a field added
 # to ChatRequest is part of the key unless it is listed here, and
@@ -212,6 +212,12 @@ class AnswerCache:
                 """,
                 (excess,),
             )
+
+    def pin(self, key: str) -> bool:
+        """Exempt an entry from expiry and eviction; False when it is missing."""
+
+        with self._connect() as conn:
+            return conn.execute("UPDATE answers SET pinned = 1 WHERE key = ?", (key,)).rowcount > 0
 
     def delete(self, key: str) -> bool:
         with self._connect() as conn:

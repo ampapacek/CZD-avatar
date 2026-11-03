@@ -150,6 +150,12 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.cache.get("k", now=99999)["answer"], "new")
         self.assertEqual(self.cache.count(), 1)
 
+    def test_pin_keeps_an_entry(self) -> None:
+        self.cache.put("k", {}, {"answer": "a"}, now=1000)
+        self.assertTrue(self.cache.pin("k"))
+        self.assertFalse(self.cache.pin("missing"))
+        self.assertIsNotNone(self.cache.get("k", now=99999))
+
 
 class FakeStream:
     """Like the LLM stream: yields the parts, then carries the whole trace."""
@@ -241,6 +247,28 @@ class EndpointTests(EndpointTestCase):
         self.assertEqual(len(self.generated), 2)
         self.assertEqual(self.done(self.ask())["answer"], "Nová odpověď.")
         self.assertEqual(self.cache.count(), 1)
+
+    def test_key_is_announced_and_stored_before_done(self) -> None:
+        events = self.ask()
+        sources = next(data for name, data in events if name == "sources")
+        done = self.done(events)
+        self.assertEqual((sources["cache_hit"], sources["cache_key"]), (False, done["cache_key"]))
+        self.assertTrue(self.cache.contains(done["cache_key"]))
+        replayed = self.ask()
+        self.assertEqual(next(data for name, data in replayed if name == "sources")["cache_key"], done["cache_key"])
+
+    def test_omitted_defaults_share_the_entry(self) -> None:
+        self.ask()
+        settings = main.settings
+        self.ask(
+            top_k=settings.top_k,
+            msearch_mode=settings.msearch_mode,
+            min_relative_score=settings.min_relative_score,
+            context_window_tokens=settings.context_window_tokens,
+            selections={"length": "medium"},
+            reasoning_effort="",
+        )
+        self.assertEqual(len(self.generated), 1)
 
     def test_different_settings_miss(self) -> None:
         self.ask()

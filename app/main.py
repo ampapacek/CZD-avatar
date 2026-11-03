@@ -122,6 +122,7 @@ from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
     resolve_placeholder_defs,
+    substitute_value,
     template_placeholder_names,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
@@ -1741,10 +1742,32 @@ def _chat_cache_key_input(
     request: ChatRequest,
     placeholder_defs: dict,
     selections: dict[str, str],
+    length: str,
     provider: str,
     model: str,
     base_url: str | None,
 ) -> dict[str, object]:
+    """The key input with every value as the pipeline will use it.
+
+    An omitted field and the default it stands for give the same key, so a
+    request from scripts/warm_cache.py, which leaves most fields out, hits the
+    entry of a browser request that sends the defaults explicitly.
+    """
+
+    budget = PromptBudgetConfig.from_settings(
+        settings,
+        context_window_tokens=request.context_window_tokens,
+        output_token_budget_short=request.output_token_budget_short,
+        output_token_budget_medium=request.output_token_budget_medium,
+        output_token_budget_long=request.output_token_budget_long,
+        min_prompt_chunks=request.min_prompt_chunks,
+        token_budget_safety_margin=request.token_budget_safety_margin,
+        conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
+    )
+
+    def resolved(value: object, default: object) -> object:
+        return default if value is None else value
+
     return answer_cache_key_input(
         request,
         llm_provider=provider,
@@ -1753,8 +1776,33 @@ def _chat_cache_key_input(
         wp_id=resolve_wp_id(request.wp_id),
         system_prompt=(request.system_prompt or "").strip() or default_system_prompt_template(),
         user_prompt_template=(request.user_prompt_template or "").strip() or default_user_prompt_template(),
-        placeholder_defs=jsonable_encoder(placeholder_defs),
-        selections=selections,
+        # The text each placeholder renders, not its def and selection: a
+        # missing selection and its default render the same.
+        placeholder_defs=None,
+        selections=None,
+        placeholder_values={
+            name: substitute_value(definition, selections.get(name)) for name, definition in placeholder_defs.items()
+        },
+        output_length=length,
+        reasoning_effort=(request.reasoning_effort or "").strip() or None,
+        top_k=resolved(request.top_k, settings.top_k),
+        retrieval_backend=request.retrieval_backend or settings.retrieval_backend,
+        msearch_collection=request.msearch_collection or settings.msearch_collection,
+        msearch_mode=request.msearch_mode or settings.msearch_mode,
+        msearch_min_confidence=resolved(request.msearch_min_confidence, settings.msearch_min_confidence),
+        msearch_rescore=resolved(request.msearch_rescore, settings.msearch_rescore),
+        min_score=resolved(request.min_score, settings.min_score),
+        min_relative_score=resolved(request.min_relative_score, settings.min_relative_score),
+        rerank_enabled=resolved(request.rerank_enabled, settings.reranker_enabled),
+        rerank_weight=resolved(request.rerank_weight, settings.reranker_weight),
+        rerank_candidates=resolved(request.rerank_candidates, settings.reranker_candidates),
+        context_window_tokens=budget.context_window_tokens,
+        output_token_budget_short=budget.output_token_budget_short,
+        output_token_budget_medium=budget.output_token_budget_medium,
+        output_token_budget_long=budget.output_token_budget_long,
+        min_prompt_chunks=budget.min_prompt_chunks,
+        token_budget_safety_margin=budget.token_budget_safety_margin,
+        conversation_summary_trigger_tokens=budget.conversation_summary_trigger_tokens,
         server={name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS},
     )
 
@@ -1806,7 +1854,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
     cached: dict[str, object] | None = None
     if cache is not None:
         provider, model, _, base_url = resolved_llm
-        cache_input = _chat_cache_key_input(request, placeholder_defs, selections, provider, model, base_url)
+        cache_input = _chat_cache_key_input(request, placeholder_defs, selections, length, provider, model, base_url)
         cache_key = answer_cache_key(cache_input)
         if not request.bypass_cache:
             cached = _cached_answer(cache, cache_key)
@@ -1835,7 +1883,13 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             sources = {name: cached.get(name) for name in _CACHED_SOURCES_FIELDS}
             yield _sse_event(
                 "sources",
-                {"question": request.question, **sources, "retrieved_chunks": cached.get("used_chunks")},
+                {
+                    "question": request.question,
+                    **sources,
+                    "retrieved_chunks": cached.get("used_chunks"),
+                    "cache_hit": True,
+                    "cache_key": cache_key,
+                },
             )
             if cached.get("reasoning"):
                 yield _sse_event("reasoning", {"text": cached["reasoning"]})
@@ -1855,6 +1909,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "rerank_time_seconds": None,
                     "generation_time_seconds": None,
                     "cache_hit": True,
+                    "cache_key": cache_key,
                 },
             )
             analytics.event(
@@ -2071,6 +2126,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "chunk_budget_warnings": budget.warnings,
                     "conversation_summary": conversation.summary,
                     "conversation_folded_message_count": conversation.folded_message_count,
+                    "cache_hit": False,
+                    "cache_key": cache_key,
                 },
             )
             answer_parts: list[str] = []
@@ -2140,6 +2197,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
                 "generation_time_seconds": round(generation_seconds, 3),
                 "cache_hit": False,
+                "cache_key": cache_key,
             }
             logger.info(
                 "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s",
@@ -2150,10 +2208,12 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 generation_seconds,
                 len(answer),
             )
-            yield _sse_event("done", response)
             # Only a finished answer: an aborted or failed stream never gets here.
+            # Stored before "done", so the entry exists once a client sees it
+            # (scripts/warm_cache.py pins it then).
             if cache_key is not None and answer.strip():
                 _store_answer(cache, cache_key, cache_input, response, request)
+            yield _sse_event("done", response)
             event_fields = {
                 **fields,
                 "upstream_model": upstream_model,
