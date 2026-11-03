@@ -1,4 +1,6 @@
+import socket
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -50,14 +52,17 @@ class PolicyErrorStatusTests(unittest.TestCase):
         self.assertIn("Local retrieval", response.json()["detail"])
 
     def test_chat_policy_violation_returns_400_not_500(self) -> None:
-        response = self.client.post(
-            "/chat",
-            json={
-                "question": "Cokoliv?",
-                "msearch_collection": self.gated_collection,
-                "llm_base_url": "https://example.com/api",
-            },
-        )
+        # A custom URL is resolved to check it is public; no network in tests.
+        public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+        with patch("socket.getaddrinfo", return_value=public):
+            response = self.client.post(
+                "/chat",
+                json={
+                    "question": "Cokoliv?",
+                    "msearch_collection": self.gated_collection,
+                    "llm_base_url": "https://example.com/api",
+                },
+            )
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("AI Ufal", response.json()["detail"])
 

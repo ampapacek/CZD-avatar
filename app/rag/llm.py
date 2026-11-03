@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -189,21 +192,62 @@ def validate_api_key(api_key: str, base_url: str, timeout: float = 20.0) -> None
         raise RuntimeError("API key is empty.")
 
     resolved_base_url = base_url.rstrip("/")
-    response = httpx.get(
-        f"{resolved_base_url}/models",
-        headers={
-            "Authorization": f"Bearer {resolved_api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8000",
-            "X-Title": "rag-avatar",
-        },
-        timeout=timeout,
-    )
+    # The upstream body is not passed on: for a user-supplied URL it would show
+    # the user whatever that server answers.
     try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        message = _extract_error_message(response)
-        raise RuntimeError(_format_http_error(response, message)) from exc
+        response = httpx.get(
+            f"{resolved_base_url}/models",
+            headers={
+                "Authorization": f"Bearer {resolved_api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:8000",
+                "X-Title": "rag-avatar",
+            },
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise RuntimeError("The API URL could not be reached.") from exc
+    if response.status_code in (401, 403):
+        raise RuntimeError(f"The API key was rejected ({response.status_code}).")
+    if response.is_error:
+        raise RuntimeError(f"The API key could not be checked ({response.status_code}).")
+
+
+def check_public_base_url(base_url: str) -> None:
+    """Refuse a user-supplied API URL that points into the server's own network.
+
+    The server calls this URL itself, so without the check anyone could make it
+    reach localhost, the internal network or a cloud metadata service. Every
+    address the host name resolves to must be public.
+
+    httpx resolves the name again when it connects, and a DNS server can answer
+    differently the second time (DNS rebinding). Such a connection can still reach
+    an internal address, but https stops it there: an internal host cannot present
+    a valid certificate for the URL's name, so no request is sent and nothing is
+    read. What remains is probing which internal ports are open. Non-ASCII names
+    are refused because the stdlib and httpx convert them differently, which
+    would let the check look up a different name than the one httpx connects to.
+    """
+
+    parsed = urlparse(base_url)
+    try:
+        port = parsed.port or 443
+    except ValueError:
+        port = None
+    if parsed.scheme != "https" or not parsed.hostname or port is None:
+        raise ValueError("A custom API URL must be an https URL.")
+    if not parsed.hostname.isascii():
+        raise ValueError("A custom API URL's host must be ASCII (use the xn-- form).")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("The API URL's host was not found.") from exc
+    for info in infos:
+        address = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        if address.version == 6 and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        if not address.is_global or address.is_multicast:
+            raise ValueError("The API URL must point to a public address.")
 
 
 class _OpenAICompatibleStream:

@@ -96,7 +96,7 @@ from app.rag.llm_providers import (
     provider_public_models,
     resolve_llm_provider,
 )
-from app.rag.llm import REASONING, validate_api_key
+from app.rag.llm import REASONING, check_public_base_url, validate_api_key
 from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
@@ -421,6 +421,13 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
     requested_base_url = request.llm_base_url.strip().rstrip("/") if request.llm_base_url else ""
     provider_base_url = str(provider_config.get("base_url") or "").strip().rstrip("/")
     use_server_api_key = not requested_base_url or requested_base_url == provider_base_url
+    # The configured providers are trusted (one may well run on localhost); any
+    # other URL comes from the request and must not reach the internal network.
+    if not use_server_api_key:
+        try:
+            check_public_base_url(requested_base_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
     browser_admin_password = request.admin_password.strip() if request.admin_password else ""
     unlock_enabled = bool(settings.admin_password) and _secure_eq(
