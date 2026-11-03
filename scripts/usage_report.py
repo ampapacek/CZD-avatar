@@ -67,6 +67,9 @@ def filter_events(events: list[dict[str, Any]], args: argparse.Namespace) -> lis
             continue
         if any(value is not None and event.get(key) != value for key, value in filters.items()):
             continue
+        # Events from before the answer cache have no flag: they are misses.
+        if args.cache_hit is not None and bool(event.get("cache_hit")) != (args.cache_hit == "yes"):
+            continue
         result.append(event)
     return result
 
@@ -101,13 +104,17 @@ def build_report(events: list[dict[str, Any]], skipped: int) -> dict[str, Any]:
         rows += count_rows(turns, (field,), field)
     rows += count_rows(calls, ("purpose", "key_source"), "upstream_calls")
     rows += count_rows(turns, ("status", "error_code"), "outcomes")
+    rows += count_rows([{"cache_hit": bool(event.get("cache_hit"))} for event in turns], ("cache_hit",), "cache_hit")
 
     timing_fields = (
         "total_ms", "query_transform_ms", "retrieval_ms", "rerank_ms", "prompt_prepare_ms",
         "time_to_first_token_ms", "token_stream_ms", "generation_ms",
     )
     timing_groups: dict[tuple[Any, Any, Any], list[dict[str, Any]]] = defaultdict(list)
+    # A cached answer is replayed at a fixed pace; its times say nothing about the model.
     for event in turns:
+        if event.get("cache_hit"):
+            continue
         timing_groups[(event.get("wp_id"), event.get("provider"), event.get("requested_model"))].append(event)
     for key, group in sorted(timing_groups.items(), key=lambda item: tuple(str(value) for value in item[0])):
         for field in timing_fields:
@@ -136,17 +143,22 @@ def print_table(report: dict[str, Any]) -> None:
         print("  " + "  ".join(f"{key}={value}" for key, value in row.items() if key != "section"))
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Aggregate rag-avatar monthly usage JSONL files.")
     parser.add_argument("paths", nargs="*", type=Path, help="JSONL files (default: logs/events/usage-*.jsonl)")
     parser.add_argument("--from", dest="from_date", type=_date_arg)
     parser.add_argument("--to", dest="to_date", type=_date_arg)
     for option, dest in (("--event", "event"), ("--wp", "wp"), ("--operation", "operation"), ("--provider", "provider"), ("--model", "model"), ("--endpoint", "endpoint"), ("--collection", "collection"), ("--prompt", "prompt"), ("--key-source", "key_source"), ("--status", "status"), ("--error-code", "error_code"), ("--client-id", "client_id")):
         parser.add_argument(option, dest=dest)
+    parser.add_argument("--cache-hit", choices=("yes", "no"), help="only answers from the answer cache, or only the others")
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--json", action="store_true")
     output.add_argument("--csv", action="store_true")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     paths = args.paths or sorted(Path("logs/events").glob("usage-*.jsonl"))
     events, skipped = load_events(paths)
     report = build_report(filter_events(events, args), skipped)
