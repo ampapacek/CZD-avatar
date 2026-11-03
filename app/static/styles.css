@@ -4994,3 +4994,40 @@ body[data-theme="dark"] .source-highlight {
   padding-left: 20px;
   font-size: 13px;
 }
+
+.cache-warm summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cache-warm[open] summary {
+  margin-bottom: 8px;
+}
+
+.cache-warm-models select {
+  min-width: 220px;
+}
+
+.cache-warm-concurrency input {
+  width: 6em;
+}
+
+.cache-warm-custom {
+  flex-basis: 100%;
+}
+
+.cache-warm-force {
+  align-self: center;
+}
+
+.cache-warm-progress {
+  width: 100%;
+}
+
+.cache-warm-errors {
+  margin: 0;
+  padding-left: 20px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}

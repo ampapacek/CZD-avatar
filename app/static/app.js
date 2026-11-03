@@ -10516,8 +10516,9 @@ function populateCacheWpFilter() {
 
 async function openCacheDialog() {
   populateCacheWpFilter();
+  populateCacheWarmForm();
   cacheDialog.showModal();
-  await loadCacheEntries();
+  await Promise.all([loadCacheEntries(), loadCacheWarmStatus()]);
 }
 
 async function loadCacheEntries() {
@@ -10699,6 +10700,149 @@ function closeCachePreview() {
   cachePreview.hidden = true;
   delete cachePreview.dataset.key;
 }
+
+// Warming: a background run on the server (one at a time), polled while the
+// dialog is open. The form has the options of scripts/warm_cache.py.
+
+const cacheWarm = document.querySelector("#cacheWarm");
+const cacheWarmWp = document.querySelector("#cacheWarmWp");
+const cacheWarmQuestions = document.querySelector("#cacheWarmQuestions");
+const cacheWarmCustom = document.querySelector("#cacheWarmCustom");
+const cacheWarmProfile = document.querySelector("#cacheWarmProfile");
+const cacheWarmProvider = document.querySelector("#cacheWarmProvider");
+const cacheWarmModels = document.querySelector("#cacheWarmModels");
+const cacheWarmConcurrency = document.querySelector("#cacheWarmConcurrency");
+const cacheWarmForce = document.querySelector("#cacheWarmForce");
+const cacheWarmStart = document.querySelector("#cacheWarmStart");
+const cacheWarmCancel = document.querySelector("#cacheWarmCancel");
+const cacheWarmProgress = document.querySelector("#cacheWarmProgress");
+const cacheWarmStatus = document.querySelector("#cacheWarmStatus");
+const cacheWarmErrors = document.querySelector("#cacheWarmErrors");
+const CACHE_WARM_POLL_MS = 2000;
+let cacheWarmTimer = null;
+let cacheWarmRunning = false;
+
+function populateCacheWarmForm() {
+  const wp = cacheWarmWp.value;
+  cacheWarmWp.replaceChildren(
+    new Option("Všechna WP", "all"),
+    ...(appSettings.wps || []).map((item) => new Option(item.label || item.id, item.id, false, item.id === wp)),
+  );
+  const provider = cacheWarmProvider.value || appSettings.llm_provider;
+  cacheWarmProvider.replaceChildren(
+    ...(appSettings.llm_providers || []).map((item) => new Option(item.label || item.id, item.id, false, item.id === provider)),
+  );
+  populateCacheWarmModels();
+}
+
+function populateCacheWarmModels() {
+  const provider = (appSettings.llm_providers || []).find((item) => item.id === cacheWarmProvider.value);
+  const selected = new Set([...cacheWarmModels.selectedOptions].map((option) => option.value));
+  if (!selected.size && provider?.default_model) {
+    selected.add(provider.default_model);
+  }
+  const models = Avatar.modelSelectorView(provider, { unlocked: true, currentModel: provider?.default_model || "" }).models;
+  const labels = Avatar.modelDisplayLabels(models);
+  cacheWarmModels.replaceChildren(...models.map((name, index) => {
+    const option = new Option(labels[index] || name, name, false, selected.has(name));
+    option.title = name;
+    return option;
+  }));
+}
+
+function cacheWarmForm() {
+  return {
+    wp: cacheWarmWp.value,
+    questions: cacheWarmQuestions.value,
+    custom: cacheWarmCustom.value,
+    profile: cacheWarmProfile.value,
+    provider: cacheWarmProvider.value,
+    models: [...cacheWarmModels.selectedOptions].map((option) => option.value),
+    force: cacheWarmForce.checked,
+    concurrency: cacheWarmConcurrency.value,
+  };
+}
+
+async function startCacheWarm() {
+  const form = cacheWarmForm();
+  if (form.questions === "custom" && !Avatar.cacheWarmBody(form).questions.length) {
+    setAccountStatus(cacheWarmStatus, "Zadej aspoň jednu otázku.", "error");
+    return;
+  }
+  cacheWarmStart.disabled = true;
+  try {
+    const { jobs } = await cacheRequest("answer-cache/warm", { method: "POST", body: Avatar.cacheWarmBody(form, { dryRun: true }) });
+    const body = Avatar.cacheWarmBody(form);
+    const what = body.force ? "vygenerovat (i už uložené odpovědi znovu)" : "vygenerovat, pokud ještě nejsou v cache,";
+    if (!jobs) {
+      setAccountStatus(cacheWarmStatus, "Výběru neodpovídá žádný požadavek.", "error");
+      return;
+    }
+    if (!window.confirm(`${jobs} požadavků ${what} a připnout? Concurrency ${body.concurrency}.`)) {
+      return;
+    }
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm", { method: "POST", body }));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  } finally {
+    cacheWarmStart.disabled = cacheWarmRunning;
+  }
+}
+
+async function cancelCacheWarm() {
+  try {
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm/cancel", { method: "POST" }));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  }
+}
+
+async function loadCacheWarmStatus() {
+  try {
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm"));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  }
+}
+
+function renderCacheWarmStatus(status) {
+  clearTimeout(cacheWarmTimer);
+  const wasRunning = cacheWarmRunning;
+  cacheWarmRunning = status.state === "running";
+  if (cacheWarmRunning) {
+    cacheWarm.open = true;
+  }
+  cacheWarmStart.disabled = cacheWarmRunning;
+  cacheWarmCancel.hidden = !cacheWarmRunning;
+  cacheWarmCancel.disabled = Boolean(status.cancelled);
+  cacheWarmProgress.hidden = status.state === "idle";
+  cacheWarmProgress.max = Math.max(status.total || 0, 1);
+  cacheWarmProgress.value = status.done || 0;
+  setAccountStatus(cacheWarmStatus, Avatar.cacheWarmStatusText(status), status.failed ? "error" : "");
+  cacheWarmErrors.replaceChildren(...(status.errors || []).map((item) => {
+    const line = document.createElement("li");
+    line.textContent = `${item.job}: ${item.error}`;
+    return line;
+  }));
+  if (cacheWarmRunning && cacheDialog.open) {
+    cacheWarmTimer = setTimeout(() => loadCacheWarmStatus(), CACHE_WARM_POLL_MS);
+  }
+  if (wasRunning && !cacheWarmRunning) {
+    loadCacheEntries();
+  }
+}
+
+cacheWarmQuestions.addEventListener("change", () => {
+  document.querySelector(".cache-warm-custom").hidden = cacheWarmQuestions.value !== "custom";
+});
+cacheWarmProvider.addEventListener("change", () => {
+  cacheWarmModels.replaceChildren();
+  populateCacheWarmModels();
+});
+cacheWarmStart.addEventListener("click", () => startCacheWarm());
+cacheWarmCancel.addEventListener("click", () => cancelCacheWarm());
+document.querySelector("#cacheWarmForm").addEventListener("submit", (event) => event.preventDefault());
+cacheDialog.addEventListener("close", () => clearTimeout(cacheWarmTimer));
 
 document.querySelector("#cacheButton").addEventListener("click", () => openCacheDialog());
 document.querySelector("#closeCacheButton").addEventListener("click", () => cacheDialog.close());

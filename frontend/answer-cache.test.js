@@ -6,6 +6,8 @@ import {
   cacheProfileLabel,
   cacheSettingsSummary,
   cacheStatsText,
+  cacheWarmBody,
+  cacheWarmStatusText,
   cachedAnswerStatus,
   formatBytes,
   formatCachedAt,
@@ -71,5 +73,33 @@ describe("admin Cache dialog", () => {
       wp_id: "WP1", llm_provider: "aiufal", model: "m", reasoning_effort: null, output_length: "medium",
       retrieval_backend: "msearch", msearch_collection: "c1", msearch_mode: "hybrid", top_k: 10, context_window_tokens: 32000,
     })).toBe("WP: WP1 · Model: aiufal / m · Délka: medium · Vyhledávání: c1, hybrid · Počet zdrojů: 10 · Context window: 32000");
+  });
+
+  it("builds the warm request from the form", () => {
+    expect(cacheWarmBody({
+      wp: "WP1", questions: "custom", custom: " A?\n\n B? \n", profile: "all", provider: "aiufal",
+      models: ["m1", "m2"], force: true, concurrency: "8",
+    }, { dryRun: true })).toEqual({
+      wp: ["WP1"], questions: ["A?", "B?"], profile: ["all"], provider: "aiufal",
+      model: ["m1", "m2"], force: true, concurrency: 8, dry_run: true,
+    });
+    expect(cacheWarmBody({ questions: "prepared", custom: "ignored", concurrency: "" })).toEqual({
+      wp: ["all"], questions: "prepared", profile: ["default"], provider: null,
+      model: [], force: false, concurrency: 4, dry_run: false,
+    });
+    expect(cacheWarmBody({ concurrency: "50" }).concurrency).toBe(20);
+    expect(cacheWarmBody({ concurrency: "0" }).concurrency).toBe(1);
+    expect(cacheWarmBody({ concurrency: "x" }).concurrency).toBe(4);
+  });
+
+  it("describes the warming run", () => {
+    const counts = { total: 10, done: 4, generated: 2, cached: 1, failed: 1 };
+    expect(cacheWarmStatusText({ state: "idle" })).toBe("");
+    expect(cacheWarmStatusText({ ...counts, state: "running", running: 2, pending: 4 }))
+      .toBe("Běží 2, čeká 4 · 4 / 10 · vygenerováno 2 · už v cache 1 · chyby 1");
+    expect(cacheWarmStatusText({ ...counts, state: "running", cancelled: true, running: 2, pending: 0 }))
+      .toMatch(/^Ruším, dobíhá 2 · /);
+    expect(cacheWarmStatusText({ ...counts, state: "cancelled" })).toMatch(/^Zrušeno · 4 \/ 10/);
+    expect(cacheWarmStatusText({ ...counts, done: 10, state: "finished" })).toMatch(/^Hotovo · 10 \/ 10/);
   });
 });

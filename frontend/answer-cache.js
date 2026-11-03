@@ -120,3 +120,41 @@ export function cacheSettingsSummary(settings = {}) {
   add("Context window", settings.context_window_tokens);
   return parts.join(" · ");
 }
+
+// The warm form as the body of POST answer-cache/warm. Custom questions are
+// one per line; no model means the provider's default model.
+export function cacheWarmBody(form = {}, { dryRun = false } = {}) {
+  const concurrency = String(form.concurrency ?? "").trim() ? Math.round(Number(form.concurrency)) : NaN;
+  return {
+    wp: [form.wp || "all"],
+    questions: form.questions === "custom"
+      ? String(form.custom ?? "").split("\n").map((line) => line.trim()).filter(Boolean)
+      : "prepared",
+    profile: [form.profile || "default"],
+    provider: form.provider || null,
+    model: (form.models || []).filter(Boolean),
+    force: Boolean(form.force),
+    concurrency: Number.isFinite(concurrency) ? Math.min(Math.max(concurrency, 1), 20) : 4,
+    dry_run: dryRun,
+  };
+}
+
+export function cacheWarmStatusText(status) {
+  if (!status || status.state === "idle") {
+    return "";
+  }
+  const counts = [
+    `${status.done} / ${status.total}`,
+    `vygenerováno ${status.generated}`,
+    `už v cache ${status.cached}`,
+    `chyby ${status.failed}`,
+  ];
+  if (status.state === "running") {
+    const waiting = status.cancelled
+      ? `Ruším, dobíhá ${status.running}`
+      : `Běží ${status.running}, čeká ${status.pending}`;
+    return `${waiting} · ${counts.join(" · ")}`;
+  }
+  const finished = status.state === "cancelled" ? "Zrušeno" : "Hotovo";
+  return `${finished} · ${counts.join(" · ")}`;
+}
