@@ -99,6 +99,13 @@
             </span>
             <span id="themeToggleLabel">Motiv</span>
           </button>
+          <button id="accountButton" class="topbar-button" type="button" title="Účet: denní limit dotazů, změna hesla a odhlášení." aria-label="Účet: denní limit dotazů, změna hesla a odhlášení." hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8.5" r="3.8"></circle>
+              <path d="M4.5 20a7.5 7.5 0 0 1 15 0"></path>
+            </svg>
+            <span>Účet</span>
+          </button>
         </div>
       </header>
       <div id="storagePressureNotice" class="conversation-storage-status storage-pressure-notice" role="status" aria-live="polite" hidden>
@@ -538,6 +545,12 @@
             <p>Na telefonu se seznam a detail střídají: klepnutím na položku otevřeš její detail a tlačítkem <code>← Zpět na seznam</code> se vrátíš. Filtry kromě hledání jsou schované pod tlačítkem <code>Filtry</code>, které ukazuje, kolik položek z celkového počtu filtr zobrazuje.</p>
           </details>
           <details class="help-details">
+            <summary>Účet a denní limit</summary>
+            <p>Pokud je aplikace spuštěná s účty, přihlašuješ se e-mailem a heslem. Nový účet může před prvním přihlášením vyžadovat schválení administrátorem. Zapomenuté heslo ti nastaví administrátor.</p>
+            <p>Každý účet má denní limit dotazů, který se obnoví o půlnoci. Počítá se každá odpověď, otázka v konverzaci, <code>Pouze vyhledat zdroje</code> i úprava dotazu před vyhledáváním, a to i s vlastním API klíčem. Odpověď s úpravou dotazu tak spotřebuje dva dotazy. Kolik dotazů dnes zbývá, uvidíš v okně <code>Účet</code> (tlačítko vpravo nahoře), kde také změníš heslo a odhlásíš se. Administrátor denní limit nemá.</p>
+            <p>Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu. Administrátor má v okně <code>Účet</code> správu uživatelů a režim registrace a jako přihlášený admin nepotřebuje sdílené admin heslo. To se po opakovaných chybných pokusech na 10 minut zablokuje, přihlášeného admina se to netýká.</p>
+          </details>
+          <details class="help-details">
             <summary>Pouze vyhledat zdroje</summary>
             <p>Tlačítko <code>Pouze vyhledat zdroje</code> spustí vyhledávání bez generování odpovědi. Hodí se pro kontrolu obsahu kolekce nebo nastavení vyhledávání.</p>
           </details>
@@ -558,6 +571,71 @@
             <summary>Prompty, proměnné a sdílení</summary>
             <p>Prompt může používat proměnné jako <code>{length}</code> nebo <code>{custom_instructions}</code>. Lokální profily a proměnné zůstávají v tomto prohlížeči; sdílené položky jsou uložené na serveru a řídí se stávajícím vlastnictvím a admin přístupem.</p>
           </details>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="accountDialog" class="help-dialog account-dialog">
+      <div class="help-content">
+        <div class="help-header">
+          <h2>Účet</h2>
+          <button id="closeAccountButton" class="icon-button help-close" type="button" aria-label="Zavřít účet" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="help-body">
+          <section class="help-section account-summary">
+            <p>Přihlášen(a) jako <strong id="accountEmail"></strong><span id="accountAdminBadge" class="account-badge" hidden>admin</span></p>
+            <p id="accountQuota" class="field-note"></p>
+            <div class="form-actions">
+              <button id="logoutButton" class="secondary" type="button">Odhlásit se</button>
+            </div>
+          </section>
+          <details class="help-details">
+            <summary>Změnit heslo</summary>
+            <form id="passwordChangeForm" class="account-form" novalidate>
+              <label class="field">
+                <span>Současné heslo</span>
+                <input id="currentPassword" type="password" autocomplete="current-password" />
+              </label>
+              <label class="field">
+                <span>Nové heslo</span>
+                <input id="newPassword" type="password" autocomplete="new-password" />
+              </label>
+              <label class="field">
+                <span>Nové heslo znovu</span>
+                <input id="newPasswordConfirm" type="password" autocomplete="new-password" />
+              </label>
+              <p id="passwordChangeStatus" class="status" role="status" aria-live="polite"></p>
+              <button class="secondary" type="submit">Změnit heslo</button>
+            </form>
+          </details>
+          <section id="accountAdminSection" class="help-section account-admin" hidden>
+            <h3>Správa uživatelů</h3>
+            <label class="field">
+              <span>Registrace</span>
+              <select id="registrationModeSelect"></select>
+            </label>
+            <p id="adminUsersStatus" class="status" role="status" aria-live="polite"></p>
+            <div class="account-users-scroll">
+              <table class="account-users">
+                <thead>
+                  <tr>
+                    <th scope="col">E-mail</th>
+                    <th scope="col">Stav</th>
+                    <th scope="col">Admin</th>
+                    <th scope="col" title="Dotazy dnes / celkem">Dotazy</th>
+                    <th scope="col">Registrace</th>
+                    <th scope="col" aria-label="Akce"></th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersBody"></tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </dialog>

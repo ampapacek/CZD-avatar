@@ -4763,3 +4763,126 @@ body[data-theme="dark"] .source-highlight {
 .prompt-title-row button {
   flex: none;
 }
+
+/* User accounts: the login page and the account dialog. */
+.login-shell {
+  display: grid;
+  gap: 16px;
+  width: min(440px, calc(100% - 32px));
+  margin: 48px auto;
+}
+
+.login-topbar {
+  min-height: 0;
+}
+
+.login-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.login-tabs {
+  position: static;
+}
+
+.login-form,
+.account-form {
+  display: grid;
+  gap: 12px;
+}
+
+.login-form .status,
+.account-form .status {
+  min-height: 1.4em;
+  margin: 0;
+}
+
+.account-form {
+  margin-top: 10px;
+}
+
+.account-form .secondary {
+  justify-self: start;
+}
+
+.account-summary p {
+  margin: 0;
+}
+
+.account-badge {
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.account-admin .status {
+  margin: 0;
+}
+
+.account-users-scroll {
+  overflow-x: auto;
+}
+
+.account-users {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.account-users th,
+.account-users td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.account-users th {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.account-users td:first-child {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-users tr.is-pending td:first-child {
+  font-weight: 700;
+}
+
+.account-dialog {
+  width: min(900px, calc(100% - 32px));
+}
+
+.account-users select {
+  width: auto;
+  min-width: 150px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.account-users button {
+  width: auto;
+  min-width: 0;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.account-user-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}

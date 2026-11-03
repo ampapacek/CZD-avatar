@@ -301,6 +301,9 @@ const LOCAL_PLACEHOLDER_DEFS_STORAGE_KEY = "czdemos4ai-local-placeholder-defs";
 const BROWSER_OWNER_ID_STORAGE_KEY = "czdemos4ai-browser-owner-id";
 const ANALYTICS_SESSION_ID_STORAGE_KEY = "czdemos4ai-analytics-session-id";
 const nativeFetch = window.fetch.bind(window);
+// What /settings says about user accounts and the logged-in user; see the
+// "User accounts" section near the end.
+let currentAccount = { enabled: false };
 
 function newAnalyticsId() {
   return globalThis.crypto?.randomUUID?.()
@@ -331,7 +334,10 @@ window.fetch = function analyticsFetch(input, init = {}) {
   if (analyticsAppOpen) {
     headers.set("X-App-Open", "1");
   }
-  return nativeFetch(input, { ...fetchInit, headers });
+  return nativeFetch(input, { ...fetchInit, headers }).then((response) => {
+    handleAccountResponse(response);
+    return response;
+  });
 };
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
@@ -1130,6 +1136,7 @@ async function loadSettings() {
   const settings = await response.json();
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
+  applyAccount(settings.account);
   localPlaceholderDefs = loadLocalPlaceholderDefs();
   llmSettingsState = loadLlmSettings();
   const providers = getLlmProviders(settings);
@@ -1141,7 +1148,7 @@ async function loadSettings() {
   loadProviderValues(selectedProvider, { preferStored: true });
   llmUnlockPassword.value = llmSettingsState.admin_password || "";
   populateTokenBudgetFields(settings);
-  if (llmUnlockPassword.value.trim()) {
+  if (llmUnlockPassword.value.trim() && !accountIsAdmin()) {
     await verifyUnlockPassword({ silent: true });
   }
   refreshModelOptions(settings);
@@ -2159,7 +2166,7 @@ model.addEventListener("change", () => {
   }
 });
 llmUnlockPassword.addEventListener("input", () => {
-  llmModelsUnlocked = false;
+  llmModelsUnlocked = accountIsAdmin();
   setUnlockStatus("");
   persistLlmSettings();
   refreshModelOptions(appSettings);
@@ -2541,7 +2548,7 @@ function toggleSecretField(button) {
 async function verifyUnlockPassword({ silent = false } = {}) {
   const password = llmUnlockPassword.value.trim();
   if (!password) {
-    llmModelsUnlocked = false;
+    llmModelsUnlocked = accountIsAdmin();
     refreshModelOptions(appSettings);
     updatePromptActionButtonStates(promptPreset.value);
     renderQueryTransformSettings();
@@ -2597,7 +2604,7 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     }
     return true;
   } catch (error) {
-    llmModelsUnlocked = false;
+    llmModelsUnlocked = accountIsAdmin();
     refreshModelOptions(appSettings);
     if (conversationSettingsActive) {
       syncConversationControlsFromMain({ refreshOptions: true });
@@ -2620,16 +2627,19 @@ async function verifyUnlockPassword({ silent = false } = {}) {
 }
 
 function logoutAdminAccess() {
-  llmModelsUnlocked = false;
+  llmModelsUnlocked = accountIsAdmin();
   llmUnlockPassword.value = "";
   persistLlmSettings();
   refreshModelOptions(appSettings);
   renderPromptPresets();
   renderPlaceholderControls();
   renderQueryTransformSettings();
-  setUnlockStatus("Admin přístup byl odhlášen.", "success");
+  const message = accountIsAdmin()
+    ? "Sdílené heslo bylo zapomenuto. Admin účet má přístup dál."
+    : "Admin přístup byl odhlášen.";
+  setUnlockStatus(message, "success");
   statusEl.className = "status";
-  statusEl.textContent = "Admin přístup byl odhlášen.";
+  statusEl.textContent = message;
   if (conversationSettingsActive) {
     syncConversationControlsFromMain({ refreshOptions: true });
     persistActiveConversationSettings();
@@ -8965,7 +8975,7 @@ function renderSharedHistory() {
 
 // The owner (this browser) or an admin may unshare an item.
 function sharedItemManageable(item) {
-  // llmModelsUnlocked: the shared password, verified by the server.
+  // llmModelsUnlocked: a verified shared password or a logged-in admin account.
   return Boolean(item.mine) || llmModelsUnlocked;
 }
 
@@ -10133,6 +10143,288 @@ function formatHistoryTime(timestamp) {
     return "";
   }
 }
+
+// User accounts ---------------------------------------------------------------
+// Only when the server runs with AUTH_ENABLED. A logged-out browser never gets
+// here (the server sends it to the login page), so this covers the logged-in
+// user: the daily request count, password change, logout and, for admins,
+// user management. A logged-in admin also counts as unlocked admin access.
+
+const accountButton = document.querySelector("#accountButton");
+const accountDialog = document.querySelector("#accountDialog");
+const closeAccountButton = document.querySelector("#closeAccountButton");
+const accountEmail = document.querySelector("#accountEmail");
+const accountAdminBadge = document.querySelector("#accountAdminBadge");
+const accountQuota = document.querySelector("#accountQuota");
+const logoutButton = document.querySelector("#logoutButton");
+const passwordChangeForm = document.querySelector("#passwordChangeForm");
+const currentPasswordInput = document.querySelector("#currentPassword");
+const newPasswordInput = document.querySelector("#newPassword");
+const newPasswordConfirmInput = document.querySelector("#newPasswordConfirm");
+const passwordChangeStatus = document.querySelector("#passwordChangeStatus");
+const accountAdminSection = document.querySelector("#accountAdminSection");
+const registrationModeSelect = document.querySelector("#registrationModeSelect");
+const adminUsersStatus = document.querySelector("#adminUsersStatus");
+const adminUsersBody = document.querySelector("#adminUsersBody");
+
+function accountIsAdmin() {
+  return Boolean(currentAccount.enabled && currentAccount.user?.is_admin);
+}
+
+function applyAccount(account) {
+  const wasAdmin = accountIsAdmin();
+  currentAccount = account && typeof account === "object" ? account : { enabled: false };
+  if (wasAdmin && !accountIsAdmin()) {
+    // Demoted meanwhile: only a typed shared password can keep admin access.
+    llmModelsUnlocked = false;
+    setUnlockStatus("");
+    verifyUnlockPassword({ silent: true });
+  }
+  if (currentAccount.enabled && !currentAccount.user) {
+    // /auth/me after the session ended: nothing here is valid any more.
+    goToLogin();
+    return;
+  }
+  accountButton.hidden = !currentAccount.enabled;
+  if (!currentAccount.enabled) {
+    return;
+  }
+  accountButton.title = `Účet ${currentAccount.user.email}: denní limit dotazů, změna hesla a odhlášení.`;
+  accountEmail.textContent = currentAccount.user.email;
+  accountAdminBadge.hidden = !accountIsAdmin();
+  accountAdminSection.hidden = !accountIsAdmin();
+  if (accountIsAdmin()) {
+    llmModelsUnlocked = true;
+    setUnlockStatus("Admin přístup je aktivní díky přihlášenému admin účtu.", "success");
+  }
+  renderAccountQuota();
+}
+
+function renderAccountQuota() {
+  accountQuota.textContent = Avatar.quotaText(currentAccount);
+}
+
+function goToLogin() {
+  window.location.href = `login${window.location.search}`;
+}
+
+function handleAccountResponse(response) {
+  // The app page only ever calls the API logged in (a wrong current password is
+  // a 400), so any 401 means the session expired or an admin ended it.
+  if (response.status === 401) {
+    goToLogin();
+    return;
+  }
+  const remaining = response.headers.get("X-Daily-Requests-Remaining");
+  if (remaining !== null && currentAccount.enabled) {
+    currentAccount = Avatar.accountWithRemaining(currentAccount, remaining);
+    renderAccountQuota();
+  }
+}
+
+async function accountRequest(url, { method = "POST", body } = {}) {
+  const response = await fetch(url, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = response.status === 204 ? {} : await safeJson(response);
+  if (!response.ok) {
+    throw requestError(data.detail, "Požadavek se nepovedl.");
+  }
+  return data;
+}
+
+function setAccountStatus(element, message, variant = "") {
+  element.textContent = message;
+  element.className = variant ? `status ${variant}` : "status";
+}
+
+async function refreshAccount() {
+  try {
+    applyAccount(await accountRequest("auth/me", { method: "GET" }));
+  } catch {
+    /* Keep the last known state; the count is refreshed by the next answer anyway. */
+  }
+}
+
+async function openAccountDialog() {
+  setAccountStatus(passwordChangeStatus, "");
+  accountDialog.showModal();
+  await refreshAccount();
+  if (accountIsAdmin()) {
+    await loadAdminUsers();
+  }
+}
+
+async function changeOwnPassword(event) {
+  event.preventDefault();
+  const problem = Avatar.passwordProblem(newPasswordInput.value, newPasswordConfirmInput.value);
+  if (problem) {
+    setAccountStatus(passwordChangeStatus, problem, "error");
+    return;
+  }
+  try {
+    await accountRequest("auth/password", {
+      body: { current_password: currentPasswordInput.value, new_password: newPasswordInput.value },
+    });
+    passwordChangeForm.reset();
+    setAccountStatus(passwordChangeStatus, "Heslo je změněné. Ostatní přihlášení byla ukončena.");
+  } catch (error) {
+    setAccountStatus(passwordChangeStatus, error.message, "error");
+  }
+}
+
+async function logoutAccount() {
+  try {
+    await accountRequest("auth/logout");
+  } finally {
+    window.location.href = "login";
+  }
+}
+
+function populateRegistrationModes(selected) {
+  registrationModeSelect.replaceChildren(
+    ...Object.entries(Avatar.REGISTRATION_MODE_LABELS).map(([value, label]) => new Option(label, value, false, value === selected)),
+  );
+}
+
+async function loadAdminUsers() {
+  setAccountStatus(adminUsersStatus, "Načítám uživatele…");
+  try {
+    const data = await accountRequest("admin/users", { method: "GET" });
+    populateRegistrationModes(data.registration_mode);
+    renderAdminUsers(data.users || []);
+    const pending = (data.users || []).filter((user) => user.status === "pending").length;
+    setAccountStatus(adminUsersStatus, pending ? `Na schválení čeká ${pending}.` : "");
+  } catch (error) {
+    setAccountStatus(adminUsersStatus, error.message, "error");
+  }
+}
+
+// Every value goes in through textContent or a form control: an email is
+// user input and may contain markup.
+function renderAdminUsers(users) {
+  adminUsersBody.replaceChildren(...users.map((user) => adminUserRow(user)));
+}
+
+function adminUserRow(user) {
+  const row = document.createElement("tr");
+  row.classList.toggle("is-pending", user.status === "pending");
+  const isSelf = user.email === currentAccount.user?.email;
+
+  const email = document.createElement("td");
+  email.textContent = user.email;
+  email.title = user.last_login_at ? `Naposledy přihlášen(a): ${Avatar.formatAccountDate(user.last_login_at)}` : "Ještě se nepřihlásil(a).";
+
+  const statusCell = document.createElement("td");
+  const status = document.createElement("select");
+  status.setAttribute("aria-label", `Stav účtu ${user.email}`);
+  status.append(...Object.entries(Avatar.USER_STATUS_LABELS).map(([value, label]) => new Option(label, value, false, value === user.status)));
+  status.disabled = isSelf;
+  status.addEventListener("change", () => updateAdminUser(user, { status: status.value }));
+  statusCell.append(status);
+
+  const adminCell = document.createElement("td");
+  const admin = document.createElement("input");
+  admin.type = "checkbox";
+  admin.checked = Boolean(user.is_admin);
+  admin.disabled = isSelf;
+  admin.setAttribute("aria-label", `${user.email} je admin`);
+  admin.addEventListener("change", () => updateAdminUser(user, { is_admin: admin.checked }));
+  adminCell.append(admin);
+
+  const usage = document.createElement("td");
+  usage.textContent = `${user.requests_today} / ${user.requests_total}`;
+
+  const created = document.createElement("td");
+  created.textContent = Avatar.formatAccountDate(user.created_at);
+
+  const actions = document.createElement("td");
+  const actionWrap = document.createElement("div");
+  actionWrap.className = "account-user-actions";
+  // Not on the admin's own row: a reset ends every session, this one too.
+  // "Změnit heslo" in the same dialog changes their own and keeps them logged in.
+  if (!isSelf) {
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "secondary";
+    resetButton.textContent = "Nové heslo";
+    resetButton.addEventListener("click", () => resetAdminUserPassword(user));
+    actionWrap.append(resetButton);
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "secondary";
+    deleteButton.textContent = "Smazat";
+    deleteButton.addEventListener("click", () => deleteAdminUser(user));
+    actionWrap.append(deleteButton);
+  }
+  actions.append(actionWrap);
+
+  row.append(email, statusCell, adminCell, usage, created, actions);
+  return row;
+}
+
+async function runAdminAction(action, successMessage) {
+  try {
+    await action();
+    await loadAdminUsers();
+    if (successMessage) {
+      setAccountStatus(adminUsersStatus, successMessage);
+    }
+  } catch (error) {
+    // Reload first: it rewrites the status line, which would hide the error.
+    await loadAdminUsers();
+    setAccountStatus(adminUsersStatus, error.message, "error");
+  }
+}
+
+function updateAdminUser(user, changes) {
+  return runAdminAction(
+    () => accountRequest(`admin/users/${user.id}`, { method: "PATCH", body: changes }),
+    `Účet ${user.email} upraven.`,
+  );
+}
+
+function resetAdminUserPassword(user) {
+  const password = window.prompt(`Nové heslo pro ${user.email} (alespoň ${Avatar.PASSWORD_MIN_LENGTH} znaků). Předej ho uživateli sám/sama.`);
+  if (password === null) {
+    return;
+  }
+  const problem = Avatar.passwordProblem(password);
+  if (problem) {
+    setAccountStatus(adminUsersStatus, problem, "error");
+    return;
+  }
+  return runAdminAction(
+    () => accountRequest(`admin/users/${user.id}/password`, { body: { password } }),
+    `Heslo pro ${user.email} je změněné; jeho přihlášení byla ukončena.`,
+  );
+}
+
+function deleteAdminUser(user) {
+  if (!window.confirm(`Smazat účet ${user.email}? Nejde to vrátit.`)) {
+    return;
+  }
+  return runAdminAction(
+    () => accountRequest(`admin/users/${user.id}`, { method: "DELETE" }),
+    `Účet ${user.email} smazán.`,
+  );
+}
+
+accountButton.addEventListener("click", () => openAccountDialog());
+closeAccountButton.addEventListener("click", () => accountDialog.close());
+accountDialog.addEventListener("click", (event) => {
+  if (event.target === accountDialog) {
+    accountDialog.close();
+  }
+});
+logoutButton.addEventListener("click", () => logoutAccount());
+passwordChangeForm.addEventListener("submit", changeOwnPassword);
+registrationModeSelect.addEventListener("change", () => runAdminAction(
+  () => accountRequest("admin/registration-mode", { method: "PUT", body: { mode: registrationModeSelect.value } }),
+  "Režim registrace uložen.",
+));
 
 const sharedItemRequest = fetchSharedItemFromUrl();
 refreshStoragePressure();
