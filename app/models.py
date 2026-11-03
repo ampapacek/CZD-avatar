@@ -390,3 +390,18 @@ class AnswerCacheFilter(BaseModel):
 
 class AnswerCachePinRequest(BaseModel):
     pinned: bool
+
+
+class AnswerCacheWarmRequest(BaseModel):
+    """A warming run of the admin Cache dialog, with the options of
+    scripts/warm_cache.py; questions are "prepared" or a list."""
+
+    wp: list[str] = Field(default_factory=lambda: ["all"], max_length=100)
+    questions: Literal["prepared"] | list[str] = "prepared"
+    profile: list[str] = Field(default_factory=lambda: ["default"], max_length=100)
+    provider: str | None = None
+    model: list[str] = Field(default_factory=list, max_length=100)
+    force: bool = False
+    concurrency: int = Field(default=4, ge=1, le=20)
+    # Only count the requests.
+    dry_run: bool = False

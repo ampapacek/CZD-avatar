@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import hashlib
 import json
@@ -12,9 +13,10 @@ import re
 import threading
 import time
 import httpx
+from collections.abc import Iterator
 from html import escape
 from pathlib import Path
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager, closing, suppress
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -32,6 +34,7 @@ from app.answer_cache import (
     key_input as answer_cache_key_input,
     replay_pieces,
 )
+from app import cache_warming
 from app.auth import (
     AuthMiddleware,
     account_payload,
@@ -59,6 +62,7 @@ from app.logging_config import configure_logging
 from app.models import (
     AnswerCacheFilter,
     AnswerCachePinRequest,
+    AnswerCacheWarmRequest,
     BuiltinPromptOverride,
     BuiltinPromptOverrideSaveRequest,
     ChatRequest,
@@ -1835,6 +1839,22 @@ def _store_answer(cache: AnswerCache, key: str, key_input: dict[str, object], re
 
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+    events, quota_headers = _chat_events(request, http_request)
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            **quota_headers,
+        },
+    )
+
+
+def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[str], dict[str, str]]:
+    """The SSE events of /chat/stream and its quota headers; warming the
+    cache consumes them in-process. A request over the daily limit raises."""
+
     placeholder_defs, selections = _resolve_chat_placeholders(request)
     length = _output_budget_length(placeholder_defs, selections)
     context = request_context(http_request, settings.analytics_instance_id)
@@ -2293,15 +2313,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 answer_tokens_estimated=estimated_tokens(answer),
             )
 
-    return StreamingResponse(
-        cached_event_stream() if cached is not None else event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            **quota_headers,
-        },
-    )
+    return (cached_event_stream() if cached is not None else event_stream()), quota_headers
 
 
 # Admin Cache dialog -----------------------------------------------------------
@@ -2374,6 +2386,95 @@ def list_answer_cache(
         "matching": len(matching),
         "entries": matching[:ANSWER_CACHE_LIST_LIMIT],
     }
+
+
+# Warming runs one at a time, in worker threads of this process; a restart
+# ends it. Before /answer-cache/{key}, which would match these paths too.
+_warm_run: cache_warming.WarmRun | None = None
+_warm_lock = threading.Lock()
+# Warming requests carry no browser headers, so analytics sees them as "api".
+_WARM_HTTP_REQUEST = Request({"type": "http", "method": "POST", "path": "/chat/stream", "headers": []})
+
+
+def _warm_fetch(path: str, params: dict[str, str]) -> object:
+    """What scripts/warm_cache.py reads over HTTP, read in-process."""
+
+    if path == "/settings":
+        return jsonable_encoder(get_public_settings(_WARM_HTTP_REQUEST))
+    if path == "/prompt-presets":
+        return jsonable_encoder(get_prompt_presets())
+    if path == "/questions":
+        return list_questions(params.get("wp_id"))
+    raise ValueError(path)
+
+
+def _warm_stream(body: dict[str, object]) -> Iterator[str]:
+    """The lines of /chat/stream for one request, as warm() reads them."""
+
+    try:
+        events, _ = _chat_events(ChatRequest(**body), _WARM_HTTP_REQUEST)
+    except HTTPException as exc:
+        yield _sse_event("error", {"detail": exc.detail})
+        return
+    with closing(events):
+        for event in events:
+            yield from event.split("\n")
+
+
+def _warm_status() -> dict[str, object]:
+    return _warm_run.snapshot() if _warm_run is not None else {"state": "idle"}
+
+
+@app.get("/answer-cache/warm")
+def get_answer_cache_warm(x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    _admin_answer_cache(x_admin_password)
+    return _warm_status()
+
+
+@app.post("/answer-cache/warm")
+def start_answer_cache_warm(
+    request: AnswerCacheWarmRequest, x_admin_password: str | None = Header(default=None)
+) -> dict[str, object]:
+    """Count the requests (dry_run) or start warming. The answers are pinned."""
+
+    global _warm_run
+    cache = _admin_answer_cache(x_admin_password)
+    options = request.model_dump(include={"wp", "questions", "profile", "provider", "model"})
+    try:
+        # The shared password unlocks the models that are not public, as for
+        # the script; an admin account unlocks them by itself (the workers run
+        # in its context).
+        jobs = cache_warming.build_jobs(_warm_fetch, options, settings.admin_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.dry_run:
+        return {"jobs": len(jobs)}
+    if not jobs:
+        raise HTTPException(status_code=400, detail="Výběru neodpovídá žádný požadavek.")
+    with _warm_lock:
+        if _warm_run is not None and not _warm_run.finished:
+            raise HTTPException(status_code=409, detail="Předgenerování už běží.")
+        run = cache_warming.WarmRun(
+            jobs,
+            lambda job: cache_warming.warm(_warm_stream, cache, job, request.force),
+            request.concurrency,
+        )
+        # Each worker in its own copy of this request's context, so it runs as
+        # the logged-in admin, if any.
+        run.start(lambda work: functools.partial(contextvars.copy_context().run, work))
+        _warm_run = run
+    logger.info("Answer cache warming started: %d requests, concurrency %d", len(jobs), run.concurrency)
+    return run.snapshot()
+
+
+@app.post("/answer-cache/warm/cancel")
+def cancel_answer_cache_warm(x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    """Drop the requests not started yet; the running ones finish."""
+
+    _admin_answer_cache(x_admin_password)
+    if _warm_run is not None:
+        _warm_run.cancel()
+    return _warm_status()
 
 
 @app.get("/answer-cache/{key}")
