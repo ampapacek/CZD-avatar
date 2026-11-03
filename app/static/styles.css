@@ -154,6 +154,18 @@ textarea {
   margin: var(--shell-margin) auto;
 }
 
+/* A quiet note under whichever view is showing; it spans every column and, in
+   conversation mode, takes its own row below the thread. */
+.page-disclaimer {
+  grid-column: 1 / -1;
+  padding: 2px 12px 6px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+  text-wrap: balance;
+}
+
 /* The topbar is a child of the shell rather than of the workspace, so it stays
    put while the mode views below it are swapped. */
 .topbar {
