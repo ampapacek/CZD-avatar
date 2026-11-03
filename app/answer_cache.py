@@ -7,9 +7,9 @@ sources are the ones the answer cites. Only first turns are cached: a
 follow-up depends on the whole conversation and would almost never repeat.
 
 Entries expire after a TTL and the least recently used ones are evicted above
-a size cap; pinned entries (pinned by scripts/warm_cache.py) are exempt from
-both. Like the account store, every operation opens its own short-lived SQLite
-connection.
+a size cap; pinned entries (pinned by scripts/warm_cache.py or in the admin
+Cache dialog) are exempt from both. Like the account store, every operation
+opens its own short-lived SQLite connection.
 """
 
 from __future__ import annotations
@@ -219,9 +219,72 @@ class AnswerCache:
         with self._connect() as conn:
             return conn.execute("UPDATE answers SET pinned = 1 WHERE key = ?", (key,)).rowcount > 0
 
+    def unpin(self, key: str) -> bool:
+        """Let an entry expire and be evicted again; False when it is missing."""
+
+        with self._connect() as conn:
+            return conn.execute("UPDATE answers SET pinned = 0 WHERE key = ?", (key,)).rowcount > 0
+
+    def entries(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        """Every live entry without its payload, newest first, for the admin view.
+
+        ``server`` and ``cache_version`` are the ones the key was made with.
+        """
+
+        now = time.time() if now is None else now
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT key, created_at, last_hit_at, hit_count, pinned, meta,
+                       length(payload) AS size,
+                       json_extract(key_input, '$.question') AS question,
+                       json_extract(key_input, '$.wp_id') AS wp_id,
+                       json_extract(key_input, '$.llm_provider') AS llm_provider,
+                       json_extract(key_input, '$.model') AS model,
+                       json_extract(key_input, '$.cache_version') AS cache_version,
+                       json_extract(key_input, '$.server') AS server
+                FROM answers ORDER BY created_at DESC
+                """
+            ).fetchall()
+        return [
+            {
+                "key": row["key"],
+                "question": row["question"] or "",
+                "wp_id": row["wp_id"],
+                "llm_provider": row["llm_provider"],
+                "model": row["model"],
+                "prompt_preset_id": json.loads(row["meta"]).get("prompt_preset_id"),
+                "created_at": row["created_at"],
+                "last_hit_at": row["last_hit_at"],
+                "hit_count": row["hit_count"],
+                "pinned": bool(row["pinned"]),
+                "size": row["size"],
+                "cache_version": row["cache_version"],
+                "server": json.loads(row["server"]) if row["server"] else None,
+            }
+            for row in rows
+            if not self._expired(row, now)
+        ]
+
+    def peek(self, key: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """The key input and payload of an entry, without counting a hit."""
+
+        with self._connect() as conn:
+            row = conn.execute("SELECT key_input, payload FROM answers WHERE key = ?", (key,)).fetchone()
+        return None if row is None else (json.loads(row["key_input"]), _decode(row["payload"]))
+
     def delete(self, key: str) -> bool:
         with self._connect() as conn:
             return conn.execute("DELETE FROM answers WHERE key = ?", (key,)).rowcount > 0
+
+    def delete_many(self, keys: list[str]) -> int:
+        with self._connect() as conn:
+            return conn.executemany("DELETE FROM answers WHERE key = ?", [(key,) for key in keys]).rowcount
+
+    def size_bytes(self) -> int:
+        """The database file size, including the write-ahead log."""
+
+        return sum(path.stat().st_size for path in (self.path, self.path.with_name(self.path.name + "-wal")) if path.exists())
 
     def count(self) -> int:
         with self._connect() as conn:

@@ -17,7 +17,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.answer_cache import (
+    CACHE_VERSION as ANSWER_CACHE_VERSION,
     AnswerCache,
     cache_key as answer_cache_key,
     is_cacheable as answer_is_cacheable,
@@ -56,6 +57,8 @@ from app.analytics import (
 )
 from app.logging_config import configure_logging
 from app.models import (
+    AnswerCacheFilter,
+    AnswerCachePinRequest,
     BuiltinPromptOverride,
     BuiltinPromptOverrideSaveRequest,
     ChatRequest,
@@ -626,6 +629,7 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
         "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
         "account": account_payload(current_user.get()),
+        "answer_cache_enabled": settings.answer_cache_enabled,
     }
 
 
@@ -1803,8 +1807,12 @@ def _chat_cache_key_input(
         min_prompt_chunks=budget.min_prompt_chunks,
         token_budget_safety_margin=budget.token_budget_safety_margin,
         conversation_summary_trigger_tokens=budget.conversation_summary_trigger_tokens,
-        server={name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS},
+        server=_answer_cache_server_settings(),
     )
+
+
+def _answer_cache_server_settings() -> dict[str, object]:
+    return {name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS}
 
 
 def _cached_answer(cache: AnswerCache, key: str) -> dict[str, object] | None:
@@ -2294,6 +2302,120 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             **quota_headers,
         },
     )
+
+
+# Admin Cache dialog -----------------------------------------------------------
+# Admin access as elsewhere: a logged-in admin account, or the shared admin
+# password, sent in a header so it stays out of URLs and access logs.
+
+# Rows the list returns; the rest is counted but left out.
+ANSWER_CACHE_LIST_LIMIT = 500
+
+
+def _admin_answer_cache(admin_password: str | None) -> AnswerCache:
+    if not _admin_authorized(admin_password):
+        raise HTTPException(status_code=403, detail="Správa cache vyžaduje admin přístup.")
+    cache = _get_answer_cache()
+    if cache is None:
+        raise HTTPException(status_code=404, detail="Cache odpovědí je vypnutá (ANSWER_CACHE_ENABLED).")
+    return cache
+
+
+def _answer_cache_entries(cache: AnswerCache) -> list[dict[str, object]]:
+    """The live entries, each marked stale when it was made for another server
+    configuration or cache version: an identical request now has another key,
+    so such an entry is never hit again."""
+
+    # Compared as stored, so Path and similar values match their JSON form.
+    server = json.loads(json.dumps(_answer_cache_server_settings(), ensure_ascii=False, default=str))
+    names = {
+        **{prompt.id: prompt.name for wp in WP_CONFIGS for prompt in wp.builtin_prompts},
+        **{preset["id"]: preset.get("name") for preset in load_prompt_presets(settings.prompt_presets_path)},
+    }
+    entries = cache.entries()
+    for entry in entries:
+        entry["stale"] = entry.pop("cache_version") != ANSWER_CACHE_VERSION or entry.pop("server") != server
+        entry["prompt_preset_name"] = names.get(entry["prompt_preset_id"])
+    return entries
+
+
+def _matches(entry: dict[str, object], selection: AnswerCacheFilter) -> bool:
+    query = (selection.q or "").strip().casefold()
+    return (
+        (not selection.wp_id or entry["wp_id"] == selection.wp_id)
+        and (selection.pinned is None or entry["pinned"] == selection.pinned)
+        and (selection.stale is None or entry["stale"] == selection.stale)
+        and (not query or query in str(entry["question"]).casefold())
+    )
+
+
+@app.get("/answer-cache")
+def list_answer_cache(
+    wp_id: str | None = None,
+    pinned: bool | None = None,
+    stale: bool | None = None,
+    q: str | None = None,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    cache = _admin_answer_cache(x_admin_password)
+    entries = _answer_cache_entries(cache)
+    selection = AnswerCacheFilter(wp_id=wp_id, pinned=pinned, stale=stale, q=q)
+    matching = [entry for entry in entries if _matches(entry, selection)]
+    return {
+        "stats": {
+            "entries": len(entries),
+            "pinned": sum(entry["pinned"] for entry in entries),
+            "stale": sum(entry["stale"] for entry in entries),
+            "hits": sum(entry["hit_count"] for entry in entries),
+            "size_bytes": cache.size_bytes(),
+            "ttl_days": settings.answer_cache_ttl_days,
+            "max_entries": settings.answer_cache_max_entries,
+        },
+        "matching": len(matching),
+        "entries": matching[:ANSWER_CACHE_LIST_LIMIT],
+    }
+
+
+@app.get("/answer-cache/{key}")
+def get_answer_cache_entry(key: str, x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    stored = _admin_answer_cache(x_admin_password).peek(key)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    key_input, payload = stored
+    # Credentials never reach the key input; the prompts are long but are the
+    # point of a preview.
+    return {"key": key, "settings": key_input, "answer": payload.get("answer", ""), "sources": payload.get("sources", [])}
+
+
+@app.put("/answer-cache/{key}/pin")
+def pin_answer_cache_entry(
+    key: str,
+    body: AnswerCachePinRequest,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    cache = _admin_answer_cache(x_admin_password)
+    if not (cache.pin(key) if body.pinned else cache.unpin(key)):
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    return {"key": key, "pinned": body.pinned}
+
+
+@app.delete("/answer-cache/{key}", status_code=204)
+def delete_answer_cache_entry(key: str, x_admin_password: str | None = Header(default=None)) -> Response:
+    if not _admin_answer_cache(x_admin_password).delete(key):
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    return Response(status_code=204)
+
+
+@app.post("/answer-cache/delete")
+def delete_answer_cache_entries(
+    selection: AnswerCacheFilter,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Delete every entry the filter matches, beyond the listed ones too."""
+
+    cache = _admin_answer_cache(x_admin_password)
+    keys = [entry["key"] for entry in _answer_cache_entries(cache) if _matches(entry, selection)]
+    return {"deleted": cache.delete_many(keys)}
 
 
 def _sse_event(event: str, payload: dict[str, object]) -> str:

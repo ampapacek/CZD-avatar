@@ -377,3 +377,16 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     collection: str
+
+
+class AnswerCacheFilter(BaseModel):
+    """Which entries of the admin Cache dialog a list or bulk delete covers."""
+
+    wp_id: str | None = None
+    pinned: bool | None = None
+    stale: bool | None = None
+    q: str | None = None
+
+
+class AnswerCachePinRequest(BaseModel):
+    pinned: bool
