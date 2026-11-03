@@ -28,6 +28,18 @@ class IndexPageTests(unittest.TestCase):
             self.assertIn(f"static/{name}?v={expected}", html)
         self.assertNotIn("?v=auto", html)
 
+    def test_title_comes_from_settings(self) -> None:
+        orig = main.settings
+        main.settings = orig.model_copy(update={"app_title": "CZD-Demo <1>"})
+        try:
+            for name in ("index.html", "login.html"):
+                html = main._render_page(name)
+                self.assertIn("<title>CZD-Demo &lt;1&gt;", html)
+                self.assertIn("<h1>CZD-Demo &lt;1&gt;</h1>", html)
+                self.assertNotIn("{{APP_TITLE}}", html)
+        finally:
+            main.settings = orig
+
     def test_version_follows_file_contents(self) -> None:
         orig_dir = main.static_dir
         with tempfile.TemporaryDirectory() as tmp:

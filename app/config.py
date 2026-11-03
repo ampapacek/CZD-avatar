@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # calendar day. Admins are not limited; 0 turns the limit off.
     user_daily_request_limit: int = Field(default=100, ge=0, alias="USER_DAILY_REQUEST_LIMIT")
 
+    # Shown as the page title and heading, so a second instance (e.g. a demo) can
+    # carry its own name without a code change.
+    app_title: str = Field(default="CZD-Avatar", min_length=1, alias="APP_TITLE")
+
     analytics_enabled: bool = Field(default=True, alias="ANALYTICS_ENABLED")
     analytics_dir: Path = Field(default=Path("logs/events"), alias="ANALYTICS_DIR")
     analytics_instance_id: str = Field(default="czd-avatar", alias="ANALYTICS_INSTANCE_ID")

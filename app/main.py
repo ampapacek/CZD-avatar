@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import httpx
+from html import escape
 from pathlib import Path
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
@@ -513,7 +514,9 @@ def _render_page(name: str = "index.html") -> str:
         except OSError:
             return match.group(0)
 
-    return _VERSIONED_ASSET_RE.sub(versioned, (static_dir / name).read_text(encoding="utf-8"))
+    html = (static_dir / name).read_text(encoding="utf-8")
+    html = html.replace("{{APP_TITLE}}", escape(settings.app_title))
+    return _VERSIONED_ASSET_RE.sub(versioned, html)
 
 
 @app.get("/", include_in_schema=False)
