@@ -232,6 +232,29 @@ class UnlockResponse(BaseModel):
     unlocked: bool
 
 
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1024)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(max_length=1024)
+    new_password: str = Field(max_length=1024)
+
+
+class PasswordResetRequest(BaseModel):
+    password: str = Field(max_length=1024)
+
+
+class UserUpdateRequest(BaseModel):
+    status: Literal["active", "pending", "disabled"] | None = None
+    is_admin: bool | None = None
+
+
+class RegistrationModeRequest(BaseModel):
+    mode: Literal["open", "approval", "closed"]
+
+
 class QueryTransformRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     wp_id: str | None = None

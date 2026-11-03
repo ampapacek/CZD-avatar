@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CZD-Avatar – přihlášení</title>
+    <link rel="icon" type="image/svg+xml" href="static/favicon.svg" />
+    <link rel="apple-touch-icon" href="static/favicon.svg" />
+    <link rel="stylesheet" href="static/styles.css?v=auto" />
+  </head>
+  <body class="login-body">
+    <script>
+      // Same theme boot as index.html, so the login page matches the app.
+      (function () {
+        var saved = "light";
+        try {
+          var stored = localStorage.getItem("theme");
+          if (stored === "dark" || stored === "light") {
+            saved = stored;
+          }
+        } catch (err) {
+          /* localStorage unavailable — keep the default theme. */
+        }
+        document.body.dataset.theme = saved;
+      })();
+    </script>
+    <main class="login-shell">
+      <header class="topbar login-topbar">
+        <div class="brand-copy">
+          <h1>CZD-Avatar</h1>
+          <div class="brand-meta">
+            <img class="ufal-logo" src="static/logo_ufal_110u.png" alt="UFAL" />
+          </div>
+        </div>
+      </header>
+      <section class="login-card">
+        <div class="settings-category-tabs login-tabs" role="tablist" aria-label="Přihlášení nebo registrace">
+          <button id="loginTab" class="settings-category-tab" type="button" role="tab" aria-selected="true" aria-controls="loginForm">Přihlásit se</button>
+          <button id="registerTab" class="settings-category-tab" type="button" role="tab" aria-selected="false" aria-controls="loginForm">Registrovat</button>
+        </div>
+        <form id="loginForm" class="login-form" novalidate>
+          <label class="field">
+            <span>E-mail</span>
+            <input id="loginEmail" type="email" autocomplete="username" required />
+          </label>
+          <label class="field">
+            <span>Heslo</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <label id="loginConfirmField" class="field" hidden>
+            <span>Heslo znovu</span>
+            <input id="loginConfirm" type="password" autocomplete="new-password" />
+          </label>
+          <p id="registrationNote" class="field-note" hidden></p>
+          <p id="loginStatus" class="status" role="status" aria-live="polite"></p>
+          <button id="loginSubmit" class="primary" type="submit">Přihlásit se</button>
+          <p class="field-note">Zapomenuté heslo ti obnoví administrátor.</p>
+        </form>
+      </section>
+    </main>
+    <script src="static/avatar.bundle.js?v=auto"></script>
+    <script src="static/login.js?v=auto"></script>
+  </body>
+</html>

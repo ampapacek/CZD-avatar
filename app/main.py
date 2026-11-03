@@ -17,10 +17,20 @@ from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.auth import (
+    AuthMiddleware,
+    account_payload,
+    current_user,
+    get_store as get_account_store,
+    is_admin_user,
+    router as auth_router,
+)
 from app.admin_password_guard import AdminPasswordGuard
 from app.config import get_settings
 from app.analytics import (
@@ -355,6 +365,9 @@ async def lifespan(app: FastAPI):
         settings.analytics_dir,
         settings.analytics_instance_id,
     )
+    if settings.auth_enabled:
+        # Create the database now, so a bad AUTH_DB_PATH fails the start, not the first login.
+        logger.info("User accounts enabled; database: %s", get_account_store().path)
     discovery = asyncio.create_task(_discovery_loop(settings.discovery_refresh_interval_seconds))
     yield
     logger.info("Shutting down API")
@@ -365,6 +378,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="rag-avatar", version="0.1.0", lifespan=lifespan)
+app.add_middleware(AuthMiddleware)
+app.include_router(auth_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> Response:
+    """FastAPI's 422, but with ASCII escapes: the default echoes the input, and
+    a lone surrogate from JSON cannot be encoded as UTF-8, so the 422 became a 500."""
+
+    body = json.dumps({"detail": jsonable_encoder(exc.errors())}, ensure_ascii=True)
+    return Response(body, status_code=422, media_type="application/json")
 
 static_dir = Path(__file__).parent / "static"
 project_root = Path(__file__).resolve().parents[1]
@@ -475,8 +499,8 @@ def _hash_file(path: Path, mtime_ns: int, size: int) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
-def _render_index() -> str:
-    """index.html with every `static/<file>?v=...` pointed at that file's content hash.
+def _render_page(name: str = "index.html") -> str:
+    """A static page with every `static/<file>?v=...` pointed at that file's content hash.
 
     The hash changes exactly when the file does, so a deploy never has to bump a
     version by hand and a browser never keeps running last week's app.js.
@@ -489,7 +513,7 @@ def _render_index() -> str:
         except OSError:
             return match.group(0)
 
-    return _VERSIONED_ASSET_RE.sub(versioned, (static_dir / "index.html").read_text(encoding="utf-8"))
+    return _VERSIONED_ASSET_RE.sub(versioned, (static_dir / name).read_text(encoding="utf-8"))
 
 
 @app.get("/", include_in_schema=False)
@@ -497,7 +521,15 @@ def index() -> HTMLResponse:
     # no-cache: the browser may store the page but must revalidate it on every
     # load. A heuristically cached index.html pinned old asset versions and
     # served a stale UI long after a deploy.
-    return HTMLResponse(_render_index(), headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(_render_page(), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/login", include_in_schema=False)
+def login_page() -> Response:
+    # AuthMiddleware sends logged-out visitors of "/" here; anyone else belongs in the app.
+    if not settings.auth_enabled or current_user.get() is not None:
+        return RedirectResponse("./", status_code=303)
+    return HTMLResponse(_render_page("login.html"), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/logo_ufal_110u.png", include_in_schema=False)
@@ -581,6 +613,7 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
         },
         "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
+        "account": account_payload(current_user.get()),
     }
 
 
@@ -872,9 +905,9 @@ def _shared_password_ok(password: str | None) -> bool:
 
 
 def _admin_authorized(password: str | None) -> bool:
-    """Whether the request has admin rights: the shared ADMIN_PASSWORD."""
+    """The shared ADMIN_PASSWORD, or a logged-in admin account, which needs none."""
 
-    return _shared_password_ok(password)
+    return is_admin_user() or _shared_password_ok(password)
 
 
 def _require_admin_password(password: str | None) -> None:

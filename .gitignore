@@ -27,6 +27,8 @@ data/shared_history.json
 data/shared_history.json.lock
 data/.shared_history.json.*.tmp
 data/placeholders.json
+data/users.sqlite3
+data/users.sqlite3-*
 data/query_transforms.json
 data/questions/
 data/raw/*

@@ -115,6 +115,20 @@ class Settings(BaseSettings):
     )
     query_transform_timeout: float = Field(default=15.0, alias="QUERY_TRANSFORM_TIMEOUT")
 
+    # User accounts. Off by default: the app then behaves exactly as without them.
+    auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
+    auth_db_path: Path = Field(default=Path("data/users.sqlite3"), alias="AUTH_DB_PATH")
+    # Used until an admin picks a mode in the app; that choice is kept in the database.
+    auth_registration_mode: str = Field(default="approval", alias="AUTH_REGISTRATION_MODE")
+    auth_session_days: float = Field(default=30, gt=0, alias="AUTH_SESSION_DAYS")
+    # Browsers keep Secure cookies off plain http, except on localhost. Turn this
+    # off only for a test server reached over plain http.
+    auth_cookie_secure: bool = Field(default=True, alias="AUTH_COOKIE_SECURE")
+    auth_cookie_name: str = Field(default="czd_session", alias="AUTH_COOKIE_NAME")
+    # /chat, /chat/stream, /retrieve and /retrieve/stream per user and Prague
+    # calendar day. Admins are not limited; 0 turns the limit off.
+    user_daily_request_limit: int = Field(default=100, ge=0, alias="USER_DAILY_REQUEST_LIMIT")
+
     analytics_enabled: bool = Field(default=True, alias="ANALYTICS_ENABLED")
     analytics_dir: Path = Field(default=Path("logs/events"), alias="ANALYTICS_DIR")
     analytics_instance_id: str = Field(default="czd-avatar", alias="ANALYTICS_INSTANCE_ID")

@@ -40,14 +40,14 @@ class IndexPageTests(unittest.TestCase):
                 )
                 asset = main.static_dir / "app.js"
                 asset.write_text("one", encoding="utf-8")
-                first = re.search(r"app\.js\?v=(\w+)", main._render_index()).group(1)
+                first = re.search(r"app\.js\?v=(\w+)", main._render_page()).group(1)
 
                 asset.write_text("two!", encoding="utf-8")
-                second = re.search(r"app\.js\?v=(\w+)", main._render_index()).group(1)
+                second = re.search(r"app\.js\?v=(\w+)", main._render_page()).group(1)
 
                 self.assertNotEqual(first, second)
                 # A missing file keeps its reference untouched rather than failing the page.
-                self.assertIn("static/missing.js?v=auto", main._render_index())
+                self.assertIn("static/missing.js?v=auto", main._render_page())
             finally:
                 main.static_dir = orig_dir
 

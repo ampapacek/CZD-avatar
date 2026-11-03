@@ -73,5 +73,6 @@ tests, and frontend builds.
 - [Prompts, placeholders, and work packages](docs/prompts.md)
 - [Retrieval, reranking, and local reference implementation](docs/retrieval.md)
 - [Usage analytics and logging](docs/analytics.md)
+- [User accounts and the daily limit](docs/accounts.md)
 - [Deployment](docs/deployment.md)
 - [Architecture and development conventions](docs/architecture.md)

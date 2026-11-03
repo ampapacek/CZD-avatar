@@ -2,7 +2,7 @@
 
 Counted for the whole server, not per client: without accounts there is no
 reliable identity to count by. The cost is that someone guessing can keep the
-shared password blocked for everyone.
+shared password blocked for everyone; logged-in admin accounts are not affected.
 """
 
 from __future__ import annotations

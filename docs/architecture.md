@@ -23,6 +23,7 @@ Selected API endpoints (the complete schema is available at `/docs` when the app
 - `POST /retrieve`
 - `POST /chat`
 - `POST /chat/stream`
+- `/auth/*` and `/admin/*` when `AUTH_ENABLED` is on (see [User accounts](accounts.md))
 
 Example `/chat` body. Parameter placeholders (e.g. `length`, `custom_instructions`) travel as a generic `selections` map; `placeholder_defs` carries the frontend's fully-resolved effective definitions for the placeholders the selected prompt uses (so the server substitutes exactly what the browser configured):
 
@@ -109,6 +110,7 @@ The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake 
 
 - `app/main.py` — routes, model presets, public settings, lifespan shutdown
 - `app/config.py`, `app/models.py`, `app/logging_config.py`
+- `app/accounts.py`, `app/auth.py` — optional user accounts, login gate and daily request limit ([User accounts](accounts.md))
 - `app/rag/` — ingestion, chunking, retrieval, prompting, vector store, pipeline
 - `app/rag/wp_config.py` — single source of WP config (labels, built-in prompts, collections, defaults)
 - `app/rag/placeholders.py` — placeholder engine + `DEFAULT_PLACEHOLDERS` floor
@@ -119,7 +121,7 @@ The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake 
   `npm run build`, each with a `*.test.js` beside it. Entry point is `frontend/bundle.js`.
   **Rebuild the bundle after editing any of them** and include it with source changes; the deployed app
   serves the built file and needs no Node.
-- `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`
+- `scripts/` — `ingest.py`, `ask.py`, `batch_answers.py`, `download_wikipedia.py`, `users.py` (first admin, password resets)
 - `deploy/` — pull-based auto-deploy: `deploy.sh` run every minute by a systemd timer that `install.sh` sets up on the server, deploying whatever the `production` branch points at (see [Deployment](deployment.md)). `tests/test_deploy_script.py` drives it against a throwaway origin.
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/models.json` — the one tracked file describing models: context window, reasoning support, room for more. `MODEL_METADATA_PATH` overrides it.
