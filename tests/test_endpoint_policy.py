@@ -119,5 +119,12 @@ class PolicyErrorStatusTests(unittest.TestCase):
         self.assertEqual(wp1["default_collection_id"], "configured-id")
 
 
+class IngestEndpointTests(unittest.TestCase):
+    def test_ingest_is_not_served(self) -> None:
+        # Indexing runs only from scripts/ingest.py on the server.
+        response = TestClient(main.app).post("/ingest", json={"reset": True})
+        self.assertIn(response.status_code, (404, 405))
+
+
 if __name__ == "__main__":
     unittest.main()

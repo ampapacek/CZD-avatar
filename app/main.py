@@ -39,8 +39,6 @@ from app.models import (
     ChatRequest,
     ChatResponse,
     HealthResponse,
-    IngestRequest,
-    IngestResponse,
     Placeholder,
     PlaceholderSaveRequest,
     PromptPreset,
@@ -1261,16 +1259,6 @@ def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, st
         if value is not None
     }
     return defs, selections
-
-
-@app.post("/ingest", response_model=IngestResponse)
-def ingest(request: IngestRequest) -> IngestResponse:
-    path = Path(request.path) if request.path else settings.raw_data_dir
-    try:
-        result = pipeline.ingest(path, reset=request.reset)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return IngestResponse(**result)
 
 
 @app.post("/retrieve", response_model=RetrieveResponse)

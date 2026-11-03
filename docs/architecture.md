@@ -20,7 +20,6 @@ Selected API endpoints (the complete schema is available at `/docs` when the app
 - `POST /placeholders`
 - `DELETE /placeholders/{name}`
 - `POST /unlock`
-- `POST /ingest`
 - `POST /retrieve`
 - `POST /chat`
 - `POST /chat/stream`

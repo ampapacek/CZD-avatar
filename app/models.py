@@ -7,17 +7,6 @@ RetrievalBackend = Literal["msearch", "local"]
 MSearchMode = Literal["hybrid", "semantic", "keyword"]
 
 
-class IngestRequest(BaseModel):
-    path: str | None = Field(default=None, description="Directory with .txt, .md, and .pdf documents.")
-    reset: bool = Field(default=True, description="Recreate the Qdrant collection before ingesting.")
-
-
-class IngestResponse(BaseModel):
-    documents_loaded: int
-    chunks_indexed: int
-    collection: str
-
-
 class RetrieveRequest(BaseModel):
     question: str
     retrieval_query: str | None = None
