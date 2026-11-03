@@ -24,7 +24,7 @@ function selector() {
   w.customModelAllowed = () => w.unlocked;
   w.selectedProviderApiKey = w.selectedProviderBaseUrl = () => "";
   w.escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-  w.updateCustomModelVisibility = w.updateLlmPolicyNote = w.updateContextWindowForSelectedModel = w.persistLlmSettings = () => {};
+  w.updateCustomModelVisibility = w.updateLlmPolicyNote = w.updateContextWindowForSelectedModel = w.persistLlmSettings = w.renderCacheButton = () => {};
   w.eval(source.slice(source.indexOf("function populateModels("), source.indexOf("// System placeholders are filled by the server and never surfaced")));
   w.eval(source.match(/^showAllOpenRouterModels.addEventListener.*$/m)[0]);
   w.eval(source.slice(source.indexOf('model.addEventListener("change"'), source.indexOf('llmUnlockPassword.addEventListener("input"')));

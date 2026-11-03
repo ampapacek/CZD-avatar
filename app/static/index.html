@@ -99,6 +99,14 @@
             </span>
             <span id="themeToggleLabel">Motiv</span>
           </button>
+          <button id="cacheButton" class="topbar-button" type="button" title="Cache: uložené odpovědi, připnutí a mazání (admin)." aria-label="Cache: uložené odpovědi, připnutí a mazání (admin)." hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <ellipse cx="12" cy="5.5" rx="7" ry="2.5"></ellipse>
+              <path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"></path>
+              <path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"></path>
+            </svg>
+            <span>Cache</span>
+          </button>
           <button id="accountButton" class="topbar-button" type="button" title="Účet: denní limit dotazů, změna hesla a odhlášení." aria-label="Účet: denní limit dotazů, změna hesla a odhlášení." hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="8.5" r="3.8"></circle>
@@ -551,6 +559,7 @@
             <summary>Uložené odpovědi (mezipaměť)</summary>
             <p>Když někdo položí stejnou první otázku se stejným nastavením (profil, model, kolekce, délka, vlastní instrukce…), jako už dříve někdo jiný, aplikace nemusí model ptát znovu. Odpověď i se zdroji načte z mezipaměti a zobrazí ji postupně jako obvykle, jen rychleji. Pod odpovědí pak stojí <code>Odpověď z mezipaměti</code> s časem, kdy byla vygenerovaná, a v konverzaci štítek <code>z mezipaměti</code>.</p>
             <p>Tlačítko <code>Vygenerovat znovu</code> vedle tohoto štítku nechá model odpovědět znovu s aktuálním nastavením; nová odpověď uloženou nahradí i pro ostatní. Navazující otázky v konverzaci se z mezipaměti nikdy neberou. Uložené odpovědi po čase vyprší.</p>
+            <p>Administrátor (přihlášený admin účet nebo odemčené admin heslo v <code>Nastavení</code>) má vpravo nahoře tlačítko <code>Cache</code>. V něm vidí uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a může je filtrovat podle WP, připnutí, stavu a textu otázky. <code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny, které odpovídají filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a je možné ji smazat.</p>
           </details>
           <details class="help-details">
             <summary>Účet a denní limit</summary>
@@ -643,6 +652,95 @@
                 <tbody id="adminUsersBody"></tbody>
               </table>
             </div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="cacheDialog" class="help-dialog account-dialog cache-dialog">
+      <div class="help-content">
+        <div class="help-header">
+          <h2>Cache</h2>
+          <button id="closeCacheButton" class="icon-button help-close" type="button" aria-label="Zavřít cache" title="Zavřít">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6 6 18"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="help-body">
+          <section class="help-section">
+            <p id="cacheStats" class="field-note"></p>
+            <form id="cacheFilterForm" class="cache-filters">
+              <label class="field">
+                <span>WP</span>
+                <select id="cacheWpFilter"></select>
+              </label>
+              <label class="field">
+                <span>Připnutí</span>
+                <select id="cachePinnedFilter">
+                  <option value="">Vše</option>
+                  <option value="true">Připnuté</option>
+                  <option value="false">Nepřipnuté</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Stav</span>
+                <select id="cacheStaleFilter">
+                  <option value="">Vše</option>
+                  <option value="true">Staré</option>
+                  <option value="false">Aktuální</option>
+                </select>
+              </label>
+              <label class="field cache-search">
+                <span>Otázka obsahuje</span>
+                <input id="cacheQueryFilter" type="search" autocomplete="off" />
+              </label>
+            </form>
+            <div class="form-actions">
+              <button id="cacheReloadButton" class="secondary" type="button">Načíst znovu</button>
+              <button id="cacheDeleteMatchingButton" class="secondary" type="button">Smazat vyfiltrované</button>
+            </div>
+            <p id="cacheStatus" class="status" role="status" aria-live="polite"></p>
+            <div>
+              <table class="account-users cache-entries">
+                <colgroup>
+                  <col class="cache-col-question" />
+                  <col class="cache-col-wp" />
+                  <col class="cache-col-profile" />
+                  <col class="cache-col-model" />
+                  <col class="cache-col-created" />
+                  <col class="cache-col-hits" />
+                  <col class="cache-col-size" />
+                  <col class="cache-col-pinned" />
+                  <col class="cache-col-actions" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">Otázka</th>
+                    <th scope="col">WP</th>
+                    <th scope="col">Profil</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Vytvořeno</th>
+                    <th scope="col" title="Kolikrát byla odpověď použitá z cache / naposledy">Použito</th>
+                    <th scope="col">Velikost</th>
+                    <th scope="col" title="Připnutá odpověď nevyprší a nevyřadí se">Připnuto</th>
+                    <th scope="col" aria-label="Akce"></th>
+                  </tr>
+                </thead>
+                <tbody id="cacheEntriesBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section id="cachePreview" class="help-section cache-preview" hidden>
+            <div class="cache-preview-header">
+              <h3 id="cachePreviewQuestion"></h3>
+              <button id="cachePreviewClose" class="secondary" type="button">Zavřít náhled</button>
+            </div>
+            <p id="cachePreviewSettings" class="field-note"></p>
+            <div id="cachePreviewAnswer" class="cache-preview-answer"></div>
+            <h4>Zdroje</h4>
+            <ol id="cachePreviewSources" class="cache-preview-sources"></ol>
           </section>
         </div>
       </div>

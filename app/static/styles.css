@@ -4912,3 +4912,85 @@ body[data-theme="dark"] .source-highlight {
   gap: 6px;
   justify-content: flex-end;
 }
+
+.cache-dialog {
+  width: min(1280px, calc(100% - 32px));
+}
+
+.cache-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+  margin: 10px 0;
+}
+
+.cache-filters .field {
+  flex: 0 1 auto;
+}
+
+.cache-filters .cache-search {
+  flex: 1 1 220px;
+}
+
+/* Fixed columns: a long question or model name is cut with an ellipsis (the
+   full text is in the title), so the table never scrolls sideways. */
+.cache-entries {
+  table-layout: fixed;
+}
+
+.cache-entries th,
+.cache-entries td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cache-entries td:first-child {
+  max-width: none;
+}
+
+.cache-entries .account-badge {
+  margin: 0 6px 0 0;
+}
+
+.cache-col-wp { width: 11%; }
+.cache-col-profile { width: 10%; }
+.cache-col-model { width: 12%; }
+.cache-col-created { width: 120px; }
+.cache-col-hits { width: 64px; }
+.cache-col-size { width: 68px; }
+.cache-col-pinned { width: 72px; }
+.cache-col-actions { width: 150px; }
+
+.cache-entries tr.is-stale td {
+  color: var(--muted);
+}
+
+.cache-preview-header {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.cache-preview-header h3 {
+  margin: 0;
+}
+
+.cache-preview-header .secondary {
+  width: auto;
+}
+
+.cache-preview-answer {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.cache-preview-sources {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
