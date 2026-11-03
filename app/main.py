@@ -432,11 +432,12 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
     server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
     resolved_api_key = browser_api_key or server_api_key or None
     public_models = provider_public_models(resolved_provider, provider_presets, request.llm_base_url)
-    # The admin password is checked only when it is needed, so a stale one saved
-    # in a browser neither counts as a guess nor, while the shared password is
-    # blocked, breaks chats with public models.
+    # Only the browser's own key unlocks a model; the server key pays for public
+    # models only. The admin password is checked only when it is needed, so a
+    # stale one saved in a browser neither counts as a guess nor, while the
+    # shared password is blocked, breaks chats with public models.
     if (
-        not resolved_api_key
+        not browser_api_key
         and resolved_model not in public_models
         and not _admin_authorized(request.admin_password)
     ):

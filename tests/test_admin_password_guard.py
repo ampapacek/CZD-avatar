@@ -69,6 +69,17 @@ class SharedPasswordEndpointTests(unittest.TestCase):
         response = self.client.delete("/prompt-presets/builtin-overrides/x", params={"admin_password": "s3cret"})
         self.assertEqual(response.status_code, 429)
 
+    def test_blocked_password_does_not_break_public_models(self) -> None:
+        for index in range(3):
+            self.unlock(f"guess {index}")
+        # A browser still sending the saved (right) password asks for a public model.
+        public = main.ChatRequest(question="x", model="test-model", admin_password="s3cret")
+        self.assertEqual(main._resolve_llm_request(public)[1], "test-model")
+        locked = main.ChatRequest(question="x", model="locked-model", admin_password="s3cret")
+        with self.assertRaises(main.HTTPException) as caught:
+            main._resolve_llm_request(locked)
+        self.assertEqual(caught.exception.status_code, 429)
+
     def test_stale_password_with_public_model_is_not_a_guess(self) -> None:
         for index in range(5):
             main._resolve_llm_request(main.ChatRequest(question="x", model="test-model", admin_password=f"old {index}"))
@@ -78,3 +89,29 @@ class SharedPasswordEndpointTests(unittest.TestCase):
         for _ in range(5):
             self.unlock("")
         self.assertTrue(self.unlock("s3cret").json()["unlocked"])
+
+
+class LockedModelTests(unittest.TestCase):
+    """The test provider has a server key; only `test-model` is public."""
+
+    def setUp(self) -> None:
+        self.patch = patch.object(main.settings, "admin_password", "s3cret")
+        self.patch.start()
+
+    def tearDown(self) -> None:
+        self.patch.stop()
+
+    def resolve(self, **fields):
+        return main._resolve_llm_request(main.ChatRequest(question="x", **fields))
+
+    def test_server_key_does_not_unlock_other_models(self) -> None:
+        with self.assertRaises(main.HTTPException) as caught:
+            self.resolve(model="expensive-model")
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(self.resolve(model="test-model")[2], "test-key")
+
+    def test_password_or_own_key_unlocks(self) -> None:
+        self.assertEqual(self.resolve(model="expensive-model", admin_password="s3cret")[1], "expensive-model")
+        with patch.object(main, "validate_api_key"):
+            resolved = self.resolve(model="expensive-model", llm_api_key="own-key")
+        self.assertEqual(resolved[2], "own-key")
