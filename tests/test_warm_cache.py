@@ -7,15 +7,8 @@ from unittest.mock import patch
 
 from app import main
 from app.rag.prompts import default_system_prompt_template, default_user_prompt_template
-from scripts.warm_cache import (
-    Job,
-    build_jobs,
-    build_parser,
-    load_options,
-    request_body,
-    select_profiles,
-    warm,
-)
+from app.cache_warming import Job, interleave_by_model, request_body, select_profiles, warm
+from scripts.warm_cache import build_jobs, build_parser, load_options
 from tests.test_answer_cache import EndpointTestCase
 
 QUESTION = "Kdo byl Jan Hus?"
@@ -233,5 +226,5 @@ class OptionTests(unittest.TestCase):
     def test_the_example_config_is_valid(self) -> None:
         example = Path(__file__).resolve().parents[1] / "scripts" / "warm_cache.example.json"
         options = load_options(argparse.Namespace(config=str(example), **{name: None for name in
-                               ("url", "wp", "questions", "profile", "provider", "model")}))
+                               ("url", "wp", "questions", "profile", "provider", "model", "concurrency")}))
         self.assertEqual(options["wp"], ["all"])

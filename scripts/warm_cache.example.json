@@ -4,5 +4,6 @@
   "questions": "prepared",
   "profile": ["default"],
   "provider": null,
-  "model": []
+  "model": [],
+  "concurrency": 1
 }
