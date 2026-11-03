@@ -642,12 +642,33 @@ def _configured_default_live_collection(
     return None
 
 
+# Anyone can press the refresh button, so a forced refresh of the provider model
+# lists and mSearch collections runs at most this often for the whole server.
+PROVIDER_REFRESH_COOLDOWN_SECONDS = 60.0
+_provider_refresh_lock = threading.Lock()
+_last_forced_provider_refresh = float("-inf")
+
+
+def _claim_forced_provider_refresh() -> bool:
+    global _last_forced_provider_refresh
+    now = time.monotonic()
+    with _provider_refresh_lock:
+        if now - _last_forced_provider_refresh < PROVIDER_REFRESH_COOLDOWN_SECONDS:
+            return False
+        _last_forced_provider_refresh = now
+        return True
+
+
 @app.post("/llm-providers/refresh")
 def refresh_llm_providers() -> dict[str, object]:
-    _refresh_provider_state(force_model_refresh=True)
-    # Drop the cached mSearch collection list and re-fetch it now, so the refresh
-    # button updates the per-WP collection options too (not just on next load).
-    clear_collections_cache()
+    if _claim_forced_provider_refresh():
+        _refresh_provider_state(force_model_refresh=True)
+        # Drop the cached mSearch collection list and re-fetch it now, so the refresh
+        # button updates the per-WP collection options too (not just on next load).
+        clear_collections_cache()
+    else:
+        # Within the cooldown: answer with the lists fetched moments ago.
+        _refresh_provider_state()
     return {**_llm_settings_payload(), "wps": _wps_payload_with_live_collections()}
 
 

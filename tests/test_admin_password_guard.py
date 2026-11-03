@@ -115,3 +115,24 @@ class LockedModelTests(unittest.TestCase):
         with patch.object(main, "validate_api_key"):
             resolved = self.resolve(model="expensive-model", llm_api_key="own-key")
         self.assertEqual(resolved[2], "own-key")
+
+
+class ProviderRefreshCooldownTests(unittest.TestCase):
+    def test_forced_refresh_runs_at_most_once_per_cooldown(self) -> None:
+        calls = []
+        original = main._refresh_provider_state
+
+        def record(force_model_refresh: bool = False) -> None:
+            calls.append(force_model_refresh)
+            original()
+
+        with (
+            patch.object(main, "_last_forced_provider_refresh", float("-inf")),
+            patch.object(main, "_refresh_provider_state", record),
+            patch.object(main, "clear_collections_cache"),
+            patch.object(main, "_wps_payload_with_live_collections", lambda: []),
+        ):
+            client = TestClient(main.app)
+            for _ in range(3):
+                self.assertEqual(client.post("/llm-providers/refresh").status_code, 200)
+            self.assertEqual(calls, [True, False, False])
