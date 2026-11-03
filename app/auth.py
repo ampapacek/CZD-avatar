@@ -45,7 +45,9 @@ PUBLIC_PATHS = {
 }
 PUBLIC_PREFIXES = ("/static/", "/auth/")
 # The endpoints that cost an LLM or mSearch call, one per user action.
-COUNTED_PATHS = {"/chat", "/chat/stream", "/retrieve", "/retrieve/stream", "/query-transform"}
+# /chat/stream counts itself (count_request below), because an answer from the
+# answer cache costs nothing and is not counted.
+COUNTED_PATHS = {"/chat", "/retrieve", "/retrieve/stream", "/query-transform"}
 QUOTA_HEADER = "X-Daily-Requests-Remaining"
 
 # Generous enough for a room full of people signing up from one conference
@@ -149,6 +151,20 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
         finally:
             current_user.reset(token)
+
+
+def count_request() -> dict[str, str]:
+    """Count one request of the logged-in user, for an endpoint that counts
+    itself. Returns the quota header to send; raises 429 over the limit."""
+
+    user = current_user.get()
+    if not settings.auth_enabled or user is None:
+        return {}
+    limit = settings.user_daily_request_limit
+    remaining = get_store().consume_request(user, limit)
+    if remaining is None:
+        raise HTTPException(status_code=429, detail=_quota_exceeded_detail(limit), headers={QUOTA_HEADER: "0"})
+    return {QUOTA_HEADER: str(remaining)}
 
 
 def _with_header(send: Send, name: str, value: str) -> Send:

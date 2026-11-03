@@ -24,9 +24,17 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.answer_cache import (
+    AnswerCache,
+    cache_key as answer_cache_key,
+    is_cacheable as answer_is_cacheable,
+    key_input as answer_cache_key_input,
+    replay_pieces,
+)
 from app.auth import (
     AuthMiddleware,
     account_payload,
+    count_request,
     current_user,
     get_store as get_account_store,
     is_admin_user,
@@ -1662,6 +1670,113 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+_answer_cache: AnswerCache | None = None
+_answer_cache_lock = threading.Lock()
+# Pause between the pieces of a replayed answer; tests replace it.
+_replay_sleep = time.sleep
+
+# The settings a request field falls back to when it is unset, plus the ones
+# that shape retrieval and the prompt without a request field. They are part
+# of the cache key, so changing one in .env does not serve answers made under
+# the old value.
+_ANSWER_CACHE_SETTINGS = (
+    "retrieval_backend",
+    "top_k",
+    "min_score",
+    "min_relative_score",
+    "qdrant_collection",
+    "embedding_model",
+    "reranker_enabled",
+    "reranker_model",
+    "reranker_weight",
+    "reranker_candidates",
+    "reranker_max_length",
+    "msearch_base_url",
+    "msearch_collection",
+    "msearch_max_results",
+    "msearch_mode",
+    "msearch_min_confidence",
+    "msearch_rescore",
+    "context_window_tokens",
+    "output_token_budget_short",
+    "output_token_budget_medium",
+    "output_token_budget_long",
+    "min_prompt_chunks",
+    "token_budget_safety_margin",
+)
+# Everything of the "sources" event that the stored "done" payload carries too.
+_CACHED_SOURCES_FIELDS = (
+    "original_question",
+    "retrieval_query",
+    "answer_question",
+    "retrieval_query_was_rewritten",
+    "retrieval_query_rewrite_attempted",
+    "retrieval_query_rewrite_skip_reason",
+    "used_chunks",
+    "omitted_chunks",
+    "baseline_chunks",
+    "sources",
+    "token_budget",
+    "chunk_budget_warnings",
+    "conversation_summary",
+    "conversation_folded_message_count",
+)
+
+
+def _get_answer_cache() -> AnswerCache | None:
+    global _answer_cache
+    if not settings.answer_cache_enabled:
+        return None
+    with _answer_cache_lock:
+        if _answer_cache is None:
+            _answer_cache = AnswerCache(
+                settings.answer_cache_path,
+                ttl_seconds=settings.answer_cache_ttl_days * 86400,
+                max_entries=settings.answer_cache_max_entries,
+            )
+    return _answer_cache
+
+
+def _chat_cache_key_input(
+    request: ChatRequest,
+    placeholder_defs: dict,
+    selections: dict[str, str],
+    provider: str,
+    model: str,
+    base_url: str | None,
+) -> dict[str, object]:
+    return answer_cache_key_input(
+        request,
+        llm_provider=provider,
+        model=model,
+        llm_base_url=(base_url or "").rstrip("/"),
+        wp_id=resolve_wp_id(request.wp_id),
+        system_prompt=(request.system_prompt or "").strip() or default_system_prompt_template(),
+        user_prompt_template=(request.user_prompt_template or "").strip() or default_user_prompt_template(),
+        placeholder_defs=jsonable_encoder(placeholder_defs),
+        selections=selections,
+        server={name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS},
+    )
+
+
+def _cached_answer(cache: AnswerCache, key: str) -> dict[str, object] | None:
+    # A broken cache must not break the chat: it only costs a fresh answer.
+    try:
+        return cache.get(key)
+    except Exception:
+        logger.exception("Answer cache lookup failed")
+        return None
+
+
+def _store_answer(cache: AnswerCache, key: str, key_input: dict[str, object], response: dict[str, object], request: ChatRequest) -> None:
+    # retrieved_chunks repeats used_chunks; the replay restores it.
+    payload = {name: value for name, value in response.items() if name != "retrieved_chunks"}
+    try:
+        cache.put(key, key_input, payload, meta={"prompt_preset_id": request.prompt_preset_id})
+    except Exception:
+        logger.exception("Answer cache store failed")
+
+
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     placeholder_defs, selections = _resolve_chat_placeholders(request)
@@ -1676,6 +1791,93 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
         base_url=request.llm_base_url,
         key_source="browser" if request.llm_api_key and request.llm_api_key.strip() else "none",
     )
+    initial_fields["cache_hit"] = False
+    # Resolved before the stream starts, because the cache key needs the
+    # resolved model; an error is reported from inside the stream as before.
+    resolved_llm: tuple[str, str, str | None, str | None] | None = None
+    resolve_error: HTTPException | None = None
+    try:
+        resolved_llm = _resolve_llm_request(request)
+    except HTTPException as exc:
+        resolve_error = exc
+    cache = _get_answer_cache() if resolved_llm is not None and answer_is_cacheable(request) else None
+    cache_input: dict[str, object] | None = None
+    cache_key: str | None = None
+    cached: dict[str, object] | None = None
+    if cache is not None:
+        provider, model, _, base_url = resolved_llm
+        cache_input = _chat_cache_key_input(request, placeholder_defs, selections, provider, model, base_url)
+        cache_key = answer_cache_key(cache_input)
+        if not request.bypass_cache:
+            cached = _cached_answer(cache, cache_key)
+    # Only an answer that costs an LLM call counts against the daily limit.
+    quota_headers = {} if cached is not None else count_request()
+
+    def cached_event_stream():
+        started = time.perf_counter()
+        resolved_provider, resolved_model, resolved_api_key, resolved_base_url = resolved_llm
+        fields = {
+            **initial_fields,
+            "provider": resolved_provider,
+            "requested_model": resolved_model,
+            "endpoint_host": endpoint_host(resolved_base_url),
+            "key_source": _key_source(request, resolved_api_key),
+            "upstream_model": cached.get("upstream_model"),
+            "cache_hit": True,
+        }
+        answer = str(cached.get("answer") or "")
+        try:
+            # The policy may have changed since the answer was stored.
+            _enforce_msearch_collection_policy(
+                request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+            )
+            _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            sources = {name: cached.get(name) for name in _CACHED_SOURCES_FIELDS}
+            yield _sse_event(
+                "sources",
+                {"question": request.question, **sources, "retrieved_chunks": cached.get("used_chunks")},
+            )
+            if cached.get("reasoning"):
+                yield _sse_event("reasoning", {"text": cached["reasoning"]})
+            # Streamed at a steady pace rather than all at once, so it reads
+            # like (and an avatar can speak it like) a generated answer.
+            pieces, pause = replay_pieces(answer)
+            for index, piece in enumerate(pieces):
+                if index:
+                    _replay_sleep(pause)
+                yield _sse_event("token", {"text": piece})
+            yield _sse_event(
+                "done",
+                {
+                    **cached,
+                    "retrieved_chunks": cached.get("used_chunks"),
+                    "response_time_seconds": round(time.perf_counter() - started, 3),
+                    "rerank_time_seconds": None,
+                    "generation_time_seconds": None,
+                    "cache_hit": True,
+                },
+            )
+            analytics.event(
+                "turn", context, **fields, status="ok",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code=None,
+                **text_lengths(answer, "answer"), answer_tokens_estimated=estimated_tokens(answer),
+            )
+        except HTTPException as exc:
+            logger.info("Streaming chat rejected: %s", exc.detail)
+            yield _sse_event("error", {"detail": exc.detail})
+            analytics.event(
+                "turn", context, **fields, status="error",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code=analytics_error_code(exc, exc.status_code),
+            )
+        except GeneratorExit:
+            analytics.event(
+                "turn", context, **fields, status="cancelled",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code="client_cancelled",
+            )
+            raise
 
     def event_stream():
         started = time.perf_counter()
@@ -1686,7 +1888,9 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
         budget = None
         answer = ""
         try:
-            resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
+            if resolve_error is not None:
+                raise resolve_error
+            resolved_provider, resolved_model, resolved_api_key, resolved_base_url = resolved_llm
             key_source = _key_source(request, resolved_api_key)
             fields.update(
                 provider=resolved_provider,
@@ -1935,6 +2139,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "response_time_seconds": round(elapsed, 3),
                 "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
                 "generation_time_seconds": round(generation_seconds, 3),
+                "cache_hit": False,
             }
             logger.info(
                 "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s",
@@ -1946,6 +2151,9 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 len(answer),
             )
             yield _sse_event("done", response)
+            # Only a finished answer: an aborted or failed stream never gets here.
+            if cache_key is not None and answer.strip():
+                _store_answer(cache, cache_key, cache_input, response, request)
             event_fields = {
                 **fields,
                 "upstream_model": upstream_model,
@@ -2018,11 +2226,12 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             )
 
     return StreamingResponse(
-        event_stream(),
+        cached_event_stream() if cached is not None else event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            **quota_headers,
         },
     )
 

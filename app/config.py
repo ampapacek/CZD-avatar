@@ -126,8 +126,16 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = Field(default=True, alias="AUTH_COOKIE_SECURE")
     auth_cookie_name: str = Field(default="czd_session", alias="AUTH_COOKIE_NAME")
     # /chat, /chat/stream, /retrieve and /retrieve/stream per user and Prague
-    # calendar day. Admins are not limited; 0 turns the limit off.
+    # calendar day; an answer served from the answer cache does not count.
+    # Admins are not limited; 0 turns the limit off.
     user_daily_request_limit: int = Field(default=100, ge=0, alias="USER_DAILY_REQUEST_LIMIT")
+
+    # Finished first-turn answers of /chat/stream, replayed for an identical
+    # request instead of calling the LLM again (see app/answer_cache.py).
+    answer_cache_enabled: bool = Field(default=True, alias="ANSWER_CACHE_ENABLED")
+    answer_cache_path: Path = Field(default=Path("data/answer_cache.sqlite3"), alias="ANSWER_CACHE_PATH")
+    answer_cache_ttl_days: float = Field(default=14, gt=0, alias="ANSWER_CACHE_TTL_DAYS")
+    answer_cache_max_entries: int = Field(default=10_000, ge=1, alias="ANSWER_CACHE_MAX_ENTRIES")
 
     # Shown as the page title and heading, so a second instance (e.g. a demo) can
     # carry its own name without a code change.

@@ -80,6 +80,9 @@ class ChatRequest(BaseModel):
     prompt_preset_id: str | None = None
     query_transform_ms: int | None = Field(default=None, ge=0)
     query_transform_kind: Literal["llm", "other"] | None = None
+    # Generate a fresh answer even when the answer cache has one ("Vygenerovat
+    # znovu"); the new answer replaces the cached one.
+    bypass_cache: bool = False
 
 
 class OptionDef(BaseModel):
