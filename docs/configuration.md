@@ -160,7 +160,7 @@ MSEARCH_PASSWORD=your_password
 
 Model and collection discovery run at startup and in `_discovery_loop` in `app/main.py`. Forced provider fetching runs outside `_provider_state_lock`, because `/settings` takes that lock on every call. Keep `LLM_MODELS_CACHE_TTL_SECONDS` and `MSEARCH_COLLECTIONS_CACHE_TTL_SECONDS` longer than the refresh interval; they are request-side fallback TTLs. `/llm-providers/refresh` forces both lists immediately.
 
-The browser's `LLM API` panel can override the LLM base URL and key for the session. If credentials appear inconsistent, check the key fingerprint in startup logs; never print the key. The project `.env` intentionally takes precedence over exported environment variables.
+The browser's `LLM API` panel can override the LLM base URL and key for the session. A server key is only ever sent to its own provider's URL; a request to another URL without a browser key goes without one. If credentials appear inconsistent, check the key fingerprint in startup logs; never print the key. The project `.env` intentionally takes precedence over exported environment variables.
 
 ## Reasoning and context metadata
 

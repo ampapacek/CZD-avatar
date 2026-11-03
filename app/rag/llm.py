@@ -99,6 +99,14 @@ class OpenAICompatibleLLM(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
+    def _api_key_for(self, api_key: str | None, base_url: str) -> str | None:
+        # The client's own key belongs to its own URL. A request sent elsewhere
+        # without a key of its own goes without one, so the server key can
+        # never reach a URL taken from a request.
+        if api_key:
+            return api_key
+        return self.api_key if base_url == self.base_url else None
+
     def generate(
         self,
         messages: list[dict[str, str]],
@@ -107,8 +115,8 @@ class OpenAICompatibleLLM(LLMClient):
         base_url: str | None = None,
         reasoning: dict[str, object] | None = None,
     ) -> LLMGeneration:
-        resolved_api_key = api_key or self.api_key
         resolved_base_url = (base_url or self.base_url).rstrip("/")
+        resolved_api_key = self._api_key_for(api_key, resolved_base_url)
 
         resolved_model = model or self.model
         headers = {
@@ -163,10 +171,11 @@ class OpenAICompatibleLLM(LLMClient):
         base_url: str | None = None,
         reasoning: dict[str, object] | None = None,
     ) -> TokenStream:
+        resolved_base_url = (base_url or self.base_url).rstrip("/")
         return _OpenAICompatibleStream(
-            api_key=api_key or self.api_key,
+            api_key=self._api_key_for(api_key, resolved_base_url),
             model=model or self.model,
-            base_url=(base_url or self.base_url).rstrip("/"),
+            base_url=resolved_base_url,
             messages=messages,
             timeout=self.timeout,
             analytics_context=current_context(),
