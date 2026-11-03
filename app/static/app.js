@@ -2564,7 +2564,8 @@ async function verifyUnlockPassword({ silent = false } = {}) {
     });
     const data = await response.json();
     if (!response.ok || !data.unlocked) {
-      throw new Error("Admin heslo není správné.");
+      // 429: the shared password is blocked for a while after repeated wrong guesses.
+      throw new Error(response.status === 429 && data.detail ? data.detail : "Admin heslo není správné.");
     }
     llmModelsUnlocked = true;
     // Unlock already succeeded server-side; persisting is best-effort, so a full

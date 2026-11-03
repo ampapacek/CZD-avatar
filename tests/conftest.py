@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import pytest
+
 import app.config
 
 TEST_ENV = {
@@ -39,3 +41,13 @@ app.config.load_env_values = _test_env_values
 # Settings also reads `.env` by itself for any field not passed explicitly.
 app.config.Settings.model_config["env_file"] = None
 app.config.get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_admin_password_guard():
+    """Wrong shared passwords sent by one test must not block the next one."""
+
+    from app import main
+
+    main.admin_password_guard.reset()
+    yield

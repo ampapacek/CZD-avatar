@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import hmac
+import math
 import random
 import re
 import threading
@@ -19,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.admin_password_guard import AdminPasswordGuard
 from app.config import get_settings
 from app.analytics import (
     AnalyticsWriter,
@@ -128,6 +130,7 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 settings = get_settings()
+admin_password_guard = AdminPasswordGuard()
 analytics = AnalyticsWriter(
     False,
     settings.analytics_dir,
@@ -427,14 +430,16 @@ def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, st
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     server_api_key = provider_api_key(resolved_provider, provider_presets, request.llm_base_url) if use_server_api_key else ""
-    browser_admin_password = request.admin_password.strip() if request.admin_password else ""
-    unlock_enabled = bool(settings.admin_password) and _secure_eq(
-        browser_admin_password,
-        settings.admin_password,
-    )
     resolved_api_key = browser_api_key or server_api_key or None
     public_models = provider_public_models(resolved_provider, provider_presets, request.llm_base_url)
-    if not resolved_api_key and resolved_model not in public_models and not unlock_enabled:
+    # The admin password is checked only when it is needed, so a stale one saved
+    # in a browser neither counts as a guess nor, while the shared password is
+    # blocked, breaks chats with public models.
+    if (
+        not resolved_api_key
+        and resolved_model not in public_models
+        and not _admin_authorized(request.admin_password)
+    ):
         allowed_models = ", ".join(sorted(public_models)) if public_models else provider_config["default_model"]
         raise HTTPException(
             status_code=400,
@@ -788,21 +793,35 @@ def _can_modify_prompt_preset(
     owner_id: str | None,
     password: str | None,
 ) -> bool:
-    owner = (preset.get("owner_id") or "").strip()
-    requester = (owner_id or "").strip()
-    if owner and requester and _secure_eq(owner, requester):
-        return True
-    if settings.admin_password and _secure_eq(
-        (password or "").strip(), settings.admin_password
-    ):
-        return True
-    return False
+    return _owned_by(preset, owner_id) or _admin_authorized(password)
+
+
+def _shared_password_ok(password: str | None) -> bool:
+    """Check the shared ADMIN_PASSWORD, counting wrong guesses server-wide."""
+
+    supplied = (password or "").strip()
+    if not settings.admin_password or not supplied:
+        return False
+    ok, wait = admin_password_guard.check(supplied, settings.admin_password)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Sdílené admin heslo je kvůli opakovaným chybným pokusům dočasně zablokované. "
+                f"Zkus to znovu za {math.ceil(wait / 60)} min."
+            ),
+        )
+    return ok
+
+
+def _admin_authorized(password: str | None) -> bool:
+    """Whether the request has admin rights: the shared ADMIN_PASSWORD."""
+
+    return _shared_password_ok(password)
 
 
 def _require_admin_password(password: str | None) -> None:
-    if not settings.admin_password or not _secure_eq(
-        (password or "").strip(), settings.admin_password
-    ):
+    if not _admin_authorized(password):
         raise HTTPException(
             status_code=403,
             detail="Úpravy vestavěných profilů vyžadují admin přístup.",
@@ -827,10 +846,7 @@ def get_prompt_presets(owner_id: str | None = None) -> list[PromptPreset]:
 
 @app.post("/unlock", response_model=UnlockResponse)
 def unlock_models(request: UnlockRequest) -> UnlockResponse:
-    if not settings.admin_password:
-        return UnlockResponse(unlocked=False)
-    unlocked = _secure_eq(request.password.strip(), settings.admin_password)
-    return UnlockResponse(unlocked=unlocked)
+    return UnlockResponse(unlocked=_shared_password_ok(request.password))
 
 
 @app.post("/prompt-presets", response_model=PromptPreset)
@@ -1075,15 +1091,7 @@ def _find_shared_history_item(item_id: str) -> dict[str, object] | None:
 def _can_modify_shared_history_item(
     item: dict[str, object], owner_id: str | None, password: str | None
 ) -> bool:
-    owner = (str(item.get("owner_id") or "")).strip()
-    requester = (owner_id or "").strip()
-    if owner and requester and _secure_eq(owner, requester):
-        return True
-    if settings.admin_password and _secure_eq(
-        (password or "").strip(), settings.admin_password
-    ):
-        return True
-    return False
+    return _owned_by(item, owner_id) or _admin_authorized(password)
 
 
 @app.get("/shared-history", response_model=list[SharedHistoryItem])
@@ -1182,17 +1190,8 @@ def _find_placeholder(name: str) -> dict[str, object] | None:
 
 def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None, password: str | None) -> bool:
     if str(placeholder.get("name") or "") in DEFAULT_PLACEHOLDERS:
-        return bool(settings.admin_password) and _secure_eq(
-            (password or "").strip(),
-            settings.admin_password,
-        )
-    owner = (str(placeholder.get("owner_id") or "")).strip()
-    requester = (owner_id or "").strip()
-    if owner and requester and _secure_eq(owner, requester):
-        return True
-    if settings.admin_password and _secure_eq((password or "").strip(), settings.admin_password):
-        return True
-    return False
+        return _admin_authorized(password)
+    return _owned_by(placeholder, owner_id) or _admin_authorized(password)
 
 
 @app.get("/placeholders", response_model=list[Placeholder])
@@ -1209,10 +1208,7 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
     if not name:
         raise HTTPException(status_code=400, detail="Placeholder name is required.")
     existing = _find_placeholder(name)
-    if existing is None and name in DEFAULT_PLACEHOLDERS and not (
-        settings.admin_password
-        and _secure_eq((request.admin_password or "").strip(), settings.admin_password)
-    ):
+    if existing is None and name in DEFAULT_PLACEHOLDERS and not _admin_authorized(request.admin_password):
         raise HTTPException(status_code=403, detail=BUILTIN_PLACEHOLDER_FORBIDDEN_DETAIL)
     if existing is not None and not _can_modify_placeholder(existing, request.owner_id, request.admin_password):
         if name in DEFAULT_PLACEHOLDERS:

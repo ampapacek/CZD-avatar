@@ -23,6 +23,8 @@ Discovered model lists and the live mSearch collections are fetched at startup a
 
 If you also set `ADMIN_PASSWORD`, the browser can enter that shared admin password to unlock the full model list and to modify or delete shared prompt presets owned by another browser (creating a new shared prompt stays open). Without it, only the public models configured for the selected provider appear in the selector. Creating shared prompts currently requires no admin password.
 
+Wrong guesses of the shared password are counted for the whole server: after 10 different wrong values within 10 minutes, the shared password is refused (HTTP 429) for the next 10 minutes, even when correct. The password is only checked when a request needs it (a locked model, someone else's shared item, `/unlock`), so chats with public models keep working while it is blocked. There is no per-client identity without accounts, so someone guessing can keep it blocked for everyone. Use a long random value.
+
 Set `LLM_PROVIDER_<ID>_PUBLIC_MODELS=*` to make every resolved model for that provider public. If discovery succeeds, this means all discovered models. If discovery fails, it means the fallback configured models from `MODELS` plus `DEFAULT_MODEL`.
 
 When `DISCOVER_MODELS=true`, discovered models are treated as authoritative. `MODELS` is used only as a fallback if discovery fails, so stale explicit model names do not appear while provider discovery is working.
