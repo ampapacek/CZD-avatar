@@ -53,6 +53,8 @@ Example `/chat` body. Parameter placeholders (e.g. `length`, `custom_instruction
 
 `selections` and `placeholder_defs` may be omitted; the server then falls back to the shared `data/placeholders.json` overlay and the `DEFAULT_PLACEHOLDERS` code floor.
 
+`"use_sources": false` answers from the bare model without retrieval and sends the prompt texts as written (see [Answering without sources](prompts.md#answering-without-sources)).
+
 ## Ask A Question
 
 From the browser, try a Czech-history question such as:

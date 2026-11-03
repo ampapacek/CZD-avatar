@@ -37,6 +37,16 @@ The chat request carries `selections` (a generic `{name: value}` map) and `place
 
 Browser state lives in `localStorage`. Important keys include `czdemos4ai-local-prompt-presets`, `czdemos4ai-local-placeholder-defs`, `czdemos4ai-history-v2`, `czdemos4ai-conversations`, `czdemos4ai-llm-settings`, `czdemos4ai-token-budget`, `czdemos4ai-browser-owner-id`, and `theme`.
 
+## Answering without sources
+
+The Kolekce selector ends with **Bez zdrojů**. It answers from the bare model: no retrieval, no Sources panel, and the retrieval sliders and `Pouze vyhledat zdroje` are disabled. Query transformations still run, so a transform with `use_transformed_for_answer` still changes the question the model answers. Without sources no collection content goes to the provider, so the per-WP AI-Ufal restriction does not apply.
+
+- **Prompts declare their mode** with `uses_sources` (built-ins in `wp_config.py`, shared presets in `data/prompt_presets.json`, local ones in `localStorage`). A prompt without the flag uses sources. The main-page Profil list shows only the current mode's prompts; Settings lists all of them and marks those without sources. Picking a prompt of the other mode moves Kolekce with it, and switching Kolekce loads the prompt last used in the new mode (else the WP's first built-in for it).
+- **Every WP ships `Obecný asistent`** (`wpN-obecny`), a topic-neutral prompt without sources (answer in the question's language, `{length}`, Markdown). WP-specific prompts without sources are created in the UI by unticking `Používá zdroje` in the prompt editor; untouched default texts are swapped for the no-sources ones.
+- **The prompt is taken literally.** The request carries `use_sources: false` and the prompt texts verbatim. An empty system prompt sends no system message at all; an empty user template sends just the question. `{retrieved_snippets}` renders empty. The conversation query rewrite is skipped (`retrieval_query_rewrite_skip_reason: "no_sources"`).
+- The mode is stored as the sentinel collection value `__no_sources__` wherever the collection already is (conversation settings, history entries), so restoring them restores the mode. Conversation turns follow the current setting, so one thread can mix turns with and without sources.
+- CLI: `uv run python scripts/ask.py "…" --no-sources`.
+
 ## Random Questions
 
 The "Náhodná otázka" button (`GET /questions/random?wp_id=...`) and the "Připravené otázky" dropdown (`GET /questions?wp_id=...`) read a per-WP plain-text file (one question per line) configured by `questions_path` in `app/rag/wp_config.py`:
