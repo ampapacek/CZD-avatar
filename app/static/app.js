@@ -41,6 +41,7 @@ const clearCustomProviderApiKeyButton = document.querySelector("#clearCustomProv
 const customProviderDefaultModel = document.querySelector("#customProviderDefaultModel");
 const customProviderModels = document.querySelector("#customProviderModels");
 const retrieveButton = document.querySelector("#retrieveButton");
+const copyAnswerWithSourcesButton = document.querySelector("#copyAnswerWithSourcesButton");
 const queryTransformSection = document.querySelector("#queryTransformSection");
 const queryTransformApplyToggle = document.querySelector("#queryTransformApplyToggle");
 const queryTransformRowsEl = document.querySelector("#queryTransformRows");
@@ -74,6 +75,7 @@ const deletePromptButton = document.querySelector("#deletePromptButton");
 const llmPolicyNote = document.querySelector("#llmPolicyNote");
 const promptName = document.querySelector("#promptName");
 const promptNote = document.querySelector("#promptNote");
+const promptUsesSources = document.querySelector("#promptUsesSources");
 const systemPrompt = document.querySelector("#systemPrompt");
 const userPromptTemplate = document.querySelector("#userPromptTemplate");
 const promptTemplateWarning = document.querySelector("#promptTemplateWarning");
@@ -436,6 +438,10 @@ let promptPresets = [];
 let localPromptPresets = [];
 let activePromptPresetId = "";
 let activeWpId = "";
+// "Bez zdrojů" bookkeeping: the prompt last used in each mode ("<wp>|<mode>")
+// and the real collection to return to when sources are switched back on.
+const lastPromptIdByMode = new Map();
+const lastSourceCollectionByWp = new Map();
 // Prepared questions are static for a page load. Cache successful loads so a WP
 // switch can identify whether the current text is managed without another
 // request. These revisions guard asynchronous loads against stale UI updates.
@@ -1095,7 +1101,11 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
   activeWpId = resolveWpId(wpId);
   wpSelect.value = activeWpId;
   const wp = getWpConfig(activeWpId);
-  populateMsearchCollections(collectionId || wpDefaultCollectionMsearchId(wp));
+  // Switching WP keeps "Bez zdrojů" on; otherwise the WP's default collection.
+  const keepNoSources = !collectionId && !currentUsesSources();
+  populateMsearchCollections(
+    collectionId || (keepNoSources ? Avatar.NO_SOURCES_COLLECTION : wpDefaultCollectionMsearchId(wp)),
+  );
   updateRescoreThresholdNote();
   const targetPrompt = promptId && promptPresetExists(promptId)
     ? promptId
@@ -1194,6 +1204,13 @@ async function loadSettings() {
 // generator stop retrieval / reranking / generation at its next yield.
 let activeQueryController = null;
 
+function runQueryStatusText(retrieveOnlyMode) {
+  if (retrieveOnlyMode) {
+    return "Vyhledávám zdroje...";
+  }
+  return currentUsesSources() ? "Vyhledávám zdroje a generuji odpověď..." : "Generuji odpověď...";
+}
+
 async function runQuery(retrieveOnlyMode) {
   const controller = new AbortController();
   const turnId = activeQueryTransformTurnId() || newAnalyticsId();
@@ -1207,9 +1224,7 @@ async function runQuery(retrieveOnlyMode) {
   questionStatus.hidden = true;
   statusEl.hidden = false;
   statusEl.className = "status";
-  statusEl.textContent = retrieveOnlyMode
-    ? "Vyhledávám zdroje..."
-    : "Vyhledávám zdroje a generuji odpověď...";
+  statusEl.textContent = runQueryStatusText(retrieveOnlyMode);
   streamedAnswerText = "";
   currentAnswerSources = [];
   currentRetrievedChunks = [];
@@ -1246,9 +1261,7 @@ async function runQuery(retrieveOnlyMode) {
 
   try {
     await prepareAutomaticQueryTransform(controller.signal, turnId);
-    statusEl.textContent = retrieveOnlyMode
-      ? "Vyhledávám zdroje..."
-      : "Vyhledávám zdroje a generuji odpověď...";
+    statusEl.textContent = runQueryStatusText(retrieveOnlyMode);
     if (retrieveOnlyMode) {
       const payload = buildRetrievePayload();
       currentRetrievalQuery = payload.retrieval_query || payload.question;
@@ -1332,7 +1345,9 @@ async function runQuery(retrieveOnlyMode) {
           currentConversationSummary = sourceData.conversation_summary || "";
           currentAnswerSources = sourceData.sources || chunksToSources(currentRetrievedChunks);
           renderSources(currentAnswerSources, currentRetrievedChunks, streamedAnswerText);
-          statusEl.textContent = `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`;
+          statusEl.textContent = payload.use_sources
+            ? `Nalezeno ${currentRetrievedChunks.length} chunků, odpovídám...`
+            : "Odpovídám...";
         },
         onReasoning(delta) {
           currentReasoning += delta;
@@ -2057,6 +2072,21 @@ userPromptTemplate.addEventListener("input", () => {
   renderPlaceholderControls();
   updatePromptTemplateWarning();
 });
+// Flipping "Používá zdroje" swaps in that mode's starting texts, but only where
+// the editor still holds the other mode's untouched starting text.
+promptUsesSources.addEventListener("change", () => {
+  const defaults = appSettings.prompt_defaults || {};
+  const next = Avatar.promptTextsForModeSwitch({
+    systemPrompt: systemPrompt.value,
+    userPromptTemplate: userPromptTemplate.value,
+    useSources: promptUsesSources.checked,
+    defaults: { sources: defaults, noSources: defaults.no_sources },
+  });
+  systemPrompt.value = next.systemPrompt;
+  userPromptTemplate.value = next.userPromptTemplate;
+  renderPlaceholderControls();
+  updatePromptTemplateWarning();
+});
 wpSelect.addEventListener("change", async () => {
   const nextWpId = wpSelect.value;
   if (!(await resolvePendingPromptEdits())) {
@@ -2073,6 +2103,23 @@ settingsWpSelect?.addEventListener("change", async () => {
   }
   flushSettingsDialogEdits();
   syncSettingsWp(nextWpId);
+});
+msearchCollection.addEventListener("change", async () => {
+  if (!collectionModeNeedsPromptSwitch()) {
+    applyCollectionMode();
+    return;
+  }
+  // Entering or leaving "Bez zdrojů" switches the prompt, so unsaved prompt
+  // edits are settled first, exactly as on a WP switch.
+  if (!(await resolvePendingPromptEdits())) {
+    populateMsearchCollections(
+      Avatar.promptUsesSources(getPromptPresetById(activePromptPresetId))
+        ? lastSourceCollectionByWp.get(activeWpId) || wpDefaultCollectionMsearchId(getWpConfig(activeWpId))
+        : Avatar.NO_SOURCES_COLLECTION,
+    );
+    return;
+  }
+  applyCollectionMode();
 });
 activePromptPreset.addEventListener("change", () => switchPromptPreset(activePromptPreset.value));
 promptPreset.addEventListener("change", () => switchPromptPreset(promptPreset.value));
@@ -2233,7 +2280,7 @@ document.querySelectorAll("[data-toggle-secret]").forEach((button) => {
 
 function buildRequestPayload(overrides = {}) {
   const activePrompt = activePromptPresetMetadata();
-  return {
+  const payload = {
     question: question.value,
     // wp_id / prompt_preset_id / prompt_preset_name are carried for the saved
     // history entry's labels (rendered client-side); the server ignores them and
@@ -2246,8 +2293,12 @@ function buildRequestPayload(overrides = {}) {
     // what the user configured, including browser-local globals it cannot see.
     selections: { ...placeholderSelections },
     placeholder_defs: effectivePlaceholderDefsForRequest(),
-    system_prompt: promptOverride(systemPrompt.value, appSettings.prompt_defaults?.system_prompt),
-    user_prompt_template: promptOverride(userPromptTemplate.value, appSettings.prompt_defaults?.user_prompt_template),
+    ...Avatar.requestPromptTexts({
+      systemPrompt: systemPrompt.value,
+      userPromptTemplate: userPromptTemplate.value,
+      defaults: appSettings.prompt_defaults,
+      useSources: currentUsesSources(),
+    }),
     conversation_history: [],
     ...currentTokenBudgetSettings(),
     model: selectedModelValue(),
@@ -2267,6 +2318,10 @@ function buildRequestPayload(overrides = {}) {
     ...activeQueryTransformPayload(),
     ...overrides,
   };
+  // The collection selector carries the mode, so it also follows a
+  // conversation's own collection passed in `overrides`.
+  payload.use_sources = Avatar.collectionUsesSources(payload.msearch_collection);
+  return payload;
 }
 
 function buildRetrievePayload(overrides = {}) {
@@ -4481,15 +4536,19 @@ function updatePromptTemplateWarning() {
     systemPrompt.value,
     userPromptTemplate.value,
   ]);
-  if (!unknownVariables.length) {
-    promptTemplateWarning.hidden = true;
-    promptTemplateWarning.textContent = "";
-    return;
+  const warnings = [];
+  if (unknownVariables.length) {
+    warnings.push(
+      `Neznámé proměnné v promptu: ${unknownVariables.map((name) => `{${name}}`).join(", ")}. ` +
+      "Prompt lze uložit; neznámé proměnné zůstanou v odeslaném promptu beze změny.",
+    );
   }
-  promptTemplateWarning.hidden = false;
-  promptTemplateWarning.textContent =
-    `Neznámé proměnné v promptu: ${unknownVariables.map((name) => `{${name}}`).join(", ")}. ` +
-    "Prompt lze uložit; neznámé proměnné zůstanou v odeslaném promptu beze změny.";
+  const templates = [systemPrompt.value, userPromptTemplate.value];
+  if (!promptUsesSources.checked && templates.some((template) => extractPromptVariables(template).includes("retrieved_snippets"))) {
+    warnings.push("Profil nepoužívá zdroje, proměnná {retrieved_snippets} proto zůstane prázdná.");
+  }
+  promptTemplateWarning.hidden = !warnings.length;
+  promptTemplateWarning.textContent = warnings.join(" ");
 }
 
 function unknownPromptVariables(templates) {
@@ -4543,7 +4602,7 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   // The main-page select lists the active WP's prompts; the Settings select lists
   // the Settings-scoped WP's prompts (defaults to activeWpId until the user
   // switches the Settings WP). Both reflect the same loaded prompt (resolvedId).
-  renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId);
+  renderPromptPresetSelect(activePromptPreset, resolvedId, activeWpId, { useSources: currentUsesSources() });
   renderPromptPresetSelect(promptPreset, resolvedId, settingsWpScope());
   activePromptPresetId = resolvedId;
   updatePromptActionButtonStates(resolvedId);
@@ -4552,35 +4611,42 @@ function renderPromptPresets(selectedId = activePromptPresetId || defaultPromptP
   }
 }
 
-function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId) {
+// With `useSources` set, only that mode's prompts are listed (the main page:
+// "Bez zdrojů" in Kolekce offers only prompts without sources and vice versa).
+// Without it every prompt is listed and the ones without sources are marked,
+// so Settings can edit both kinds.
+function renderPromptPresetSelect(selectEl, selectedId, wpId = activeWpId, { useSources = null } = {}) {
+  const inMode = (preset) => useSources === null || Avatar.promptUsesSources(preset) === useSources;
+  const modeSuffix = (preset) => (useSources === null && !Avatar.promptUsesSources(preset) ? ` · ${Avatar.NO_SOURCES_LABEL.toLowerCase()}` : "");
   const builtinIds = new Set(builtInPromptPresets(wpId).map((preset) => preset.id));
   const serverIds = new Set(promptPresets.map((preset) => preset.id));
   const wpLocal = localPromptPresets.filter((preset) => (
     presetWpId(preset) === wpId
     && !builtinIds.has(preset.id)
     && !serverIds.has(preset.id)
+    && inMode(preset)
   ));
-  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === wpId && !builtinIds.has(preset.id));
+  const wpServer = promptPresets.filter((preset) => presetWpId(preset) === wpId && !builtinIds.has(preset.id) && inMode(preset));
   const builtinOptions = builtInPromptPresets(wpId)
-    .map((preset) => {
-      const effective = getPromptPresetById(preset.id) || preset;
-      return `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(effective)}>${escapeHtml(effective.name || preset.name)}</option>`;
-    })
+    .map((preset) => getPromptPresetById(preset.id) || preset)
+    .filter(inMode)
+    .map((effective) => `<option value="${escapeHtml(effective.id)}"${promptNoteTitleAttribute(effective)}>${escapeHtml(effective.name)}${modeSuffix(effective)}</option>`)
     .join("");
   const localOptions = wpLocal.length
     ? `<optgroup label="Lokální profily">${wpLocal
-        .map((preset) => `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>${escapeHtml(preset.name)}</option>`)
+        .map((preset) => `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>${escapeHtml(preset.name)}${modeSuffix(preset)}</option>`)
         .join("")}</optgroup>`
     : "";
   const serverOptions = wpServer.length
     ? `<optgroup label="Sdílené profily">${wpServer
         .map((preset) => {
           const ownedSuffix = isOwnedServerPromptPreset(preset.id) ? " (tvůj)" : "";
-          return `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>${escapeHtml(preset.name)}${ownedSuffix}</option>`;
+          return `<option value="${escapeHtml(preset.id)}"${promptNoteTitleAttribute(preset)}>${escapeHtml(preset.name)}${modeSuffix(preset)}${ownedSuffix}</option>`;
         })
         .join("")}</optgroup>`
     : "";
-  selectEl.innerHTML = `<optgroup label="Vestavěné profily">${builtinOptions}</optgroup>${localOptions}${serverOptions}`;
+  const builtinGroup = builtinOptions ? `<optgroup label="Vestavěné profily">${builtinOptions}</optgroup>` : "";
+  selectEl.innerHTML = `${builtinGroup}${localOptions}${serverOptions}`;
   selectEl.value = normalizePromptPresetId(selectedId);
   selectEl.title = promptPresetNote(getPromptPresetById(selectEl.value));
 }
@@ -4690,6 +4756,7 @@ function updatePromptSaveShareState(presetId) {
   for (const field of [promptNote, systemPrompt, userPromptTemplate]) {
     field.readOnly = !editing;
   }
+  promptUsesSources.disabled = !editing;
   promptNameField.hidden = !editing;
   promptNoteField.hidden = !editing && !promptNote.value.trim();
 }
@@ -4748,6 +4815,7 @@ function wpBuiltInPromptPresets(wp) {
       note: String(preset.note || ""),
       system_prompt: preset.system_prompt || "",
       user_prompt_template: preset.user_prompt_template || "",
+      uses_sources: Avatar.promptUsesSources(preset),
       placeholders: preset.placeholders && typeof preset.placeholders === "object" ? preset.placeholders : {},
     };
     if (Object.prototype.hasOwnProperty.call(preset, "query_transform")) {
@@ -4765,9 +4833,15 @@ function allBuiltInPromptPresets() {
   return getWpConfigs().flatMap((wp) => wpBuiltInPromptPresets(wp));
 }
 
-function defaultPromptPresetId(wpId = activeWpId) {
+// The WP's default prompt for the current mode: its configured default with
+// sources, its first built-in without them ("Bez zdrojů").
+function defaultPromptPresetId(wpId = activeWpId, useSources = currentUsesSources()) {
   const wp = getWpConfig(wpId);
-  return wp?.default_prompt_id || wpBuiltInPromptPresets(wp)[0]?.id || "";
+  const builtins = wpBuiltInPromptPresets(wp);
+  return Avatar.pickPromptForMode(builtins, useSources, { defaultId: wp?.default_prompt_id })
+    || wp?.default_prompt_id
+    || builtins[0]?.id
+    || "";
 }
 
 function getPromptPresetById(presetId) {
@@ -4795,6 +4869,11 @@ function applyPromptPresetById(presetId) {
   promptNote.value = preset.note || "";
   systemPrompt.value = preset.system_prompt || "";
   userPromptTemplate.value = preset.user_prompt_template || "";
+  promptUsesSources.checked = Avatar.promptUsesSources(preset);
+  alignCollectionWithPrompt(preset);
+  if (presetWpId(preset) === activeWpId) {
+    lastPromptIdByMode.set(promptModeKey(activeWpId, Avatar.promptUsesSources(preset)), resolvedId);
+  }
   clearAppliedQueryTransform({ refreshButton: false });
   // Switching prompts resets controls to the new prompt's resolved defaults; no
   // prior values (including text placeholders) are preserved across the switch.
@@ -4823,6 +4902,7 @@ function currentPromptDraft({ id = null, name }) {
     note: promptNote.value,
     system_prompt: systemPrompt.value,
     user_prompt_template: userPromptTemplate.value,
+    uses_sources: promptUsesSources.checked,
     // Inline placeholder defs come from the live preset object, which the inline
     // def editor (14d) mutates in place; saving the prompt persists them.
     placeholders: structuredClone(activePromptInlinePlaceholderDefs()),
@@ -4988,7 +5068,8 @@ function promptEditorDirty() {
   return promptName.value.trim() !== String(preset.name || "").trim()
     || promptNote.value !== String(preset.note || "")
     || systemPrompt.value !== String(preset.system_prompt || "")
-    || userPromptTemplate.value !== String(preset.user_prompt_template || "");
+    || userPromptTemplate.value !== String(preset.user_prompt_template || "")
+    || promptUsesSources.checked !== Avatar.promptUsesSources(preset);
 }
 
 // Leaving a profile with unsaved edits (switching profile or WP, closing
@@ -5074,6 +5155,7 @@ function submitNewPromptDialog(event) {
             note: "",
             system_prompt: "",
             user_prompt_template: BLANK_USER_PROMPT_TEMPLATE,
+            uses_sources: true,
             placeholders: {},
           }
         : null,
@@ -5176,6 +5258,7 @@ function normalizeLocalPromptPreset(item) {
     note: String(item.note || ""),
     system_prompt: String(item.system_prompt || ""),
     user_prompt_template: String(item.user_prompt_template || ""),
+    uses_sources: Avatar.promptUsesSources(item),
     // Inline placeholder defs are passed through as-is; the inline def editor
     // (14d) mutates them and persists via persistLocalPromptPresets().
     placeholders: item.placeholders && typeof item.placeholders === "object" && !Array.isArray(item.placeholders)
@@ -5206,6 +5289,7 @@ function resetPromptEditorValues() {
     promptNote.value = defaultPrompt.note || "";
     systemPrompt.value = defaultPrompt.system_prompt || "";
     userPromptTemplate.value = defaultPrompt.user_prompt_template || "";
+    promptUsesSources.checked = Avatar.promptUsesSources(defaultPrompt);
     renderPlaceholderControls();
     updatePromptTemplateWarning();
   } else {
@@ -5268,7 +5352,7 @@ function populateMsearchCollections(currentCollection) {
   const collections = wp?.collections || [];
   const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
   const wpGated = wpRequiresAiufal(wp) && !aiUfalSelected;
-  msearchCollection.innerHTML = collections
+  const collectionOptions = collections
     .map((collection) => {
       const value = collection.msearch_collection_id || "";
       const label = collection.label || value;
@@ -5276,10 +5360,101 @@ function populateMsearchCollections(currentCollection) {
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
+  // "Bez zdrojů" sends nothing from a collection, so the AI Ufal gate never
+  // disables it.
+  msearchCollection.innerHTML = `${collectionOptions}<option value="${Avatar.NO_SOURCES_COLLECTION}">${escapeHtml(Avatar.NO_SOURCES_LABEL)}</option>`;
   const options = Array.from(msearchCollection.options);
-  const enabledCurrent = options.find((option) => option.value === currentCollection && !option.disabled);
-  const firstEnabled = options.find((option) => !option.disabled);
-  msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || options[0]?.value || "";
+  const realOptions = options.filter((option) => Avatar.collectionUsesSources(option.value));
+  if (currentCollection === Avatar.NO_SOURCES_COLLECTION) {
+    msearchCollection.value = Avatar.NO_SOURCES_COLLECTION;
+  } else {
+    // A gated WP keeps showing its (disabled) collection rather than silently
+    // falling back to "Bez zdrojů".
+    const enabledCurrent = realOptions.find((option) => option.value === currentCollection && !option.disabled);
+    const firstEnabled = realOptions.find((option) => !option.disabled);
+    msearchCollection.value = enabledCurrent?.value || firstEnabled?.value || realOptions[0]?.value || Avatar.NO_SOURCES_COLLECTION;
+  }
+  updateSourceModeUi();
+}
+
+function currentUsesSources() {
+  return Avatar.collectionUsesSources(msearchCollection.value);
+}
+
+// Retrieval-only controls are pointless without sources. The conversation
+// twins follow the main controls.
+function updateSourceModeUi() {
+  const useSources = currentUsesSources();
+  if (useSources && msearchCollection.value) {
+    lastSourceCollectionByWp.set(activeWpId, msearchCollection.value);
+  }
+  retrieveButton.hidden = !useSources;
+  for (const control of [
+    topK,
+    minRelativeScore,
+    msearchMinConfidence,
+    msearchRescore,
+    convTopK,
+    convMinRelativeScore,
+    convMsearchMinConfidence,
+    convMsearchRescore,
+  ]) {
+    if (control) {
+      control.disabled = !useSources;
+    }
+  }
+}
+
+// Every prompt the WP offers, built-in, local and shared, as currently effective.
+function wpPromptPresets(wpId) {
+  const ids = new Set([
+    ...builtInPromptPresets(wpId).map((preset) => preset.id),
+    ...localPromptPresets.filter((preset) => presetWpId(preset) === wpId).map((preset) => preset.id),
+    ...promptPresets.filter((preset) => presetWpId(preset) === wpId).map((preset) => preset.id),
+  ]);
+  return Array.from(ids).map((id) => getPromptPresetById(id)).filter(Boolean);
+}
+
+function promptModeKey(wpId, useSources) {
+  return `${wpId}|${useSources ? "sources" : "none"}`;
+}
+
+function collectionModeNeedsPromptSwitch() {
+  return Avatar.promptUsesSources(getPromptPresetById(activePromptPresetId)) !== currentUsesSources();
+}
+
+// After the collection selector moved: when it crossed into or out of "Bez
+// zdrojů", load the prompt last used in the new mode (or the WP's default for
+// it); otherwise only refresh the mode-filtered prompt list.
+function applyCollectionMode() {
+  updateSourceModeUi();
+  if (!collectionModeNeedsPromptSwitch()) {
+    renderPromptPresets(activePromptPresetId);
+    return;
+  }
+  const useSources = currentUsesSources();
+  const nextId = Avatar.pickPromptForMode(wpPromptPresets(activeWpId), useSources, {
+    rememberedId: lastPromptIdByMode.get(promptModeKey(activeWpId, useSources)),
+    defaultId: getWpConfig(activeWpId)?.default_prompt_id,
+  });
+  applyPromptPresetById(nextId || defaultPromptPresetId(activeWpId));
+}
+
+// The other direction: a prompt from the other mode was picked (in Settings, or
+// a profile was saved with "Používá zdroje" flipped), so the collection follows.
+function alignCollectionWithPrompt(preset) {
+  if (!preset || presetWpId(preset) !== activeWpId) {
+    return;
+  }
+  const useSources = Avatar.promptUsesSources(preset);
+  if (useSources === currentUsesSources()) {
+    return;
+  }
+  populateMsearchCollections(
+    useSources
+      ? lastSourceCollectionByWp.get(activeWpId) || wpDefaultCollectionMsearchId(getWpConfig(activeWpId))
+      : Avatar.NO_SOURCES_COLLECTION,
+  );
 }
 
 function updateRescoreThresholdNote() {
@@ -5795,15 +5970,6 @@ function updateCustomModelVisibility(unlocked) {
   customModelField.classList.toggle("is-hidden", !showCustomField);
 }
 
-function promptOverride(value, defaultValue) {
-  const current = String(value || "").trim();
-  const baseline = String(defaultValue || "").trim();
-  if (!current || current === baseline) {
-    return null;
-  }
-  return current;
-}
-
 function chunksToSources(chunks) {
   return chunks.map((chunk) => ({
     citation_id: chunk.citation_id,
@@ -6056,6 +6222,10 @@ function updateAnswerActions() {
   }
   if (continueInConversationButton) {
     continueInConversationButton.hidden = currentAnswerContinuation === null;
+  }
+  // Nothing to append for an answer without sources ("Bez zdrojů", or nothing found).
+  if (copyAnswerWithSourcesButton) {
+    copyAnswerWithSourcesButton.hidden = !currentAnswerSources.length;
   }
   if (shareAnswerButton) {
     shareAnswerButton.hidden = currentAnswerHistoryId === null;
@@ -7102,10 +7272,13 @@ function applySettingsToGlobals(settings) {
 // Apply a WP for conversation mode: WP + its default collection + default
 // prompt, without touching the shared retrieval controls (unlike selectWp).
 function applyConvWp(wpId) {
+  const keepNoSources = !currentUsesSources();
   activeWpId = resolveWpId(wpId);
   wpSelect.value = activeWpId;
   loadPredefinedQuestions(activeWpId);
-  populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
+  populateMsearchCollections(
+    keepNoSources ? Avatar.NO_SOURCES_COLLECTION : wpDefaultCollectionMsearchId(getWpConfig(activeWpId)),
+  );
   applyPromptPresetById(defaultPromptPresetId(activeWpId));
 }
 
@@ -7221,6 +7394,9 @@ function handleConversationControlEvent(event) {
     optionKeys.push("prompt", "collection");
   } else if (binding.key === "prompt") {
     applyPromptPresetById(event.target.value);
+  } else if (binding.key === "collection") {
+    applyCollectionMode();
+    optionKeys.push("prompt");
   } else if (binding.key === "provider") {
     loadProviderValues(event.target.value, { preferStored: true });
     refreshModelOptions(appSettings);
@@ -7948,7 +8124,7 @@ function renderConversationMessage(message, index = 0, conversationSummary = "")
     message.role === "assistant" && (message.content || "").trim()
       ? `<div class="answer-actions">
           <button type="button" class="ghost-button" data-copy-scope="conversation">Kopírovat odpověď</button>
-          <button type="button" class="ghost-button" data-copy-scope="conversation" data-copy-sources="1">Kopírovat se zdroji</button>
+          ${(message.sources || []).length ? `<button type="button" class="ghost-button" data-copy-scope="conversation" data-copy-sources="1">Kopírovat se zdroji</button>` : ""}
           <span class="copy-status" role="status" aria-live="polite"></span>
         </div>`
       : "";
@@ -8172,8 +8348,12 @@ async function submitConversationTurn() {
     wp_id: convSettings.wp_id,
     prompt_preset_id: convSettings.prompt_preset_id,
     prompt_preset_name: convSettings.prompt_preset_name,
-    system_prompt: promptOverride(convSettings.system_prompt, appSettings.prompt_defaults?.system_prompt),
-    user_prompt_template: promptOverride(convSettings.user_prompt_template, appSettings.prompt_defaults?.user_prompt_template),
+    ...Avatar.requestPromptTexts({
+      systemPrompt: convSettings.system_prompt,
+      userPromptTemplate: convSettings.user_prompt_template,
+      defaults: appSettings.prompt_defaults,
+      useSources: Avatar.collectionUsesSources(convSettings.msearch_collection),
+    }),
     selections: { ...(convSettings.selections || {}) },
     placeholder_defs: convSettings.placeholder_defs || {},
     llm_provider: convSettings.llm_provider,
@@ -9751,7 +9931,7 @@ function renderHistoryAnswer(entry, { share = false } = {}) {
       <h4>Odpověď</h4>
       <div class="answer-actions">
         <button type="button" class="ghost-button" data-copy-scope="history">Kopírovat odpověď</button>
-        <button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>
+        ${sources.length ? `<button type="button" class="ghost-button" data-copy-scope="history" data-copy-sources="1">Kopírovat se zdroji</button>` : ""}
         ${share ? renderHistoryShareToggle(entry) : ""}
         <span class="copy-status" role="status" aria-live="polite"></span>
       </div>
@@ -9792,6 +9972,7 @@ function renderHistorySettings(entry) {
       <div class="settings-grid">
         ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
+        ${entry.settings?.use_sources === false ? renderSetting("Zdroje", Avatar.NO_SOURCES_LABEL) : ""}
         ${renderPromptNoteSetting(entry.settings)}
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
@@ -10034,6 +10215,7 @@ function applyHistoryEntryToForm(entry) {
   updateCustomModelVisibility(unlocked);
   persistLlmSettings();
   msearchCollection.value = entry.settings?.msearch_collection || msearchCollection.value;
+  updateSourceModeUi();
   msearchMinConfidence.value = entry.settings?.msearch_min_confidence ?? msearchMinConfidence.value;
   msearchRescore.checked = Boolean(entry.settings?.msearch_rescore);
   topK.value = entry.settings?.top_k ?? topK.value;

@@ -16,3 +16,4 @@ export * from "./storage-usage.js";
 export * from "./reasoning-panel.js";
 export * from "./citation-return.js";
 export * from "./account.js";
+export * from "./source-mode.js";
