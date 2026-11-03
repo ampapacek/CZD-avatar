@@ -248,6 +248,16 @@ class PlaceholderEndpointTests(unittest.TestCase):
         response = self.client.delete("/placeholders/nope", params={"owner_id": "owner-a"})
         self.assertEqual(response.status_code, 404)
 
+    def test_owner_id_is_never_returned(self) -> None:
+        self._create("tone", owner_id="owner-a")
+        for owner, expect_mine in (("", False), ("owner-b", False), ("owner-a", True)):
+            listed = self.client.get("/placeholders", params={"owner_id": owner}).json()
+            settings_records = self.client.get("/settings", params={"owner_id": owner}).json()["placeholders"]
+            for records in (listed, settings_records):
+                tone = next(record for record in records if record["name"] == "tone")
+                self.assertEqual(tone["mine"], expect_mine)
+                self.assertTrue(all("owner_id" not in record for record in records))
+
     def test_saved_file_shape(self) -> None:
         self._create("tone", owner_id="owner-a")
         written = json.loads(self.path.read_text(encoding="utf-8"))["placeholders"][0]

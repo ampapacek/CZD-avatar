@@ -49,7 +49,20 @@ class SharedHistoryEndpointTests(unittest.TestCase):
         self.assertTrue(created["id"])
         self.assertTrue(created["shared_at"])
         self.assertEqual(created["question"], "What is history?")
-        self.assertEqual(created["owner_id"], "owner-a")
+        self.assertTrue(created["mine"])
+        self.assertNotIn("owner_id", created)
+
+    def test_owner_id_is_never_returned(self) -> None:
+        # Anyone who read it could edit or delete the owner's items.
+        item = self._create("Mine", owner_id="owner-a")
+        hidden = self._create("Hidden", owner_id="owner-a", visibility="link")
+        for owner, expect_mine in (("", False), ("owner-b", False), ("owner-a", True)):
+            listed = self.client.get("/shared-history", params={"owner_id": owner}).json()
+            single = self.client.get(f"/shared-history/{item['id']}", params={"owner_id": owner}).json()
+            for record in [*listed, single]:
+                self.assertNotIn("owner_id", record)
+                self.assertEqual(record["mine"], expect_mine)
+            self.assertEqual(hidden["id"] in [record["id"] for record in listed], expect_mine)
 
     def test_get_lists_newest_first(self) -> None:
         first = self._create("First", owner_id="owner-a")

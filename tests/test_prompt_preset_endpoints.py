@@ -37,6 +37,14 @@ class PromptPresetEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+    def test_owner_id_is_never_returned(self) -> None:
+        created = self._create("Mine", owner_id="owner-a")
+        self.assertTrue(created["mine"])
+        for owner, expect_mine in (("", False), ("owner-b", False), ("owner-a", True)):
+            listed = self.client.get("/prompt-presets", params={"owner_id": owner}).json()
+            self.assertNotIn("owner_id", listed[0])
+            self.assertEqual(listed[0]["mine"], expect_mine)
+
     def test_owner_updates_and_deletes_without_password(self) -> None:
         created = self._create("Mine", owner_id="owner-a")
         update = self.client.post(

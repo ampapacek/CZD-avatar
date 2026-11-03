@@ -12,7 +12,7 @@ A prompt is one concept to the UI (the dropdown merges built-ins + local + share
 
 - **Built-in prompts** ship read-only in code (`app/rag/wp_config.py`), including the WP1 personas (`Učitel`/`Historik`/`Laik`). Editing their prompt text is a **save as new**. An administrator can attach a transformation-only override to a built-in prompt from Settings without copying or replacing its prompt text.
 - **Local prompts** live in browser `localStorage` (key `czdemos4ai-local-prompt-presets`). They are private to that browser and need no password to edit or delete.
-- **Shared/server prompts** live in `data/prompt_presets.json` (gitignored mutable overlay; may be absent). The same file stores built-in transformation overrides under `builtin_overrides`; these are merged onto the code-defined prompt at runtime. Creating a shared prompt is open. Updating or deleting one requires either an `owner_id` match (the browser that created it) or the shared `ADMIN_PASSWORD`; changing a built-in override always requires the admin password.
+- **Shared/server prompts** live in `data/prompt_presets.json` (gitignored mutable overlay; may be absent). The same file stores built-in transformation overrides under `builtin_overrides`; these are merged onto the code-defined prompt at runtime. Creating a shared prompt is open. Updating or deleting one requires either an `owner_id` match (the browser that created it) or the shared `ADMIN_PASSWORD`. The owner id is never returned: lists take the browser's `?owner_id=` and mark its own records with `mine: true`; changing a built-in override always requires the admin password.
 
 ### Placeholders
 

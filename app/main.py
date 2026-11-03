@@ -512,7 +512,7 @@ def health() -> HealthResponse:
 
 
 @app.get("/settings")
-def get_public_settings(request: Request) -> dict[str, object]:
+def get_public_settings(request: Request, owner_id: str | None = None) -> dict[str, object]:
     if request.headers.get("x-app-open") == "1":
         analytics.event(
             "app_open",
@@ -522,7 +522,10 @@ def get_public_settings(request: Request) -> dict[str, object]:
         )
     _refresh_provider_state()
     return {
-        "placeholders": effective_global_placeholders(settings.placeholders_path),
+        "placeholders": [
+            _for_requester(record, owner_id)
+            for record in effective_global_placeholders(settings.placeholders_path)
+        ],
         "top_k": settings.top_k,
         "embedding_model": settings.embedding_model,
         **_llm_settings_payload(),
@@ -762,6 +765,24 @@ def _find_prompt_preset(preset_id: str) -> dict[str, object] | None:
     )
 
 
+def _owned_by(record: dict[str, object], owner_id: str | None) -> bool:
+    owner = str(record.get("owner_id") or "").strip()
+    requester = (owner_id or "").strip()
+    return bool(owner and requester) and _secure_eq(owner, requester)
+
+
+def _for_requester(record: dict[str, object], owner_id: str | None) -> dict[str, object]:
+    """A stored record as sent to a browser.
+
+    The owner id is what proves ownership on writes, so it never leaves the
+    server; the browser learns only whether the record is its own.
+    """
+
+    public = {key: value for key, value in record.items() if key != "owner_id"}
+    public["mine"] = _owned_by(record, owner_id)
+    return public
+
+
 def _can_modify_prompt_preset(
     preset: dict[str, object],
     owner_id: str | None,
@@ -797,8 +818,11 @@ def _builtin_prompt_exists(prompt_id: str) -> bool:
 
 
 @app.get("/prompt-presets", response_model=list[PromptPreset])
-def get_prompt_presets() -> list[PromptPreset]:
-    return [PromptPreset(**preset) for preset in load_prompt_presets(settings.prompt_presets_path)]
+def get_prompt_presets(owner_id: str | None = None) -> list[PromptPreset]:
+    return [
+        PromptPreset(**_for_requester(preset, owner_id))
+        for preset in load_prompt_presets(settings.prompt_presets_path)
+    ]
 
 
 @app.post("/unlock", response_model=UnlockResponse)
@@ -842,7 +866,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
             status_code=500,
             detail="Sdílený prompt se nepodařilo uložit na server.",
         ) from exc
-    return PromptPreset(**preset)
+    return PromptPreset(**_for_requester(preset, request.owner_id))
 
 
 @app.put(
@@ -1065,21 +1089,19 @@ def _can_modify_shared_history_item(
 @app.get("/shared-history", response_model=list[SharedHistoryItem])
 def get_shared_history(owner_id: str | None = None) -> list[SharedHistoryItem]:
     # Link-only items stay out of the list, except for the browser that owns them.
-    requester = (owner_id or "").strip()
     return [
-        SharedHistoryItem(**item)
+        SharedHistoryItem(**_for_requester(item, owner_id))
         for item in load_shared_history(settings.shared_history_path)
-        if item["visibility"] == "listed"
-        or (requester and _secure_eq(str(item.get("owner_id") or ""), requester))
+        if item["visibility"] == "listed" or _owned_by(item, owner_id)
     ]
 
 
 @app.get("/shared-history/{item_id}", response_model=SharedHistoryItem)
-def get_shared_history_item(item_id: str) -> SharedHistoryItem:
+def get_shared_history_item(item_id: str, owner_id: str | None = None) -> SharedHistoryItem:
     item = _find_shared_history_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
-    return SharedHistoryItem(**item)
+    return SharedHistoryItem(**_for_requester(item, owner_id))
 
 
 @app.patch("/shared-history/{item_id}", response_model=SharedHistoryItem)
@@ -1100,7 +1122,7 @@ def patch_shared_history_item(item_id: str, request: SharedHistoryUpdateRequest)
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
-    return SharedHistoryItem(**updated)
+    return SharedHistoryItem(**_for_requester(updated, request.owner_id))
 
 
 @app.post("/shared-history", response_model=SharedHistoryItem)
@@ -1125,7 +1147,7 @@ def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
         token_budget=request.token_budget,
         visibility=request.visibility,
     )
-    return SharedHistoryItem(**item)
+    return SharedHistoryItem(**_for_requester(item, request.owner_id))
 
 
 @app.delete("/shared-history/{item_id}", status_code=204)
@@ -1174,8 +1196,11 @@ def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None
 
 
 @app.get("/placeholders", response_model=list[Placeholder])
-def get_placeholders() -> list[Placeholder]:
-    return [Placeholder(**item) for item in load_placeholders(settings.placeholders_path)]
+def get_placeholders(owner_id: str | None = None) -> list[Placeholder]:
+    return [
+        Placeholder(**_for_requester(item, owner_id))
+        for item in load_placeholders(settings.placeholders_path)
+    ]
 
 
 @app.post("/placeholders", response_model=Placeholder)
@@ -1203,7 +1228,7 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
         options=[option.model_dump() for option in request.options],
         owner_id=request.owner_id,
     )
-    return Placeholder(**record)
+    return Placeholder(**_for_requester(record, request.owner_id))
 
 
 @app.delete("/placeholders/{name}", status_code=204)

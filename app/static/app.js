@@ -1126,7 +1126,7 @@ function currentProviderBaseUrl() {
 }
 
 async function loadSettings() {
-  const response = await fetch("settings", { analyticsAppOpen: true });
+  const response = await fetch(`settings?${ownerQuery()}`, { analyticsAppOpen: true });
   const settings = await response.json();
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
@@ -3465,7 +3465,7 @@ function slugifyPlaceholderName(value) {
 // show immediately.
 async function refreshAfterPlaceholderDefChange() {
   try {
-    const response = await fetch("settings");
+    const response = await fetch(`settings?${ownerQuery()}`);
     if (response.ok) {
       const settings = await response.json();
       appSettings = { ...appSettings, placeholders: settings.placeholders };
@@ -3486,7 +3486,7 @@ function globalPlaceholderDefSource(name) {
     return "local";
   }
   const record = globalSharedPlaceholderRecord(name);
-  if (record && (record.owner_id || record.updated_at)) {
+  if (record && (record.mine || record.updated_at)) {
     return "shared";
   }
   return "builtin";
@@ -3494,7 +3494,7 @@ function globalPlaceholderDefSource(name) {
 
 function globalSharedPlaceholderRecord(name) {
   return (Array.isArray(appSettings.placeholders) ? appSettings.placeholders : [])
-    .find((item) => item && item.name === name && (item.owner_id || item.updated_at)) || null;
+    .find((item) => item && item.name === name && (item.mine || item.updated_at)) || null;
 }
 
 function canShareGlobalPlaceholder(name) {
@@ -3509,7 +3509,7 @@ function canShareGlobalPlaceholder(name) {
   if (!record) {
     return true;
   }
-  return record.owner_id === getBrowserOwnerId() || llmModelsUnlocked;
+  return record.mine || llmModelsUnlocked;
 }
 
 function canDeleteGlobalPlaceholder(name, source) {
@@ -3520,7 +3520,7 @@ function canDeleteGlobalPlaceholder(name, source) {
     return false;
   }
   const record = globalSharedPlaceholderRecord(name);
-  return Boolean(record) && (record.owner_id === getBrowserOwnerId() || llmModelsUnlocked);
+  return Boolean(record) && (record.mine || llmModelsUnlocked);
 }
 
 const PLACEHOLDER_SOURCE_LABELS = {
@@ -4514,7 +4514,7 @@ function extractPromptVariables(template) {
 async function loadPromptPresets(selectedId = activePromptPresetId || defaultPromptPresetId()) {
   localPromptPresets = loadLocalPromptPresets();
   try {
-    const response = await fetch("prompt-presets");
+    const response = await fetch(`prompt-presets?${ownerQuery()}`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || "Prompt presets request failed");
@@ -5100,6 +5100,12 @@ function createLocalPromptPresetId() {
   return `${LOCAL_PROMPT_PREFIX}${Date.now().toString(36)}-${randomPart}`;
 }
 
+// Query string carrying this browser's owner id, so the server can mark which
+// shared records are this browser's own ("mine") without revealing other owners.
+function ownerQuery() {
+  return new URLSearchParams({ owner_id: getBrowserOwnerId() }).toString();
+}
+
 function getBrowserOwnerId() {
   let ownerId = "";
   try {
@@ -5131,7 +5137,7 @@ function isOwnedServerPromptPreset(presetId) {
     return false;
   }
   const preset = promptPresets.find((item) => item.id === presetId);
-  return Boolean(preset?.owner_id) && preset.owner_id === getBrowserOwnerId();
+  return Boolean(preset?.mine);
 }
 
 function loadLocalPromptPresets() {
@@ -8956,13 +8962,10 @@ function renderSharedHistory() {
   renderSharedHistoryDetail(selected);
 }
 
-// Owner (this browser) or an unlocked admin password may unshare an item.
+// The owner (this browser) or an admin may unshare an item.
 function sharedItemManageable(item) {
-  const owner = String(item.owner_id || "").trim();
-  if (owner && owner === getBrowserOwnerId()) {
-    return true;
-  }
-  return Boolean(llmUnlockPassword.value.trim());
+  // llmModelsUnlocked: the shared password, verified by the server.
+  return Boolean(item.mine) || llmModelsUnlocked;
 }
 
 // The Shared detail's card: who shared it, how, their note and a copy-link
@@ -9160,7 +9163,7 @@ function fetchSharedItemFromUrl() {
   if (!sharedId) {
     return null;
   }
-  return fetch(`shared-history/${encodeURIComponent(sharedId)}`).then((response) => {
+  return fetch(`shared-history/${encodeURIComponent(sharedId)}?${ownerQuery()}`).then((response) => {
     if (!response.ok) {
       throw new Error(
         response.status === 404
@@ -9565,7 +9568,7 @@ async function refreshLocalSharedEntry(entry) {
   syncedSharedIds.add(entry.shared_id);
   let changed = false;
   try {
-    const response = await fetch(`shared-history/${encodeURIComponent(entry.shared_id)}`);
+    const response = await fetch(`shared-history/${encodeURIComponent(entry.shared_id)}?${ownerQuery()}`);
     if (response.status === 404) {
       clearLocalSharedMarker(entry.shared_id);
       changed = true;

@@ -121,7 +121,7 @@ class PromptPreset(BaseModel):
     user_prompt_template: str
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
-    owner_id: str | None = None
+    mine: bool = False
     updated_at: str | None = None
 
 
@@ -150,7 +150,7 @@ class BuiltinPromptOverrideSaveRequest(BaseModel):
 
 class SharedHistoryItem(BaseModel):
     id: str
-    owner_id: str = ""
+    mine: bool = False
     author_name: str = ""
     note: str = ""
     question: str = ""
@@ -206,7 +206,7 @@ class Placeholder(BaseModel):
     help: str | None = None
     default: str = ""
     options: list[OptionDef] = Field(default_factory=list)
-    owner_id: str | None = None
+    mine: bool = False
     updated_at: str | None = None
 
 
