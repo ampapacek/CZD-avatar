@@ -19,6 +19,8 @@ from typing import Any
 
 from app.rag.prompts import (
     PlaceholderDef,
+    default_no_sources_system_prompt,
+    default_no_sources_user_prompt_template,
     default_system_prompt_template,
     default_user_prompt_template,
 )
@@ -55,6 +57,9 @@ class BuiltInPrompt:
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
+    # False for prompts that answer without retrieval ("Bez zdrojů"); the UI
+    # offers each prompt only in its own mode.
+    uses_sources: bool = True
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,18 @@ Forma odpovědi:
 """.strip()
 
 
+def _no_sources_prompt(wp_number: int) -> BuiltInPrompt:
+    # Topic-neutral on purpose: WP-specific prompts without sources are made
+    # and shared from the UI, not shipped in code.
+    return BuiltInPrompt(
+        id=f"wp{wp_number}-obecny",
+        name="Obecný asistent",
+        system_prompt=default_no_sources_system_prompt(),
+        user_prompt_template=default_no_sources_user_prompt_template(),
+        uses_sources=False,
+    )
+
+
 WP_CONFIGS: list[WPConfig] = [
     WPConfig(
         id="WP1-historie",
@@ -144,6 +161,7 @@ WP_CONFIGS: list[WPConfig] = [
                 system_prompt=_wp1_prompt("laik"),
                 user_prompt_template=default_user_prompt_template(),
             ),
+            _no_sources_prompt(1),
         ],
         default_prompt_id="wp1-ucitel",
         collections=[
@@ -168,6 +186,7 @@ WP_CONFIGS: list[WPConfig] = [
                 system_prompt=_generic_prompt("média a mediální studia"),
                 user_prompt_template=default_user_prompt_template(),
             ),
+            _no_sources_prompt(2),
         ],
         default_prompt_id="wp2-vychozi",
         collections=[
@@ -192,6 +211,7 @@ WP_CONFIGS: list[WPConfig] = [
                 system_prompt=_generic_prompt("právo"),
                 user_prompt_template=default_user_prompt_template(),
             ),
+            _no_sources_prompt(3),
         ],
         default_prompt_id="wp3-vychozi",
         collections=[
@@ -215,6 +235,7 @@ WP_CONFIGS: list[WPConfig] = [
                 system_prompt=_generic_prompt("adiktologie"),
                 user_prompt_template=default_user_prompt_template(),
             ),
+            _no_sources_prompt(4),
         ],
         default_prompt_id="wp4-vychozi",
         collections=[

@@ -281,6 +281,7 @@ def prepare_prompt_budget(
     conversation_summary: str | None = None,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
+    use_sources: bool = True,
 ) -> PromptBudgetResult:
     usable_input = config.usable_input_tokens(length)
     reserved_output = config.output_budget_for_length(length)
@@ -304,6 +305,7 @@ def prepare_prompt_budget(
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
             context_text=format_context(chunks),
+            use_sources=use_sources,
         )
 
     # The summary and immediately preceding complete turn are required context.

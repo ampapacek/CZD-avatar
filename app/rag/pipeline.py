@@ -487,6 +487,7 @@ class RAGPipeline:
         retrieval_query_override: str | None = None,
         use_retrieval_query_for_answer: bool = False,
         reasoning: dict[str, object] | None = None,
+        use_sources: bool = True,
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
@@ -510,6 +511,7 @@ class RAGPipeline:
                 selections=selections,
                 system_prompt=system_prompt,
                 user_prompt_template=user_prompt_template,
+                use_sources=use_sources,
             )
         elif retrieval_query_override is not None:
             self.preflight_chat_prompt(
@@ -521,6 +523,7 @@ class RAGPipeline:
                 selections=selections,
                 system_prompt=system_prompt,
                 user_prompt_template=user_prompt_template,
+                use_sources=use_sources,
             )
         conversation = self._resolve_conversation_context(
             conversation_history or [],
@@ -537,6 +540,7 @@ class RAGPipeline:
                 conversation_history=conversation_history or [],
                 enabled=rewrite_query_for_retrieval,
                 model=resolved_model,
+                use_sources=use_sources,
             )
             rewrite_skip_reason = (
                 None
@@ -546,6 +550,7 @@ class RAGPipeline:
                     conversation_history=conversation_history or [],
                     enabled=rewrite_query_for_retrieval,
                     model=resolved_model,
+                    use_sources=use_sources,
                 )
             )
             retrieval_query = self.rewrite_query_for_retrieval(
@@ -556,6 +561,7 @@ class RAGPipeline:
                 model=resolved_model,
                 api_key=llm_api_key,
                 base_url=llm_base_url,
+                use_sources=use_sources,
             )
         else:
             rewrite_attempted = False
@@ -567,7 +573,7 @@ class RAGPipeline:
         retrieval_timings: dict[str, float | None] = {}
         retrieved, baseline_retrieved = self.retrieve_with_baseline(
             retrieval_query,
-            top_k,
+            top_k if use_sources else 0,
             dense_weight=dense_weight,
             bm25_weight=bm25_weight,
             min_score=min_score,
@@ -598,6 +604,7 @@ class RAGPipeline:
             conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
+            use_sources=use_sources,
         )
         if conversation.warning:
             budget.warnings.append(conversation.warning)
@@ -668,6 +675,7 @@ class RAGPipeline:
         llm_api_key: str | None = None,
         llm_base_url: str | None = None,
         budget_config: PromptBudgetConfig | None = None,
+        use_sources: bool = True,
     ):
         resolved_config = budget_config or PromptBudgetConfig.from_settings(self.settings)
         conversation = self._resolve_conversation_context(
@@ -691,6 +699,7 @@ class RAGPipeline:
             conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
+            use_sources=use_sources,
         )
         if conversation.warning:
             budget.warnings.append(conversation.warning)
@@ -708,6 +717,7 @@ class RAGPipeline:
         selections: dict[str, str] | None = None,
         system_prompt: str | None = None,
         user_prompt_template: str | None = None,
+        use_sources: bool = True,
     ) -> None:
         """Reject a current prompt that cannot fit before doing any remote work.
 
@@ -728,6 +738,7 @@ class RAGPipeline:
             conversation_summary=None,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
+            use_sources=use_sources,
         )
 
     def rewrite_query_for_retrieval(
@@ -740,6 +751,7 @@ class RAGPipeline:
         model: str,
         api_key: str | None,
         base_url: str | None,
+        use_sources: bool = True,
     ) -> str:
         clean_question = question.strip()
         if not self.should_rewrite_query_for_retrieval(
@@ -747,6 +759,7 @@ class RAGPipeline:
             conversation_history=conversation_history,
             enabled=enabled,
             model=model,
+            use_sources=use_sources,
         ):
             return clean_question
 
@@ -805,6 +818,7 @@ class RAGPipeline:
         conversation_history: list[dict[str, str]] | None,
         enabled: bool,
         model: str | None,
+        use_sources: bool = True,
     ) -> bool:
         """Return whether a conversation message needs the extra LLM rewrite.
 
@@ -819,6 +833,7 @@ class RAGPipeline:
             conversation_history=conversation_history,
             enabled=enabled,
             model=model,
+            use_sources=use_sources,
         ) is None
 
     def query_rewrite_skip_reason(
@@ -828,10 +843,14 @@ class RAGPipeline:
         conversation_history: list[dict[str, str]] | None,
         enabled: bool,
         model: str | None,
+        use_sources: bool = True,
     ) -> str | None:
         """Explain why the optional conversation query rewrite will not run."""
 
         clean_question = question.strip()
+        # The rewrite only serves retrieval; without sources there is nothing to search.
+        if not use_sources:
+            return "no_sources"
         if not enabled:
             return "disabled"
         if not clean_question:

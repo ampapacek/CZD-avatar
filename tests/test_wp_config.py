@@ -37,7 +37,7 @@ class WPConfigTests(unittest.TestCase):
         wp1 = get_wp_config("WP1-historie")
         assert wp1 is not None
         names = {prompt.name for prompt in wp1.builtin_prompts}
-        self.assertEqual(names, {"Učitel", "Historik", "Laik"})
+        self.assertEqual(names, {"Učitel", "Historik", "Laik", "Obecný asistent"})
         ucitel = next(prompt for prompt in wp1.builtin_prompts if prompt.id == "wp1-ucitel")
         # Style is baked in; the orthogonal length placeholder stays for chat-time rendering.
         self.assertNotIn("{style}", ucitel.system_prompt)
@@ -75,7 +75,7 @@ class WPConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             set(first["builtin_prompts"][0]),
-            {"id", "name", "system_prompt", "user_prompt_template", "placeholders"},
+            {"id", "name", "system_prompt", "user_prompt_template", "placeholders", "uses_sources"},
         )
 
 

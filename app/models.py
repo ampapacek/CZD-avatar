@@ -37,6 +37,9 @@ class ChatRequest(BaseModel):
     retrieval_query: str | None = None
     use_retrieval_query_for_answer: bool = False
     wp_id: str | None = None
+    # False answers from the bare model: no retrieval, and the prompt is sent
+    # as written (an empty system prompt sends no system message).
+    use_sources: bool = True
     rewrite_query_for_retrieval: bool = False
     # Generic {placeholderName: value} map for the parameter placeholders the
     # selected prompt uses (select -> chosen option name; text -> typed string).
@@ -122,6 +125,7 @@ class PromptPreset(BaseModel):
     note: str = ""
     system_prompt: str
     user_prompt_template: str
+    uses_sources: bool = True
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
     mine: bool = False
@@ -135,6 +139,7 @@ class PromptPresetSaveRequest(BaseModel):
     note: str = ""
     system_prompt: str
     user_prompt_template: str
+    uses_sources: bool = True
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
     owner_id: str | None = Field(default=None, max_length=OWNER_ID_MAX_LENGTH)
@@ -346,7 +351,7 @@ class ChatResponse(BaseModel):
     retrieval_query_was_rewritten: bool = False
     retrieval_query_rewrite_attempted: bool = False
     retrieval_query_rewrite_skip_reason: Literal[
-        "disabled", "empty_question", "no_conversation_history", "question_too_long"
+        "disabled", "empty_question", "no_conversation_history", "question_too_long", "no_sources"
     ] | None = None
     sources: list[Source]
     retrieved_chunks: list[RetrievedChunk]

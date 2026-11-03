@@ -16,6 +16,8 @@ from app.rag.placeholders import (  # noqa: E402
     placeholder_defs_from_records,
 )
 from app.rag.prompts import (  # noqa: E402
+    default_no_sources_system_prompt,
+    default_no_sources_user_prompt_template,
     default_system_prompt_template,
     default_user_prompt_template,
     resolve_placeholder_defs,
@@ -53,6 +55,11 @@ def main() -> None:
         help="Shortcut for --selection length=VALUE (e.g. short, medium, long).",
     )
     parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument(
+        "--no-sources",
+        action="store_true",
+        help="Answer from the bare model: no retrieval, generic prompt without sources.",
+    )
     args = parser.parse_args()
 
     configure_logging("ask")
@@ -64,8 +71,13 @@ def main() -> None:
 
     # Resolve placeholder defs the same way the server does: shared overlay over
     # the DEFAULT_PLACEHOLDERS code floor, for the tokens the default prompts use.
-    system_template = default_system_prompt_template()
-    user_template = default_user_prompt_template()
+    use_sources = not args.no_sources
+    if use_sources:
+        system_template = default_system_prompt_template()
+        user_template = default_user_prompt_template()
+    else:
+        system_template = default_no_sources_system_prompt()
+        user_template = default_no_sources_user_prompt_template()
     names = template_placeholder_names(system_template) | template_placeholder_names(user_template)
     shared_global = placeholder_defs_from_records(load_placeholders(settings.placeholders_path))
     placeholder_defs = resolve_placeholder_defs(
@@ -83,9 +95,14 @@ def main() -> None:
         length=length,
         placeholder_defs=placeholder_defs,
         selections=selections,
+        system_prompt=system_template,
+        user_prompt_template=user_template,
         top_k=args.top_k,
+        use_sources=use_sources,
     )
     print(response.answer)
+    if not use_sources:
+        return
     print("\nZdroje:")
     for source in response.sources:
         page = f", str. {source.page_number}" if source.page_number else ""

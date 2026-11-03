@@ -122,6 +122,27 @@ Nalezený kontext:
 """.strip()
 
 
+def default_no_sources_system_prompt() -> str:
+    """Starting text for prompts that answer from the bare model, without retrieval."""
+
+    return """
+Jsi užitečný asistent. Odpovídej ve stejném jazyce, ve kterém se uživatel ptá.
+
+Délka: {length}
+
+Piš v Markdownu.
+""".strip()
+
+
+def default_no_sources_user_prompt_template() -> str:
+    return """
+{question}
+
+Vlastní instrukce uživatele (může být prázdné):
+{custom_instructions}
+""".strip()
+
+
 def build_messages(
     question: str,
     retrieved_chunks: list[dict[str, Any]],
@@ -133,11 +154,20 @@ def build_messages(
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
     context_text: str | None = None,
+    use_sources: bool = True,
 ) -> list[dict[str, str]]:
-    context = format_context(retrieved_chunks) if context_text is None else context_text
-    context_for_prompt = context if context else "Nebyly nalezeny žádné relevantní pasáže."
-    system_template = (system_prompt or "").strip() or default_system_prompt_template()
-    user_template = (user_prompt_template or "").strip() or default_user_prompt_template()
+    if use_sources:
+        context = format_context(retrieved_chunks) if context_text is None else context_text
+        context_for_prompt = context if context else "Nebyly nalezeny žádné relevantní pasáže."
+        system_template = (system_prompt or "").strip() or default_system_prompt_template()
+        user_template = (user_prompt_template or "").strip() or default_user_prompt_template()
+    else:
+        # Without sources the prompt is taken literally: an empty system prompt
+        # means no system message at all, so the bare model can be compared with
+        # the RAG answers. Only an empty user template falls back to the question.
+        context_for_prompt = ""
+        system_template = (system_prompt or "").strip()
+        user_template = (user_prompt_template or "").strip() or "{question}"
 
     system_values = {"retrieved_snippets": context_for_prompt}
     user_values = {"question": question, "retrieved_snippets": context_for_prompt}
@@ -155,7 +185,7 @@ def build_messages(
         user_values,
     )
 
-    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}] if system else []
     # The rolling summary stands for every turn already folded away, so it goes
     # in ahead of the history and is never subject to `history_limit`.
     clean_summary = (conversation_summary or "").strip()

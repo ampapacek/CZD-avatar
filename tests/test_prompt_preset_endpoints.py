@@ -135,6 +135,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
                 "note",
                 "system_prompt",
                 "user_prompt_template",
+                "uses_sources",
                 "placeholders",
                 "query_transform",
                 "owner_id",
@@ -142,6 +143,7 @@ class PromptPresetEndpointTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.json()["note"], "Why this variant exists.")
+        self.assertIs(written["uses_sources"], True)
 
     def test_write_failure_returns_structured_json_error(self) -> None:
         with patch.object(
