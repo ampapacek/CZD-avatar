@@ -161,8 +161,9 @@ class StoreTests(unittest.TestCase):
 class FakeStream:
     """Like the LLM stream: yields the parts, then carries the whole trace."""
 
-    def __init__(self, parts) -> None:
+    def __init__(self, parts, finish_reason="stop") -> None:
         self.parts = list(parts)
+        self.finish_reason = finish_reason
         self.reasoning_text = "".join(text for kind, text in self.parts if kind == REASONING)
 
     def __iter__(self):
@@ -177,6 +178,7 @@ class EndpointTestCase(unittest.TestCase):
         self.cache = AnswerCache(Path(self.tmp.name) / "cache.sqlite3", ttl_seconds=3600, max_entries=100)
         self.generated: list[list] = []
         self.answer = [(REASONING, "Přemýšlím."), (ANSWER, "Jan Hus byl "), (ANSWER, "kazatel [1].")]
+        self.finish_reason = "stop"
         self.patches = [
             patch.object(main, "_get_answer_cache", lambda: self.cache),
             patch.object(main, "_replay_sleep", lambda _seconds: None),
@@ -205,7 +207,7 @@ class EndpointTestCase(unittest.TestCase):
 
     def generate(self, messages, **_kwargs):
         self.generated.append(messages)
-        return FakeStream(self.answer)
+        return FakeStream(self.answer, self.finish_reason)
 
     def ask(self, **body):
         response = self.client.post("/chat/stream", json={"question": "Kdo byl Jan Hus?", **body})
@@ -297,6 +299,19 @@ class EndpointTests(EndpointTestCase):
             events = self.ask()
         self.assertIn("error", [name for name, _ in events])
         self.assertEqual(self.cache.count(), 0)
+
+    def test_a_cut_answer_is_shown_with_a_warning_but_not_cached(self) -> None:
+        for reason in ("length", None):
+            self.finish_reason = reason
+            done = self.done(self.ask())
+            self.assertEqual(done["answer"], "Jan Hus byl kazatel [1].")
+            self.assertEqual(done["finish_reason"], reason)
+            self.assertIn("nebyla dokončena", done["chunk_budget_warnings"][-1])
+            self.assertEqual(self.cache.count(), 0)
+        self.finish_reason = "stop"
+        done = self.done(self.ask())
+        self.assertEqual((done["finish_reason"], done["chunk_budget_warnings"]), ("stop", []))
+        self.assertEqual(self.cache.count(), 1)
 
     def test_policy_is_checked_on_a_hit(self) -> None:
         from fastapi import HTTPException

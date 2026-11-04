@@ -60,10 +60,15 @@ class TokenStream(Protocol):
     back until the end: waiting is the part the reader most wants to see into.
     ``reasoning_text`` still accumulates the whole trace for the caller that
     wants it in one piece.
+
+    ``finish_reason`` is why the provider ended the answer: "stop" for a
+    finished one, "length" for one cut at a token limit, None when the stream
+    ended without saying.
     """
 
     upstream_model: str | None
     reasoning_text: str
+    finish_reason: str | None
 
     def __iter__(self) -> Iterator[StreamChunk]: ...
 
@@ -170,6 +175,7 @@ class OpenAICompatibleLLM(LLMClient):
             _emit_upstream(
                 started, messages, answer, resolved_model, upstream_model, resolved_base_url,
                 streaming=False, status="ok", upstream_http_status=response.status_code,
+                finish_reason=data["choices"][0].get("finish_reason"),
             )
             return LLMGeneration(answer=answer, model=upstream_model, reasoning=reasoning_text)
         except Exception as exc:
@@ -292,6 +298,7 @@ class _OpenAICompatibleStream:
         # keeping it out of the answer. Also joined here for the caller that
         # wants the finished trace in one piece.
         self.reasoning_text: str = ""
+        self.finish_reason: str | None = None
 
     def __iter__(self) -> Iterator[StreamChunk]:
         started = time.perf_counter()
@@ -336,6 +343,8 @@ class _OpenAICompatibleStream:
                         choices = event.get("choices") or []
                         if not choices:
                             continue
+                        if choices[0].get("finish_reason"):
+                            self.finish_reason = str(choices[0]["finish_reason"])
                         delta = choices[0].get("delta") or {}
                         reasoning_delta = _reasoning_text(delta)
                         if reasoning_delta:
@@ -353,6 +362,7 @@ class _OpenAICompatibleStream:
                     started, self.messages, "".join(answer_parts), self.model,
                     self.upstream_model or self.model, self.base_url, streaming=True,
                     status="ok", upstream_http_status=response.status_code if response else None,
+                    finish_reason=self.finish_reason,
                 )
         except GeneratorExit:
             context_manager = bind_context(self.analytics_context) if self.analytics_context else nullcontext()
@@ -391,6 +401,7 @@ def _emit_upstream(
     status: str,
     upstream_http_status: int | None,
     event_error_code: str | None = None,
+    finish_reason: str | None = None,
 ) -> None:
     context = current_context()
     input_text = "\n".join(str(message.get("content") or "") for message in messages)
@@ -410,6 +421,7 @@ def _emit_upstream(
         input_tokens_estimated=estimated_tokens(input_text),
         output_chars=len(answer),
         output_tokens_estimated=estimated_tokens(answer),
+        finish_reason=finish_reason,
         error_code=event_error_code,
     )
 

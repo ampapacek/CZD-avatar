@@ -149,6 +149,21 @@ from app.rag.wp_config import (
 logger = logging.getLogger(__name__)
 
 
+class _QuietWarmPolls(logging.Filter):
+    """Drop the access-log line for each poll of the warming status (every 2 s
+    while the Cache dialog shows a run); its failures are still logged."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        return not (
+            isinstance(args, tuple) and len(args) == 5
+            and args[1] == "GET" and str(args[2]).endswith("/answer-cache/warm") and args[4] == 200
+        )
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietWarmPolls())
+
+
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -1856,6 +1871,11 @@ def _cached_answer(cache: AnswerCache, key: str) -> dict[str, object] | None:
         return None
 
 
+def _truncated_answer_warning(finish_reason: str | None) -> str:
+    reason = f"„{finish_reason}“" if finish_reason else "žádný"
+    return f"Odpověď nebyla dokončena (důvod {reason}), proto se neuložila do cache."
+
+
 def _store_answer(cache: AnswerCache, key: str, key_input: dict[str, object], response: dict[str, object], request: ChatRequest) -> None:
     # retrieved_chunks repeats used_chunks; the replay restores it.
     payload = {name: value for name, value in response.items() if name != "retrieved_chunks"}
@@ -2235,6 +2255,13 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 token_stream_ms = ms(time.perf_counter() - first_token_at)
             elapsed = time.perf_counter() - started
             upstream_model = getattr(stream, "upstream_model", None) or resolved_model
+            # A stream that ends without "stop" was cut (a token or context
+            # limit at the provider): shown with a warning, but never cached.
+            finish_reason = getattr(stream, "finish_reason", "stop")
+            answer_complete = finish_reason == "stop"
+            warnings = list(budget.warnings)
+            if not answer_complete:
+                warnings.append(_truncated_answer_warning(finish_reason))
             response = {
                 "answer": answer,
                 "reasoning": reasoning_text,
@@ -2250,7 +2277,7 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 "omitted_chunks": [_serialize_retrieved_chunk(chunk) for chunk in budget.omitted_chunks],
                 "baseline_chunks": baseline_payload,
                 "token_budget": budget.metadata(),
-                "chunk_budget_warnings": budget.warnings,
+                "chunk_budget_warnings": warnings,
                 "conversation_summary": conversation.summary,
                 "conversation_folded_message_count": conversation.folded_message_count,
                 "model": resolved_model,
@@ -2258,22 +2285,24 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 "response_time_seconds": round(elapsed, 3),
                 "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
                 "generation_time_seconds": round(generation_seconds, 3),
+                "finish_reason": finish_reason,
                 "cache_hit": False,
                 "cache_key": cache_key,
             }
             logger.info(
-                "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s",
+                "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s finish_reason=%s",
                 length,
                 resolved_model,
                 elapsed,
                 rerank_seconds,
                 generation_seconds,
                 len(answer),
+                finish_reason,
             )
             # Only a finished answer: an aborted or failed stream never gets here.
             # Stored before "done", so the entry exists once a client sees it
             # (scripts/warm_cache.py pins it then).
-            if cache_key is not None and answer.strip():
+            if cache_key is not None and answer.strip() and answer_complete:
                 _store_answer(cache, cache_key, cache_input, response, request)
             yield _sse_event("done", response)
             event_fields = {
@@ -2302,7 +2331,8 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 error_code=None,
                 **text_lengths(answer, "answer"),
                 answer_tokens_estimated=estimated_tokens(answer),
-                warning_count=len(budget.warnings),
+                warning_count=len(warnings),
+                finish_reason=finish_reason,
                 **budget.metadata(),
             )
         except PromptBudgetError as exc:

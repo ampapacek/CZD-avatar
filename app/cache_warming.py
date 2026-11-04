@@ -234,6 +234,8 @@ def warm(stream: Stream, cache: AnswerCache, job: Job, force: bool) -> str:
                 _drain(events)
                 if not str(data.get("answer") or "").strip():
                     return "chyba: prázdná odpověď"
+                if data.get("finish_reason", "stop") != "stop":
+                    return f"chyba: odpověď nebyla dokončena (důvod {data.get('finish_reason') or 'žádný'})"
                 return GENERATED if _pin(cache, data.get("cache_key")) else _not_pinned()
     return "chyba: odpověď skončila předčasně"
 

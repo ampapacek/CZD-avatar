@@ -1372,6 +1372,9 @@ async function runQuery(retrieveOnlyMode, { bypassCache = false } = {}) {
           } else {
             statusEl.textContent = formatTimingLabel(doneData, modelLabel);
           }
+          if (doneData.finish_reason && doneData.finish_reason !== "stop") {
+            statusEl.prepend("Odpověď nebyla dokončena (neuložena do cache) · ");
+          }
           statusEl.title = rawModelUsageLabel(doneData.model, doneData.upstream_model);
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;

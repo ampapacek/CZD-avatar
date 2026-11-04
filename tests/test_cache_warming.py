@@ -1,3 +1,4 @@
+import logging
 import threading
 import unittest
 from unittest.mock import patch
@@ -124,6 +125,26 @@ class WarmEndpointTests(AdminTestCase):
         self.assertEqual(status["failed"], 1)
         self.assertEqual(status["errors"][0]["error"], "prázdná odpověď")
         self.assertIn("Kdo byl Jan Hus?", status["errors"][0]["job"])
+
+    def test_a_cut_answer_is_an_error(self) -> None:
+        self.finish_reason = "length"
+        self.warm(questions=["Kdo byl Jan Hus?"])
+        status = self.finish()
+        self.assertEqual((status["failed"], status["generated"]), (1, 0))
+        self.assertEqual(status["errors"][0]["error"], "odpověď nebyla dokončena (důvod length)")
+        self.assertEqual(self.cache.count(), 0)
+
+    def test_status_polls_stay_out_of_the_access_log(self) -> None:
+        quiet = main._QuietWarmPolls()
+
+        def record(method, path, status):
+            return logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                                     ("127.0.0.1:1", method, path, "1.1", status), None)
+
+        self.assertFalse(quiet.filter(record("GET", "/answer-cache/warm", 200)))
+        self.assertTrue(quiet.filter(record("GET", "/answer-cache/warm", 403)))
+        self.assertTrue(quiet.filter(record("POST", "/answer-cache/warm", 200)))
+        self.assertTrue(quiet.filter(record("GET", "/answer-cache", 200)))
 
     def test_one_run_at_a_time_and_cancel(self) -> None:
         release = threading.Event()

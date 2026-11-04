@@ -169,6 +169,17 @@ class ReasoningStreamTests(unittest.TestCase):
         chunks, _ = self._stream(body)
         self.assertEqual(chunks, [(REASONING, "hmm"), (ANSWER, "yes")])
 
+    def test_the_finish_reason_is_kept(self) -> None:
+        def finish(reason):
+            return f'data: {json.dumps({"choices": [{"delta": {}, "finish_reason": reason}]})}\n\n'
+
+        _, stream = self._stream(self._chunk({"content": "cut"}) + finish("length") + "data: [DONE]\n\n")
+        self.assertEqual(stream.finish_reason, "length")
+        _, stream = self._stream(self._chunk({"content": "whole"}) + finish("stop") + "data: [DONE]\n\n")
+        self.assertEqual(stream.finish_reason, "stop")
+        _, stream = self._stream(self._chunk({"content": "dropped"}))
+        self.assertIsNone(stream.finish_reason)
+
     def test_a_model_that_does_not_reason_yields_only_the_answer(self) -> None:
         body = self._chunk({"content": "plain"}) + "data: [DONE]\n\n"
         chunks, stream = self._stream(body)
