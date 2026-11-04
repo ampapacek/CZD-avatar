@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   cacheFilterBody,
+  cacheFilterOptions,
   cacheFilterQuery,
   cacheProfileLabel,
   cacheSettingsSummary,
   cacheStatsText,
   cacheWarmBody,
+  cacheWarmConfirmText,
   cacheWarmStatusText,
   cachedAnswerStatus,
   formatBytes,
@@ -48,17 +50,38 @@ describe("admin Cache dialog", () => {
   });
 
   it("turns the filter into a query and a delete body", () => {
-    const filter = { wp_id: "WP1", pinned: "false", stale: "", q: "  Hus " };
-    expect(cacheFilterQuery(filter)).toBe("wp_id=WP1&pinned=false&q=Hus");
+    const filter = { wp_id: "WP1", model: "m1", pinned: "false", stale: "", q: "  Hus " };
+    expect(cacheFilterQuery(filter)).toBe("wp_id=WP1&model=m1&pinned=false&q=Hus");
     expect(cacheFilterQuery({})).toBe("");
-    expect(cacheFilterBody(filter)).toEqual({ wp_id: "WP1", pinned: false, stale: null, q: "Hus" });
-    expect(cacheFilterBody({ stale: "true" })).toEqual({ wp_id: null, pinned: null, stale: true, q: null });
+    expect(cacheFilterBody(filter)).toEqual({
+      wp_id: "WP1", llm_provider: null, model: "m1", pinned: false, stale: null, q: "Hus",
+    });
+    expect(cacheFilterBody({ stale: "true" })).toEqual({
+      wp_id: null, llm_provider: null, model: null, pinned: null, stale: true, q: null,
+    });
+  });
+
+  it("offers the providers and models present in the cache", () => {
+    const models = [
+      { llm_provider: "aiufal", model: "gpt-oss", entries: 3 },
+      { llm_provider: "aiufal", model: "llama", entries: 1 },
+      { llm_provider: "openrouter", model: "gpt-oss", entries: 2 },
+    ];
+    expect(cacheFilterOptions(models)).toEqual({
+      providers: [["aiufal", 4], ["openrouter", 2]],
+      models: [["gpt-oss", 5], ["llama", 1]],
+    });
+    expect(cacheFilterOptions(models, { provider: "openrouter" }).models).toEqual([["gpt-oss", 2]]);
+    // A chosen value whose entries are all gone stays selectable.
+    expect(cacheFilterOptions([], { provider: "aiufal", model: "llama" })).toEqual({
+      providers: [["aiufal", 0]], models: [["llama", 0]],
+    });
   });
 
   it("summarises the stats and how much the filter shows", () => {
     const stats = { entries: 3, pinned: 1, stale: 0, hits: 7, size_bytes: 2048, ttl_days: 14, max_entries: 10000 };
     expect(cacheStatsText(stats, 3, 3)).toBe(
-      "3 odpovědí · 1 připnutých · 0 starých · 7 použití · 2 kB · nepřipnuté vyprší po 14 dnech, nejvýš 10000 nepřipnutých",
+      "3 odpovědí · 1 připnutých (zůstávají v cache i po uplynutí doby) · 0 starých · 7 použití · 2 kB · nepřipnuté vyprší po 14 dnech, nejvýš 10000 nepřipnutých",
     );
     expect(cacheStatsText(stats, 2, 2)).toMatch(/Filtru odpovídá 2\.$/);
     expect(cacheStatsText(stats, 3, 1)).toMatch(/Filtru odpovídá 3, zobrazeno prvních 1\.$/);
@@ -72,7 +95,9 @@ describe("admin Cache dialog", () => {
     expect(cacheSettingsSummary({
       wp_id: "WP1", llm_provider: "aiufal", model: "m", reasoning_effort: null, output_length: "medium",
       retrieval_backend: "msearch", msearch_collection: "c1", msearch_mode: "hybrid", top_k: 10, context_window_tokens: 32000,
-    })).toBe("WP: WP1 · Model: aiufal / m · Délka: medium · Vyhledávání: c1, hybrid · Počet zdrojů: 10 · Context window: 32000");
+    })).toBe("WP: WP1 · Model: aiufal / m · Délka: medium · Kolekce: c1 · Vyhledávání: hybrid · Počet zdrojů: 10 · Context window: 32000");
+    expect(cacheSettingsSummary({ retrieval_backend: "msearch", msearch_collection: "c1" }, (id) => `Sbírka ${id}`))
+      .toBe("Kolekce: Sbírka c1");
   });
 
   it("builds the warm request from the form", () => {
@@ -94,6 +119,11 @@ describe("admin Cache dialog", () => {
 
   it("describes the warming run", () => {
     const counts = { total: 10, done: 4, generated: 2, cached: 1, failed: 1 };
+    expect(cacheWarmConfirmText({ jobs: 20, cached: 5 }, { concurrency: 4 }))
+      .toBe("Vygenerovat 15 odpovědí a připnout? Dalších 5 už v cache je, ty se jen připnou. Concurrency 4.");
+    expect(cacheWarmConfirmText({ jobs: 20, cached: 5 }, { force: true, concurrency: 2 }))
+      .toBe("Vygenerovat 20 odpovědí a připnout? 5 z nich už v cache jsou, vygenerují se znovu. Concurrency 2.");
+    expect(cacheWarmConfirmText({ jobs: 4 }, { concurrency: 4 })).toBe("Vygenerovat 4 odpovědí a připnout? Concurrency 4.");
     expect(cacheWarmStatusText({ state: "idle" })).toBe("");
     expect(cacheWarmStatusText({ ...counts, state: "running", running: 2, pending: 4 }))
       .toBe("Běží 2, čeká 4 · 4 / 10 · vygenerováno 2 · už v cache 1 · chyby 1");

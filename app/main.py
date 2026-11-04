@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import httpx
+from collections import Counter
 from collections.abc import Iterator
 from html import escape
 from pathlib import Path
@@ -1825,6 +1826,23 @@ def _chat_cache_key_input(
     )
 
 
+def _chat_cache_key(request: ChatRequest) -> str | None:
+    """The key /chat/stream would store this request's answer under; None when
+    the answer is not cached or the model cannot be resolved."""
+
+    if not answer_is_cacheable(request):
+        return None
+    try:
+        provider, model, _, base_url = _resolve_llm_request(request)
+    except HTTPException:
+        return None
+    placeholder_defs, selections = _resolve_chat_placeholders(request)
+    length = _output_budget_length(placeholder_defs, selections)
+    return answer_cache_key(
+        _chat_cache_key_input(request, placeholder_defs, selections, length, provider, model, base_url)
+    )
+
+
 def _answer_cache_server_settings() -> dict[str, object]:
     return {name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS}
 
@@ -2371,6 +2389,8 @@ def _matches(entry: dict[str, object], selection: AnswerCacheFilter) -> bool:
     query = (selection.q or "").strip().casefold()
     return (
         (not selection.wp_id or entry["wp_id"] == selection.wp_id)
+        and (not selection.llm_provider or entry["llm_provider"] == selection.llm_provider)
+        and (not selection.model or entry["model"] == selection.model)
         and (selection.pinned is None or entry["pinned"] == selection.pinned)
         and (selection.stale is None or entry["stale"] == selection.stale)
         and (not query or query in str(entry["question"]).casefold())
@@ -2380,6 +2400,8 @@ def _matches(entry: dict[str, object], selection: AnswerCacheFilter) -> bool:
 @app.get("/answer-cache")
 def list_answer_cache(
     wp_id: str | None = None,
+    llm_provider: str | None = None,
+    model: str | None = None,
     pinned: bool | None = None,
     stale: bool | None = None,
     q: str | None = None,
@@ -2387,8 +2409,12 @@ def list_answer_cache(
 ) -> dict[str, object]:
     cache = _admin_answer_cache(x_admin_password)
     entries = _answer_cache_entries(cache)
-    selection = AnswerCacheFilter(wp_id=wp_id, pinned=pinned, stale=stale, q=q)
+    selection = AnswerCacheFilter(
+        wp_id=wp_id, llm_provider=llm_provider, model=model, pinned=pinned, stale=stale, q=q
+    )
     matching = [entry for entry in entries if _matches(entry, selection)]
+    # The provider and model filters offer what is stored, whatever the filter.
+    models = Counter((entry["llm_provider"], entry["model"]) for entry in entries if entry["model"])
     return {
         "stats": {
             "entries": len(entries),
@@ -2401,6 +2427,10 @@ def list_answer_cache(
         },
         "matching": len(matching),
         "entries": matching[:ANSWER_CACHE_LIST_LIMIT],
+        "models": [
+            {"llm_provider": provider, "model": model, "entries": count}
+            for (provider, model), count in sorted(models.items(), key=lambda item: (item[0][0] or "", item[0][1]))
+        ],
     }
 
 
@@ -2452,7 +2482,8 @@ def get_answer_cache_warm(x_admin_password: str | None = Header(default=None)) -
 def start_answer_cache_warm(
     request: AnswerCacheWarmRequest, x_admin_password: str | None = Header(default=None)
 ) -> dict[str, object]:
-    """Count the requests (dry_run) or start warming. The answers are pinned."""
+    """Count the requests and how many are already cached (dry_run), or start
+    warming. The answers are pinned."""
 
     global _warm_run
     cache = _admin_answer_cache(x_admin_password)
@@ -2465,7 +2496,8 @@ def start_answer_cache_warm(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if request.dry_run:
-        return {"jobs": len(jobs)}
+        keys = (_chat_cache_key(ChatRequest(**job.body)) for job in jobs)
+        return {"jobs": len(jobs), "cached": sum(1 for key in keys if key and cache.contains(key))}
     if not jobs:
         raise HTTPException(status_code=400, detail="Výběru neodpovídá žádný požadavek.")
     with _warm_lock:

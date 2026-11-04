@@ -385,6 +385,8 @@ class AnswerCacheFilter(BaseModel):
     """Which entries of the admin Cache dialog a list or bulk delete covers."""
 
     wp_id: str | None = None
+    llm_provider: str | None = None
+    model: str | None = None
     pinned: bool | None = None
     stale: bool | None = None
     q: str | None = None

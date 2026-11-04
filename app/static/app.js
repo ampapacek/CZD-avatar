@@ -10587,6 +10587,8 @@ const cacheDialog = document.querySelector("#cacheDialog");
 const cacheStats = document.querySelector("#cacheStats");
 const cacheFilterForm = document.querySelector("#cacheFilterForm");
 const cacheWpFilter = document.querySelector("#cacheWpFilter");
+const cacheProviderFilter = document.querySelector("#cacheProviderFilter");
+const cacheModelFilter = document.querySelector("#cacheModelFilter");
 const cachePinnedFilter = document.querySelector("#cachePinnedFilter");
 const cacheStaleFilter = document.querySelector("#cacheStaleFilter");
 const cacheQueryFilter = document.querySelector("#cacheQueryFilter");
@@ -10598,6 +10600,8 @@ const cachePreviewSettings = document.querySelector("#cachePreviewSettings");
 const cachePreviewAnswer = document.querySelector("#cachePreviewAnswer");
 const cachePreviewSources = document.querySelector("#cachePreviewSources");
 let cacheLoadSequence = 0;
+// The provider/model counts of the last listing, for the filter options.
+let cacheModels = [];
 let cacheQueryTimer = null;
 
 // Looks the button up itself: refreshModelOptions can run before this section.
@@ -10608,6 +10612,8 @@ function renderCacheButton() {
 function cacheFilter() {
   return {
     wp_id: cacheWpFilter.value,
+    llm_provider: cacheProviderFilter.value,
+    model: cacheModelFilter.value,
     pinned: cachePinnedFilter.value,
     stale: cacheStaleFilter.value,
     q: cacheQueryFilter.value,
@@ -10640,6 +10646,23 @@ function populateCacheWpFilter() {
   );
 }
 
+function populateCacheModelFilters() {
+  const options = Avatar.cacheFilterOptions(cacheModels, {
+    provider: cacheProviderFilter.value,
+    model: cacheModelFilter.value,
+  });
+  const fill = (select, pairs, labelOf, titleOf = () => "") => {
+    const selected = select.value;
+    select.replaceChildren(new Option("Vše", ""), ...pairs.map(([value, count]) => {
+      const option = new Option(`${labelOf(value)} (${count})`, value, false, value === selected);
+      option.title = titleOf(value);
+      return option;
+    }));
+  };
+  fill(cacheProviderFilter, options.providers, providerLabelForId);
+  fill(cacheModelFilter, options.models, (model) => Avatar.shortenModelName(model) || model, (model) => model);
+}
+
 async function openCacheDialog() {
   populateCacheWpFilter();
   populateCacheWarmForm();
@@ -10657,6 +10680,8 @@ async function loadCacheEntries() {
       return;
     }
     const entries = data.entries || [];
+    cacheModels = data.models || [];
+    populateCacheModelFilters();
     cacheStats.textContent = Avatar.cacheStatsText(data.stats, data.matching, entries.length);
     cacheEntriesBody.replaceChildren(...entries.map((entry) => cacheEntryRow(entry)));
     setAccountStatus(cacheStatus, entries.length ? "" : "Žádné uložené odpovědi.");
@@ -10783,6 +10808,16 @@ function deleteMatchingCacheEntries() {
   );
 }
 
+function collectionLabel(collectionId) {
+  if (collectionId === Avatar.NO_SOURCES_COLLECTION) {
+    return Avatar.NO_SOURCES_LABEL;
+  }
+  const collection = (appSettings.wps || [])
+    .flatMap((wp) => wp.collections || [])
+    .find((item) => item.msearch_collection_id === collectionId);
+  return collection?.label || collectionId;
+}
+
 async function showCachePreview(entry) {
   cachePreview.dataset.key = entry.key;
   cachePreview.hidden = false;
@@ -10796,7 +10831,7 @@ async function showCachePreview(entry) {
       return;
     }
     const profile = `Profil: ${Avatar.cacheProfileLabel(entry)}`;
-    cachePreviewSettings.textContent = [profile, Avatar.cacheSettingsSummary(data.settings)].join(" · ");
+    cachePreviewSettings.textContent = [profile, Avatar.cacheSettingsSummary(data.settings, collectionLabel)].join(" · ");
     cachePreviewAnswer.innerHTML = Avatar.renderMarkdown(data.answer, data.sources || []);
     cachePreviewSources.replaceChildren(...(data.sources || []).map((source) => cachePreviewSource(source)));
     cachePreview.scrollIntoView({ block: "nearest" });
@@ -10897,14 +10932,13 @@ async function startCacheWarm() {
   }
   cacheWarmStart.disabled = true;
   try {
-    const { jobs } = await cacheRequest("answer-cache/warm", { method: "POST", body: Avatar.cacheWarmBody(form, { dryRun: true }) });
+    const count = await cacheRequest("answer-cache/warm", { method: "POST", body: Avatar.cacheWarmBody(form, { dryRun: true }) });
     const body = Avatar.cacheWarmBody(form);
-    const what = body.force ? "vygenerovat (i už uložené odpovědi znovu)" : "vygenerovat, pokud ještě nejsou v cache,";
-    if (!jobs) {
+    if (!count.jobs) {
       setAccountStatus(cacheWarmStatus, "Výběru neodpovídá žádný požadavek.", "error");
       return;
     }
-    if (!window.confirm(`${jobs} požadavků ${what} a připnout? Concurrency ${body.concurrency}.`)) {
+    if (!window.confirm(Avatar.cacheWarmConfirmText(count, body))) {
       return;
     }
     renderCacheWarmStatus(await cacheRequest("answer-cache/warm", { method: "POST", body }));
@@ -10938,7 +10972,7 @@ function renderCacheWarmStatus(status) {
   if (cacheWarmRunning) {
     cacheWarm.open = true;
   }
-  cacheWarmStart.disabled = cacheWarmRunning;
+  cacheWarmStart.hidden = cacheWarmRunning;
   cacheWarmCancel.hidden = !cacheWarmRunning;
   cacheWarmCancel.disabled = Boolean(status.cancelled);
   cacheWarmProgress.hidden = status.state === "idle";
@@ -10981,7 +11015,15 @@ document.querySelector("#cacheReloadButton").addEventListener("click", () => loa
 document.querySelector("#cacheDeleteMatchingButton").addEventListener("click", () => deleteMatchingCacheEntries());
 document.querySelector("#cachePreviewClose").addEventListener("click", () => closeCachePreview());
 cacheFilterForm.addEventListener("submit", (event) => event.preventDefault());
-for (const select of [cacheWpFilter, cachePinnedFilter, cacheStaleFilter]) {
+cacheProviderFilter.addEventListener("change", () => {
+  // A model of another provider would match nothing.
+  const { models } = Avatar.cacheFilterOptions(cacheModels, { provider: cacheProviderFilter.value });
+  if (!models.some(([model]) => model === cacheModelFilter.value)) {
+    cacheModelFilter.value = "";
+  }
+  loadCacheEntries();
+});
+for (const select of [cacheWpFilter, cacheModelFilter, cachePinnedFilter, cacheStaleFilter]) {
   select.addEventListener("change", () => loadCacheEntries());
 }
 cacheQueryFilter.addEventListener("input", () => {

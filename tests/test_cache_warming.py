@@ -94,9 +94,9 @@ class WarmEndpointTests(AdminTestCase):
 
     def test_counts_then_warms_and_pins(self) -> None:
         self.assertEqual(self.client.get("/answer-cache/warm", headers=ADMIN).json(), {"state": "idle"})
-        self.assertEqual(self.warm(dry_run=True), {"jobs": 2})
+        self.assertEqual(self.warm(dry_run=True), {"jobs": 2, "cached": 0})
         self.assertEqual(self.warm(dry_run=True, questions=["A?", " ", "B?"], profile=["builtin"]),
-                         {"jobs": 2 * len(self.wp["builtin_prompts"])})
+                         {"jobs": 2 * len(self.wp["builtin_prompts"]), "cached": 0})
         self.assertEqual(self.cache.count(), 0)
 
         self.warm(questions=["Kdo byl Jan Hus?", "Kdo byl Žižka?"], concurrency=2)
@@ -106,6 +106,9 @@ class WarmEndpointTests(AdminTestCase):
         entries = self.client.get("/answer-cache", headers=ADMIN).json()["entries"]
         self.assertEqual(sorted(entry["question"] for entry in entries), ["Kdo byl Jan Hus?", "Kdo byl Žižka?"])
         self.assertTrue(all(entry["pinned"] for entry in entries))
+        # The dry run finds the answers just stored under the keys a run would use.
+        self.assertEqual(self.warm(dry_run=True, questions=["Kdo byl Jan Hus?", "Kdo byl Karel IV.?"]),
+                         {"jobs": 2, "cached": 1})
         self.assertEqual({entry["prompt_preset_id"] for entry in entries}, {self.wp["default_prompt_id"]})
 
         self.warm(questions=["Kdo byl Jan Hus?"])

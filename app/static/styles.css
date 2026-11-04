@@ -4949,6 +4949,15 @@ body[data-theme="dark"] .source-highlight {
   max-width: none;
 }
 
+/* Only text gets the ellipsis; a cut checkbox or button showed a stray "…". */
+.cache-entries td:nth-last-child(-n + 2) {
+  text-overflow: clip;
+}
+
+.cache-entries input[type="checkbox"] {
+  width: auto;
+}
+
 .cache-entries .account-badge {
   margin: 0 6px 0 0;
 }
@@ -4956,7 +4965,7 @@ body[data-theme="dark"] .source-highlight {
 .cache-col-wp { width: 11%; }
 .cache-col-profile { width: 10%; }
 .cache-col-model { width: 12%; }
-.cache-col-created { width: 120px; }
+.cache-col-created { width: 140px; }
 .cache-col-hits { width: 64px; }
 .cache-col-size { width: 68px; }
 .cache-col-pinned { width: 72px; }
@@ -4989,6 +4998,12 @@ body[data-theme="dark"] .source-highlight {
   background: var(--surface-2);
 }
 
+/* Like an answer on the main page, not the muted help text of the dialog. */
+.cache-preview-answer p {
+  color: inherit;
+  font-size: inherit;
+}
+
 .cache-preview-sources {
   margin: 0;
   padding-left: 20px;
@@ -5004,6 +5019,11 @@ body[data-theme="dark"] .source-highlight {
   margin-bottom: 8px;
 }
 
+/* The tall model list sits level with the other fields' tops. */
+#cacheWarmForm {
+  align-items: start;
+}
+
 .cache-warm-models select {
   min-width: 220px;
 }
@@ -5012,12 +5032,13 @@ body[data-theme="dark"] .source-highlight {
   width: 6em;
 }
 
-.cache-warm-custom {
-  flex-basis: 100%;
+.cache-filters .cache-warm-custom,
+.cache-filters .cache-warm-force {
+  flex: 1 1 100%;
 }
 
-.cache-warm-force {
-  align-self: center;
+.cache-warm-custom textarea {
+  width: 100%;
 }
 
 .cache-warm-progress {

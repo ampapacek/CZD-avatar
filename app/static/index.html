@@ -563,8 +563,8 @@
             <summary>Uložené odpovědi (mezipaměť)</summary>
             <p>Když někdo položí stejnou první otázku se stejným nastavením (profil, model, kolekce, délka, vlastní instrukce…), jako už dříve někdo jiný, aplikace nemusí model ptát znovu. Odpověď i se zdroji načte z mezipaměti a zobrazí ji postupně jako obvykle, jen rychleji. Pod odpovědí pak stojí <code>Odpověď z mezipaměti</code> s časem, kdy byla vygenerovaná, a v konverzaci štítek <code>z mezipaměti</code>.</p>
             <p>Tlačítko <code>Vygenerovat znovu</code> vedle tohoto štítku nechá model odpovědět znovu s aktuálním nastavením; nová odpověď uloženou nahradí i pro ostatní. Navazující otázky v konverzaci se z mezipaměti nikdy neberou. Uložené odpovědi po čase vyprší.</p>
-            <p>Administrátor (přihlášený admin účet nebo odemčené admin heslo v <code>Nastavení</code>) má vpravo nahoře tlačítko <code>Cache</code>. V něm vidí uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a může je filtrovat podle WP, připnutí, stavu a textu otázky. <code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny, které odpovídají filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a je možné ji smazat.</p>
-            <p>V části <code>Předgenerovat odpovědi</code> admin nechá server vygenerovat a připnout odpovědi předem: vybere WP, připravené nebo vlastní otázky, profily, poskytovatele a modely. Požadavky se ptají jako návštěvník s výchozím nastavením, takže je pak najde každý, kdo se zeptá stejně. Před spuštěním se ukáže počet požadavků. <code>Concurrency</code> (1–20) říká, kolik požadavků běží najednou; střídají se mezi modely. Odpovědi, které už v cache jsou, se jen připnou, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky (rozběhnuté doběhnou) a restart serveru ho ukončí.</p>
+            <p>Administrátor (přihlášený admin účet nebo odemčené admin heslo v <code>Nastavení</code>) má vpravo nahoře tlačítko <code>Cache</code>. V něm vidí uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a může je filtrovat podle WP, poskytovatele, modelu, připnutí, stavu a textu otázky. Poskytovatel a Model nabízejí jen ty, které v cache opravdu jsou; po výběru poskytovatele zbudou jen jeho modely. <code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny, které odpovídají filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a je možné ji smazat.</p>
+            <p>V části <code>Předgenerovat odpovědi</code> admin nechá server vygenerovat a připnout odpovědi předem: vybere WP, připravené nebo vlastní otázky, profily, poskytovatele a modely. Požadavky se ptají jako návštěvník s výchozím nastavením, takže je pak najde každý, kdo se zeptá stejně. Před spuštěním se ukáže, kolik odpovědí se vygeneruje a kolik už v cache je (ty se jen připnou). <code>Concurrency</code> (1–20) říká, kolik požadavků běží najednou; střídají se mezi modely. Odpovědi, které už v cache jsou, se jen připnou, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky (rozběhnuté doběhnou).</p>
           </details>
           <details class="help-details">
             <summary>Účet a denní limit</summary>
@@ -682,6 +682,14 @@
                 <select id="cacheWpFilter"></select>
               </label>
               <label class="field">
+                <span>Poskytovatel</span>
+                <select id="cacheProviderFilter"><option value="">Vše</option></select>
+              </label>
+              <label class="field">
+                <span>Model</span>
+                <select id="cacheModelFilter"><option value="">Vše</option></select>
+              </label>
+              <label class="field">
                 <span>Připnutí</span>
                 <select id="cachePinnedFilter">
                   <option value="">Vše</option>
@@ -741,7 +749,7 @@
             <summary>Předgenerovat odpovědi</summary>
             <p class="field-note">
               Vygeneruje a připne odpovědi tak, jak by se zeptal návštěvník s výchozím nastavením.
-              Běží na serveru i po zavření okna; restart serveru ho ukončí.
+              Běží na serveru i po zavření okna.
             </p>
             <form id="cacheWarmForm" class="cache-filters">
               <label class="field">
@@ -785,9 +793,9 @@
                 <span>Vygenerovat znovu i už uložené</span>
               </label>
             </form>
-            <p class="field-note">Více modelů vyberete s Ctrl nebo Cmd; požadavky se střídají mezi modely.</p>
+            <p class="field-note">Více modelů vyberete s Ctrl nebo Cmd.</p>
             <div class="form-actions">
-              <button id="cacheWarmStart" type="button">Spustit…</button>
+              <button id="cacheWarmStart" type="button">Spustit</button>
               <button id="cacheWarmCancel" class="secondary" type="button" hidden>Zrušit</button>
             </div>
             <progress id="cacheWarmProgress" class="cache-warm-progress" max="1" value="0" hidden></progress>

@@ -126,6 +126,12 @@ class AdminEndpointTests(AdminTestCase):
         self.assertEqual(self.listing(pinned=False)["matching"], 2)
         self.assertEqual(self.listing(q="žIžKA")["matching"], 2)
         self.assertEqual(self.listing(wp_id="nonexistent")["matching"], 0)
+        listed = self.listing(q="žižka")
+        entry = listed["entries"][0]
+        self.assertEqual(listed["models"], [{"llm_provider": entry["llm_provider"], "model": entry["model"], "entries": 3}])
+        self.assertEqual(self.listing(llm_provider=entry["llm_provider"], model=entry["model"])["matching"], 3)
+        self.assertEqual(self.listing(model="other-model")["matching"], 0)
+        self.assertEqual(self.listing(llm_provider="other")["matching"], 0)
 
         deleted = self.client.post("/answer-cache/delete", json={"pinned": False, "q": "žižka"}, headers=ADMIN).json()
         self.assertEqual(deleted, {"deleted": 2})

@@ -56,7 +56,7 @@ export function formatBytes(bytes) {
 // The filter as the query of GET answer-cache; empty fields are left out.
 export function cacheFilterQuery(filter = {}) {
   const params = new URLSearchParams();
-  for (const name of ["wp_id", "pinned", "stale", "q"]) {
+  for (const name of ["wp_id", "llm_provider", "model", "pinned", "stale", "q"]) {
     const value = String(filter[name] ?? "").trim();
     if (value) {
       params.set(name, value);
@@ -70,10 +70,37 @@ export function cacheFilterBody(filter = {}) {
   const flag = (value) => (value === "true" ? true : value === "false" ? false : null);
   return {
     wp_id: String(filter.wp_id ?? "").trim() || null,
+    llm_provider: String(filter.llm_provider ?? "").trim() || null,
+    model: String(filter.model ?? "").trim() || null,
     pinned: flag(filter.pinned),
     stale: flag(filter.stale),
     q: String(filter.q ?? "").trim() || null,
   };
+}
+
+// The provider and model filter options as [value, entries] pairs, from the
+// "models" counts of the listing; the models only of `provider` when one is
+// chosen. A chosen value with no entries left stays, with 0.
+export function cacheFilterOptions(models = [], { provider = "", model = "" } = {}) {
+  const count = (items, valueOf) => {
+    const counts = new Map();
+    for (const item of items) {
+      const value = valueOf(item) || "";
+      if (value) {
+        counts.set(value, (counts.get(value) || 0) + item.entries);
+      }
+    }
+    return counts;
+  };
+  const providers = count(models, (item) => item.llm_provider);
+  const providerModels = count(models.filter((item) => !provider || item.llm_provider === provider), (item) => item.model);
+  if (provider && !providers.has(provider)) {
+    providers.set(provider, 0);
+  }
+  if (model && !providerModels.has(model)) {
+    providerModels.set(model, 0);
+  }
+  return { providers: [...providers], models: [...providerModels] };
 }
 
 export function cacheStatsText(stats, matching, shown) {
@@ -82,7 +109,7 @@ export function cacheStatsText(stats, matching, shown) {
   }
   const parts = [
     `${stats.entries} odpovědí`,
-    `${stats.pinned} připnutých`,
+    `${stats.pinned} připnutých (zůstávají v cache i po uplynutí doby)`,
     `${stats.stale} starých`,
     `${stats.hits} použití`,
     formatBytes(stats.size_bytes),
@@ -101,8 +128,9 @@ export function cacheProfileLabel(entry) {
   return entry?.prompt_preset_name || entry?.prompt_preset_id || "—";
 }
 
-// The settings that tell apart answers to the same question, from the stored key input.
-export function cacheSettingsSummary(settings = {}) {
+// The settings that tell apart answers to the same question, from the stored key
+// input. `collectionLabel` names a collection id (the id itself if unknown).
+export function cacheSettingsSummary(settings = {}, collectionLabel = (id) => id) {
   const parts = [];
   const add = (label, value) => {
     if (value !== null && value !== undefined && value !== "") {
@@ -113,9 +141,12 @@ export function cacheSettingsSummary(settings = {}) {
   add("Model", [settings.llm_provider, settings.model].filter(Boolean).join(" / "));
   add("Uvažování", settings.reasoning_effort);
   add("Délka", settings.output_length);
-  add("Vyhledávání", settings.retrieval_backend === "msearch"
-    ? [settings.msearch_collection, settings.msearch_mode].filter(Boolean).join(", ")
-    : settings.retrieval_backend);
+  if (settings.retrieval_backend === "msearch") {
+    add("Kolekce", settings.msearch_collection ? collectionLabel(settings.msearch_collection) : null);
+    add("Vyhledávání", settings.msearch_mode);
+  } else {
+    add("Vyhledávání", settings.retrieval_backend);
+  }
   add("Počet zdrojů", settings.top_k);
   add("Context window", settings.context_window_tokens);
   return parts.join(" · ");
@@ -137,6 +168,17 @@ export function cacheWarmBody(form = {}, { dryRun = false } = {}) {
     concurrency: Number.isFinite(concurrency) ? Math.min(Math.max(concurrency, 1), 20) : 4,
     dry_run: dryRun,
   };
+}
+
+// The question before warming, from the dry run's counts.
+export function cacheWarmConfirmText({ jobs, cached = 0 }, { force = false, concurrency } = {}) {
+  let what = `Vygenerovat ${force ? jobs : jobs - cached} odpovědí a připnout?`;
+  if (cached) {
+    what += force
+      ? ` ${cached} z nich už v cache jsou, vygenerují se znovu.`
+      : ` Dalších ${cached} už v cache je, ty se jen připnou.`;
+  }
+  return `${what} Concurrency ${concurrency}.`;
 }
 
 export function cacheWarmStatusText(status) {
