@@ -587,6 +587,7 @@
           <details class="help-details">
             <summary>Model, context window a tokeny</summary>
             <p>V části <code>Model</code> vybereš poskytovatele, model a context window. Context window zde řídí balení promptu a zdrojů; nejde o skutečný limit modelu. Při nedostatku místa se nejméně relevantní zdroje vynechají nebo zkrátí.</p>
+            <p>Tokenový rozpočet (v <code>Nastavení › Modely a tokeny</code>) se pamatuje v prohlížeči a mění klíč odpovědí v mezipaměti. Tlačítko <code>Obnovit výchozí hodnoty</code> ho vrátí na výchozí, aby se otázky znovu trefovaly do předpřipravených odpovědí.</p>
             <p>Odemčený seznam OpenRouter standardně ukazuje nejnovější verze GPT, Gemini, Claude Sonnet/Haiku a DeepSeek, odděleně podle varianty. GPT s příponou <code>-pro</code> jsou skryté. Volba <code>Zobrazit v seznamu všechny modely</code> zpřístupní i starší verze a ostatní rodiny. Aktuálně vybraný model zůstane viditelný i po vypnutí této volby.</p>
           </details>
           <details class="help-details">
@@ -1029,6 +1030,9 @@
               </label>
             </div>
             <p class="field-note">Skutečný kompresní práh je nižší z nastaveného maxima a hodnoty 250 + 25 % dostupného vstupu. Tyto hodnoty se ukládají jen v tomto prohlížeči a posílají se s dotazem.</p>
+            <div class="settings-actions">
+              <button id="resetTokenBudgetButton" class="secondary" type="button" title="Smaže hodnoty uložené v tomto prohlížeči a vrátí výchozí hodnoty serveru (a context window podle vybraného modelu).">Obnovit výchozí hodnoty</button>
+            </div>
           </section>
           </div>
 

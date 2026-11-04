@@ -2256,6 +2256,7 @@ customProviderModels.addEventListener("input", () => {
 [outputBudgetShort, outputBudgetMedium, outputBudgetLong, minPromptChunks, tokenBudgetSafetyMargin, conversationSummaryTriggerTokens].forEach((input) => {
   input.addEventListener("input", persistTokenBudgetSettings);
 });
+document.querySelector("#resetTokenBudgetButton")?.addEventListener("click", resetTokenBudgetSettings);
 unlockModelsButton.addEventListener("click", () => verifyUnlockPassword());
 logoutAdminButton.addEventListener("click", logoutAdminAccess);
 toggleUnlockPasswordButton.addEventListener("click", () => {
@@ -2849,6 +2850,19 @@ function populateTokenBudgetFields(settings = appSettings) {
   conversationSummaryTriggerTokens.value =
     stored.conversation_summary_trigger_tokens ?? defaults.conversation_summary_trigger_tokens ?? 8000;
   updateModelContextWindowNote();
+}
+
+// Drops the browser-stored token budget so the fields fall back to the server
+// defaults (and the selected model's context window), the values the cache
+// warming builds its keys from.
+function resetTokenBudgetSettings() {
+  try {
+    localStorage.removeItem(TOKEN_BUDGET_STORAGE_KEY);
+  } catch {
+    // Storage unavailable: nothing stored to drop.
+  }
+  populateTokenBudgetFields();
+  refreshReasoningEffortOptions();
 }
 
 function loadTokenBudgetSettings() {

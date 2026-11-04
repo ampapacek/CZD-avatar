@@ -18,6 +18,20 @@ describe("conversation request UI", () => {
     expect(loadSettingsBody).toContain("await initialQuestionsPromise");
   });
 
+  it("resets the stored token budget to the server defaults", () => {
+    const appSource = readFileSync("app/static/app.js", "utf8");
+    const body = appSource.slice(
+      appSource.indexOf("function resetTokenBudgetSettings()"),
+      appSource.indexOf("function loadTokenBudgetSettings()"),
+    );
+    const document = new JSDOM(readFileSync("app/static/index.html", "utf8")).window.document;
+
+    expect(document.querySelector("#settingsModelsPanel #resetTokenBudgetButton")).not.toBeNull();
+    expect(appSource).toContain('querySelector("#resetTokenBudgetButton")?.addEventListener("click", resetTokenBudgetSettings)');
+    expect(body).toContain("localStorage.removeItem(TOKEN_BUDGET_STORAGE_KEY)");
+    expect(body).toContain("populateTokenBudgetFields()");
+  });
+
   it("shows request progress inside the scrollable conversation stream", () => {
     const dom = new JSDOM(readFileSync("app/static/index.html", "utf8"));
     const document = dom.window.document;
