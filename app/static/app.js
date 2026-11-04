@@ -10361,6 +10361,9 @@ function applyAccount(account) {
   accountEmail.textContent = currentAccount.user.email;
   accountAdminBadge.hidden = !accountIsAdmin();
   accountAdminSection.hidden = !accountIsAdmin();
+  for (const block of document.querySelectorAll("[data-account-help]")) {
+    block.hidden = (block.dataset.accountHelp === "admin") !== accountIsAdmin();
+  }
   if (accountIsAdmin()) {
     llmModelsUnlocked = true;
     setUnlockStatus("Admin přístup je aktivní díky přihlášenému admin účtu.", "success");
@@ -11022,6 +11025,16 @@ document.querySelector("#cacheWarmForm").addEventListener("submit", (event) => e
 cacheDialog.addEventListener("close", () => clearTimeout(cacheWarmTimer));
 
 document.querySelector("#cacheButton").addEventListener("click", () => openCacheDialog());
+
+// Each dialog's "?" button toggles its help panel; the panel starts closed.
+for (const [buttonId, panelId] of [["accountHelpButton", "accountHelpPanel"], ["cacheHelpButton", "cacheHelpPanel"]]) {
+  const helpToggle = document.querySelector(`#${buttonId}`);
+  const helpPanel = document.querySelector(`#${panelId}`);
+  helpToggle.addEventListener("click", () => {
+    helpPanel.hidden = !helpPanel.hidden;
+    helpToggle.setAttribute("aria-expanded", String(!helpPanel.hidden));
+  });
+}
 document.querySelector("#closeCacheButton").addEventListener("click", () => cacheDialog.close());
 cacheDialog.addEventListener("click", (event) => {
   if (event.target === cacheDialog) {

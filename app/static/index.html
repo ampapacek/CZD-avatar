@@ -560,17 +560,10 @@
             <p>Na telefonu se seznam a detail střídají: klepnutím na položku otevřeš její detail a tlačítkem <code>← Zpět na seznam</code> se vrátíš. Filtry kromě hledání jsou schované pod tlačítkem <code>Filtry</code>, které ukazuje, kolik položek z celkového počtu filtr zobrazuje.</p>
           </details>
           <details class="help-details">
-            <summary>Uložené odpovědi (mezipaměť)</summary>
-            <p>Když někdo položí stejnou první otázku se stejným nastavením (profil, model, kolekce, délka, vlastní instrukce…), jako už dříve někdo jiný, aplikace nemusí model ptát znovu. Odpověď i se zdroji načte z mezipaměti a zobrazí ji postupně jako obvykle, jen rychleji. Pod odpovědí pak stojí <code>Odpověď z mezipaměti</code> s časem, kdy byla vygenerovaná, a v konverzaci štítek <code>z mezipaměti</code>.</p>
-            <p>Tlačítko <code>Vygenerovat znovu</code> vedle tohoto štítku nechá model odpovědět znovu s aktuálním nastavením; nová odpověď uloženou nahradí i pro ostatní. Navazující otázky v konverzaci se z mezipaměti nikdy neberou. Uložené odpovědi po čase vyprší. Odpověď, kterou model nedokončil (např. kvůli limitu modelu nebo serveru), se do mezipaměti neuloží a pod ní stojí <code>Odpověď nebyla dokončena</code>.</p>
-            <p>Administrátor (přihlášený admin účet nebo odemčené admin heslo v <code>Nastavení</code>) má vpravo nahoře tlačítko <code>Cache</code>. V něm vidí uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a může je filtrovat podle WP, poskytovatele, modelu, připnutí, stavu a textu otázky. Poskytovatel a Model nabízejí jen ty, které v cache opravdu jsou; po výběru poskytovatele zbudou jen jeho modely. <code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny, které odpovídají filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a je možné ji smazat. Počítá se jen nastavení kroků, které pro odpověď opravdu proběhly: bez reranku nevadí změna rerankeru, s mSearch změna lokálního vyhledávání a odpověď bez zdrojů nezávisí na nastavení vyhledávání vůbec.</p>
-            <p>V části <code>Předgenerovat odpovědi</code> admin nechá server vygenerovat a připnout odpovědi předem: vybere WP, připravené nebo vlastní otázky, profily, poskytovatele a modely. Požadavky se ptají jako návštěvník s výchozím nastavením, takže je pak najde každý, kdo se zeptá stejně. Před spuštěním se ukáže, kolik odpovědí se vygeneruje a kolik už v cache je (ty se jen připnou). <code>Concurrency</code> (1–20) říká, kolik požadavků běží najednou; střídají se mezi modely. Odpovědi, které už v cache jsou, se hned při spuštění připnou a započítají do <code>už v cache</code>, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>; běh pak čeká jen na ty, které se generují. Nedokončená odpověď se počítá jako chyba a neuloží se. Server AI Ufal při vyšší concurrency a dlouhých promptech odpovědi nedokončoval; pro něj volte 1–2. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky (rozběhnuté doběhnou).</p>
-          </details>
-          <details class="help-details">
-            <summary>Účet a denní limit</summary>
-            <p>Pokud je aplikace spuštěná s účty, přihlašuješ se e-mailem a heslem. Nový účet může před prvním přihlášením vyžadovat schválení administrátorem. Zapomenuté heslo ti nastaví administrátor.</p>
-            <p>Každý účet má denní limit dotazů, který se obnoví o půlnoci. Počítá se každá odpověď, otázka v konverzaci, <code>Pouze vyhledat zdroje</code> i úprava dotazu před vyhledáváním, a to i s vlastním API klíčem. Odpověď s úpravou dotazu tak spotřebuje dva dotazy. Odpověď z mezipaměti se nepočítá. Kolik dotazů dnes zbývá, uvidíš v okně <code>Účet</code> (tlačítko vpravo nahoře), kde také změníš heslo a odhlásíš se. Administrátor denní limit nemá.</p>
-            <p>Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu. Administrátor má v okně <code>Účet</code> správu uživatelů a režim registrace a jako přihlášený admin nepotřebuje sdílené admin heslo. To se po opakovaných chybných pokusech na 10 minut zablokuje, přihlášeného admina se to netýká.</p>
+            <summary>Uložené odpovědi (Cache / mezipaměť)</summary>
+            <p>Když někdo položí stejnou první otázku se stejným nastavením (profil, model, kolekce, délka, vlastní instrukce…), jako už dříve někdo jiný, aplikace nemusí model ptát znovu. Odpověď i se zdroji načte z cache (mezipaměti) a zobrazí ji postupně jako obvykle, jen rychleji. Pod odpovědí pak stojí <code>Odpověď z mezipaměti</code> s časem, kdy byla vygenerovaná, a v konverzaci štítek <code>z mezipaměti</code>.</p>
+            <p>Tlačítko <code>Vygenerovat znovu</code> vedle tohoto štítku nechá model odpovědět znovu s aktuálním nastavením; nová odpověď uloženou nahradí i pro ostatní. Navazující otázky v konverzaci se z cache (mezipaměti) nikdy neberou. Uložené odpovědi po čase vyprší. Odpověď, kterou model nedokončil (např. kvůli limitu modelu nebo serveru), se do cache (mezipaměti) neuloží a pod ní stojí <code>Odpověď nebyla dokončena</code>.</p>
+            <p>Administrátor (přihlášený admin účet nebo odemčené admin heslo v <code>Nastavení</code>) má vpravo nahoře tlačítko <code>Cache</code> se správou uložených odpovědí; jeho nápověda je přímo v tomto okně.</p>
           </details>
           <details class="help-details">
             <summary>Pouze vyhledat zdroje</summary>
@@ -587,7 +580,7 @@
           <details class="help-details">
             <summary>Model, context window a tokeny</summary>
             <p>V části <code>Model</code> vybereš poskytovatele, model a context window. Context window zde řídí balení promptu a zdrojů; nejde o skutečný limit modelu. Při nedostatku místa se nejméně relevantní zdroje vynechají nebo zkrátí.</p>
-            <p>Tokenový rozpočet (v <code>Nastavení › Modely a tokeny</code>) se pamatuje v prohlížeči a mění klíč odpovědí v mezipaměti. Tlačítko <code>Obnovit výchozí hodnoty</code> ho vrátí na výchozí, aby se otázky znovu trefovaly do předpřipravených odpovědí.</p>
+            <p>Tokenový rozpočet (v <code>Nastavení › Modely a tokeny</code>) se pamatuje v prohlížeči a mění klíč odpovědí v cache (mezipaměti). Tlačítko <code>Obnovit výchozí hodnoty</code> ho vrátí na výchozí, aby se otázky znovu trefovaly do předpřipravených odpovědí.</p>
             <p>Odemčený seznam OpenRouter standardně ukazuje nejnovější verze GPT, Gemini, Claude Sonnet/Haiku a DeepSeek, odděleně podle varianty. GPT s příponou <code>-pro</code> jsou skryté. Volba <code>Zobrazit v seznamu všechny modely</code> zpřístupní i starší verze a ostatní rodiny. Aktuálně vybraný model zůstane viditelný i po vypnutí této volby.</p>
           </details>
           <details class="help-details">
@@ -602,14 +595,36 @@
       <div class="help-content">
         <div class="help-header">
           <h2>Účet</h2>
-          <button id="closeAccountButton" class="icon-button help-close" type="button" aria-label="Zavřít účet" title="Zavřít">
+          <div class="help-header-actions">
+            <button id="accountHelpButton" class="icon-button help-close" type="button" aria-label="Nápověda" title="Nápověda" aria-expanded="false" aria-controls="accountHelpPanel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
+                <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
+              </svg>
+            </button>
+            <button id="closeAccountButton" class="icon-button help-close" type="button" aria-label="Zavřít účet" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
               <path d="M6 6l12 12"></path>
               <path d="M18 6 6 18"></path>
             </svg>
           </button>
+          </div>
         </div>
         <div class="help-body">
+          <section id="accountHelpPanel" class="help-section help-panel" hidden>
+            <div data-account-help="user">
+              <p>Přihlašuješ se e-mailem a heslem. Nový účet může před prvním přihlášením vyžadovat schválení administrátorem; zapomenuté heslo ti nastaví administrátor.</p>
+              <p>Každý účet má denní limit dotazů, který se obnoví o půlnoci. Počítá se každá odpověď, otázka v konverzaci, <code>Pouze vyhledat zdroje</code> i úprava dotazu před vyhledáváním, a to i s vlastním API klíčem. Odpověď s úpravou dotazu tak spotřebuje dva dotazy. Odpověď z cache (mezipaměti) se nepočítá. Kolik dotazů dnes zbývá, vidíš výše pod e-mailem.</p>
+              <p>Tady také změníš heslo nebo se odhlásíš. Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu.</p>
+            </div>
+            <div data-account-help="admin" hidden>
+              <p>Jako administrátor nemáš denní limit dotazů a nepotřebuješ sdílené admin heslo (to se po opakovaných chybných pokusech na 10 minut zablokuje, přihlášeného admina se to netýká).</p>
+              <p>V části <code>Správa uživatelů</code> nastavuješ režim registrace (kdo se může zaregistrovat a zda nové účty schvaluješ) a spravuješ jednotlivé účty. V tabulce vidíš stav, admin oprávnění a počet dotazů dnes i celkem.</p>
+              <p>Heslo si změníš a odhlásíš se tady. Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu. Správa uložených odpovědí je pod tlačítkem <code>Cache</code> vpravo nahoře.</p>
+            </div>
+          </section>
+
           <section class="help-section account-summary">
             <p>Přihlášen(a) jako <strong id="accountEmail"></strong><span id="accountAdminBadge" class="account-badge" hidden>admin</span></p>
             <p id="accountQuota" class="field-note"></p>
@@ -667,14 +682,29 @@
       <div class="help-content">
         <div class="help-header">
           <h2>Cache</h2>
-          <button id="closeCacheButton" class="icon-button help-close" type="button" aria-label="Zavřít cache" title="Zavřít">
+          <div class="help-header-actions">
+            <button id="cacheHelpButton" class="icon-button help-close" type="button" aria-label="Nápověda" title="Nápověda" aria-expanded="false" aria-controls="cacheHelpPanel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M9.6 9.2a2.58 2.58 0 0 1 5.1.72c0 1.6-1.45 2.2-2.23 2.76-.57.42-.87.82-.87 1.62"></path>
+                <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"></circle>
+              </svg>
+            </button>
+            <button id="closeCacheButton" class="icon-button help-close" type="button" aria-label="Zavřít cache" title="Zavřít">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
               <path d="M6 6l12 12"></path>
               <path d="M18 6 6 18"></path>
             </svg>
           </button>
+          </div>
         </div>
         <div class="help-body">
+          <section id="cacheHelpPanel" class="help-section help-panel" hidden>
+            <p>Cache (mezipaměť) uchovává odpovědi, aby se stejná první otázka nemusela posílat modelu znovu. Tady vidíš uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a filtruješ je podle WP, poskytovatele, modelu, připnutí, stavu a textu otázky.</p>
+            <p><code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny odpovídající filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a lze ji smazat.</p>
+            <p>V části <code>Předgenerovat odpovědi</code> necháš server odpovědi vygenerovat a připnout předem, jako by se ptal návštěvník s výchozím nastavením. Před spuštěním se ukáže, kolik odpovědí vznikne a kolik už v cache je (ty se jen připnou, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>). <code>Concurrency</code> (1–20) určuje počet souběžných požadavků; server AI Ufal při vyšší hodnotě a dlouhých promptech odpovědi nedokončoval, pro něj volte 1–2. Nedokončená odpověď se počítá jako chyba a neuloží se. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky.</p>
+          </section>
+
           <section class="help-section">
             <p id="cacheStats" class="field-note"></p>
             <form id="cacheFilterForm" class="cache-filters">

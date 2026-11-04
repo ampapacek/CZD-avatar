@@ -3473,6 +3473,17 @@ body[data-theme="dark"] .source-highlight {
   gap: 12px;
 }
 
+.help-header-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.help-panel[hidden],
+.help-panel [hidden] {
+  display: none;
+}
+
 .help-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
