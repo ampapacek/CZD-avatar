@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     discovery_refresh_interval_seconds: float = Field(
         default=86400, ge=0, alias="DISCOVERY_REFRESH_INTERVAL_SECONDS"
     )
-    llm_timeout_seconds: float = Field(default=120.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
+    llm_timeout_seconds: float = Field(default=180.0, gt=0, alias="LLM_TIMEOUT_SECONDS")
+    # Warming sends several requests at once, and a provider that queues them
+    # sends nothing until a request's turn comes.
+    cache_warm_llm_timeout_seconds: float = Field(default=600.0, gt=0, alias="CACHE_WARM_LLM_TIMEOUT_SECONDS")
 
     qdrant_url: str = Field(default="", alias="QDRANT_URL")
     qdrant_path: Path = Field(default=Path("data/qdrant"), alias="QDRANT_PATH")

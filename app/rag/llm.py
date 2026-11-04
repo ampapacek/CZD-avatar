@@ -4,7 +4,8 @@ import ipaddress
 import json
 import socket
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
 from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
@@ -93,6 +94,20 @@ class LLMClient:
         raise NotImplementedError
 
 
+_timeout_override: ContextVar[float | None] = ContextVar("llm_timeout_override", default=None)
+
+
+@contextmanager
+def llm_timeout(seconds: float) -> Iterator[None]:
+    """Requests made in this context wait up to ``seconds`` instead of the client's timeout."""
+
+    token = _timeout_override.set(seconds)
+    try:
+        yield
+    finally:
+        _timeout_override.reset(token)
+
+
 class OpenAICompatibleLLM(LLMClient):
     """OpenAI-compatible chat completions client."""
 
@@ -101,6 +116,9 @@ class OpenAICompatibleLLM(LLMClient):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+
+    def _timeout(self) -> float:
+        return _timeout_override.get() or self.timeout
 
     def _api_key_for(self, api_key: str | None, base_url: str) -> str | None:
         # The client's own key belongs to its own URL. A request sent elsewhere
@@ -141,7 +159,7 @@ class OpenAICompatibleLLM(LLMClient):
                 f"{resolved_base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=self.timeout,
+                timeout=self._timeout(),
             )
             response.raise_for_status()
             data = response.json()
@@ -180,7 +198,7 @@ class OpenAICompatibleLLM(LLMClient):
             model=model or self.model,
             base_url=resolved_base_url,
             messages=messages,
-            timeout=self.timeout,
+            timeout=self._timeout(),
             analytics_context=current_context(),
             reasoning=reasoning,
         )

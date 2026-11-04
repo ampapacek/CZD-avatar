@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app import main
 from app.cache_warming import CACHED, GENERATED, Job, WarmRun, interleave_by_model
+from app.rag.llm import OpenAICompatibleLLM, llm_timeout
 from tests.test_answer_cache_admin import ADMIN, AdminTestCase
 
 
@@ -151,6 +152,28 @@ class WarmEndpointTests(AdminTestCase):
         for method, path in (("GET", "/answer-cache/warm"), ("POST", "/answer-cache/warm"), ("POST", "/answer-cache/warm/cancel")):
             with self.subTest(method=method, path=path):
                 self.assertEqual(self.client.request(method, path, json={}).status_code, 403)
+
+
+class WarmTimeoutTests(unittest.TestCase):
+    def test_warming_waits_longer_for_the_model(self) -> None:
+        client = OpenAICompatibleLLM("key", "model", "https://provider.example/v1", timeout=180)
+        messages = [{"role": "user", "content": "q"}]
+        with llm_timeout(600):
+            self.assertEqual(client.stream_generate(messages).timeout, 600)
+        self.assertEqual(client.stream_generate(messages).timeout, 180)
+
+        seen = []
+
+        def chat_events(request, http_request):
+            def events():
+                seen.append(client.stream_generate(messages).timeout)
+                yield "event: done\ndata: {}\n"
+            return events(), {}
+
+        with patch.object(main, "_chat_events", chat_events), patch.object(main.settings, "cache_warm_llm_timeout_seconds", 600):
+            list(main._warm_stream({"question": "q"}))
+        self.assertEqual(seen, [600])
+        self.assertEqual(client.stream_generate(messages).timeout, 180)
 
 
 if __name__ == "__main__":

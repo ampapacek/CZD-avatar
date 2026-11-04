@@ -220,17 +220,27 @@ def warm(stream: Stream, cache: AnswerCache, job: Job, force: bool) -> str:
 
     body = {**job.body, "bypass_cache": True} if force else job.body
     with closing(stream(body)) as lines:
-        for name, data in sse_events(lines):
+        events = sse_events(lines)
+        for name, data in events:
             if name == "error":
+                # Read to the end, so the stream records its error rather than
+                # a disconnect (as after "done").
+                _drain(events)
                 return f"chyba: {data.get('detail')}"
             if name == "sources" and data.get("cache_hit"):
                 # Already cached: disconnect rather than sit through the replay.
                 return CACHED if _pin(cache, data.get("cache_key")) else _not_pinned()
             if name == "done":
+                _drain(events)
                 if not str(data.get("answer") or "").strip():
                     return "chyba: prázdná odpověď"
                 return GENERATED if _pin(cache, data.get("cache_key")) else _not_pinned()
     return "chyba: odpověď skončila předčasně"
+
+
+def _drain(events: Iterator[Any]) -> None:
+    for _ in events:
+        pass
 
 
 def _pin(cache: AnswerCache, key: str | None) -> bool:

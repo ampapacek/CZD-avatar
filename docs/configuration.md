@@ -122,6 +122,7 @@ Important `.env` variables:
 - `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
 - `AUTH_ENABLED`, `AUTH_DB_PATH`, `AUTH_REGISTRATION_MODE`, `AUTH_SESSION_DAYS`, `AUTH_COOKIE_SECURE`, `AUTH_COOKIE_NAME`, `USER_DAILY_REQUEST_LIMIT` (see [User accounts](accounts.md))
 - `ANSWER_CACHE_ENABLED` (default `true`), `ANSWER_CACHE_PATH` (default `data/answer_cache.sqlite3`, gitignored), `ANSWER_CACHE_TTL_DAYS` (default 14), `ANSWER_CACHE_MAX_ENTRIES` (default 10000); see [Answer cache](architecture.md#answer-cache)
+- `LLM_TIMEOUT_SECONDS` (default 180) is the longest wait for the next piece of a model reply, including the first one; `CACHE_WARM_LLM_TIMEOUT_SECONDS` (default 600) replaces it for warming in the Cache dialog, whose parallel requests a provider may queue
 
 Shared history, prompt presets and placeholders are saved by anyone who can reach the app, so `app/main.py` limits them (`SHARED_HISTORY_LIMITS`, `PROMPT_PRESET_LIMITS`, `PLACEHOLDER_LIMITS`): the size of one item as it is stored, indented and including its owner id (1 MB, 200 kB, 50 kB; 413 above; a note edit counts the whole item) and the size of the whole file (50 MB, 10 MB, 5 MB; 409 above). The owner id itself is at most 128 characters. There is no per-browser count: the browser makes up its own id, so a script would just use new ones. The file size is checked before the write lock, so parallel saves can overshoot it slightly.
 

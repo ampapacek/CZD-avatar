@@ -124,7 +124,7 @@ from app.rag.llm_providers import (
     provider_public_models,
     resolve_llm_provider,
 )
-from app.rag.llm import REASONING, check_public_base_url, validate_api_key
+from app.rag.llm import REASONING, check_public_base_url, llm_timeout, validate_api_key
 from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
@@ -2427,14 +2427,15 @@ def _warm_fetch(path: str, params: dict[str, str]) -> object:
 def _warm_stream(body: dict[str, object]) -> Iterator[str]:
     """The lines of /chat/stream for one request, as warm() reads them."""
 
-    try:
-        events, _ = _chat_events(ChatRequest(**body), _WARM_HTTP_REQUEST)
-    except HTTPException as exc:
-        yield _sse_event("error", {"detail": exc.detail})
-        return
-    with closing(events):
-        for event in events:
-            yield from event.split("\n")
+    with llm_timeout(settings.cache_warm_llm_timeout_seconds):
+        try:
+            events, _ = _chat_events(ChatRequest(**body), _WARM_HTTP_REQUEST)
+        except HTTPException as exc:
+            yield _sse_event("error", {"detail": exc.detail})
+            return
+        with closing(events):
+            for event in events:
+                yield from event.split("\n")
 
 
 def _warm_status() -> dict[str, object]:
