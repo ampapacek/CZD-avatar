@@ -3,19 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   NO_SOURCES_COLLECTION,
   collectionUsesSources,
-  pickPromptForMode,
-  promptTextsForModeSwitch,
   promptUsesSources,
-  promptsForMode,
-  requestPromptTexts,
+  retrievalEnabled,
 } from "./source-mode.js";
 
-const PROMPTS = [
-  { id: "ucitel" },
-  { id: "historik", uses_sources: true },
-  { id: "obecny", uses_sources: false },
-  { id: "local-bare", uses_sources: false },
-];
+const DEFAULTS = {
+  system_prompt: "Jsi RAG asistent.",
+  user_prompt_template: "Otázka:\n{question}\n\nNalezený kontext:\n{retrieved_snippets}",
+};
 
 describe("source mode", () => {
   it("reads the mode from the collection selector value", () => {
@@ -25,58 +20,21 @@ describe("source mode", () => {
     expect(collectionUsesSources("")).toBe(true);
   });
 
-  it("treats a prompt without the flag as one that uses sources", () => {
-    expect(promptUsesSources({ id: "legacy" })).toBe(true);
-    expect(promptUsesSources({ uses_sources: false })).toBe(false);
-    expect(promptUsesSources(null)).toBe(true);
-    expect(promptsForMode(PROMPTS, false).map((preset) => preset.id)).toEqual(["obecny", "local-bare"]);
-    expect(promptsForMode(PROMPTS, true).map((preset) => preset.id)).toEqual(["ucitel", "historik"]);
+  it("treats Bez zdrojů and zero documents as retrieval off", () => {
+    expect(retrievalEnabled({ collection: "64d6f521", topK: 10 })).toBe(true);
+    expect(retrievalEnabled({ collection: "64d6f521", topK: "0" })).toBe(false);
+    expect(retrievalEnabled({ collection: NO_SOURCES_COLLECTION, topK: 10 })).toBe(false);
   });
 
-  it("prefers the prompt last used in the mode, then the WP default, then the first one", () => {
-    expect(pickPromptForMode(PROMPTS, false, { rememberedId: "local-bare", defaultId: "ucitel" })).toBe("local-bare");
-    // A remembered prompt from the other mode does not count.
-    expect(pickPromptForMode(PROMPTS, true, { rememberedId: "obecny", defaultId: "historik" })).toBe("historik");
-    expect(pickPromptForMode(PROMPTS, false, { defaultId: "ucitel" })).toBe("obecny");
-    expect(pickPromptForMode([{ id: "ucitel" }], false)).toBeNull();
-  });
-});
-
-describe("request prompt texts", () => {
-  const defaults = { system_prompt: "RAG system", user_prompt_template: "RAG user" };
-
-  it("sends the built-in defaults as null when sources are used", () => {
-    expect(requestPromptTexts({ systemPrompt: "RAG system", userPromptTemplate: "Custom", defaults })).toEqual({
-      system_prompt: null,
-      user_prompt_template: "Custom",
-    });
+  it("finds {retrieved_snippets} in either prompt text", () => {
+    expect(promptUsesSources({ systemPrompt: "Kontext: {retrieved_snippets}", userPromptTemplate: "{question}" }, DEFAULTS)).toBe(true);
+    expect(promptUsesSources({ systemPrompt: "Jsi asistent.", userPromptTemplate: "{question}" }, DEFAULTS)).toBe(false);
+    expect(promptUsesSources({ systemPrompt: "", userPromptTemplate: "{question}\n{retrieved_snippets!s}" }, DEFAULTS)).toBe(true);
   });
 
-  it("sends the texts verbatim without sources, so an empty system prompt stays empty", () => {
-    expect(
-      requestPromptTexts({ systemPrompt: "", userPromptTemplate: "RAG user", defaults, useSources: false }),
-    ).toEqual({ system_prompt: "", user_prompt_template: "RAG user" });
-  });
-});
-
-describe("prompt texts after flipping Používá zdroje", () => {
-  const defaults = {
-    sources: { system_prompt: "RAG system", user_prompt_template: "RAG user" },
-    noSources: { system_prompt: "Generic system", user_prompt_template: "{question}" },
-  };
-
-  it("swaps untouched starting texts for the new mode's", () => {
-    expect(
-      promptTextsForModeSwitch({ systemPrompt: "RAG system", userPromptTemplate: "", useSources: false, defaults }),
-    ).toEqual({ systemPrompt: "Generic system", userPromptTemplate: "{question}" });
-    expect(
-      promptTextsForModeSwitch({ systemPrompt: "Generic system", userPromptTemplate: "{question}", useSources: true, defaults }),
-    ).toEqual({ systemPrompt: "RAG system", userPromptTemplate: "RAG user" });
-  });
-
-  it("keeps anything the user wrote", () => {
-    expect(
-      promptTextsForModeSwitch({ systemPrompt: "Mine", userPromptTemplate: "Also mine", useSources: false, defaults }),
-    ).toEqual({ systemPrompt: "Mine", userPromptTemplate: "Also mine" });
+  it("reads an empty text as the server default", () => {
+    expect(promptUsesSources({ systemPrompt: "", userPromptTemplate: "" }, DEFAULTS)).toBe(true);
+    expect(promptUsesSources({ systemPrompt: "Jsi asistent.", userPromptTemplate: "  " }, DEFAULTS)).toBe(true);
+    expect(promptUsesSources({ systemPrompt: "", userPromptTemplate: "{question}" }, DEFAULTS)).toBe(false);
   });
 });
