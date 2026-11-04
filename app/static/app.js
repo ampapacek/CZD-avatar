@@ -10965,7 +10965,8 @@ async function startCacheWarm() {
   } catch (error) {
     setAccountStatus(cacheWarmStatus, error.message, "error");
   } finally {
-    cacheWarmStart.disabled = cacheWarmRunning;
+    // renderCacheWarmStatus shows the button again when the run ends, so it must not stay disabled.
+    cacheWarmStart.disabled = false;
   }
 }
 
