@@ -313,7 +313,7 @@ class RetrievalQueryRewriteTests(unittest.TestCase):
                     "conversation_history": [{"role": "assistant", "content": "Earlier answer"}],
                     "rewrite_query_for_retrieval": True,
                     "wp_id": "WP1-historie",
-                    "top_k": 0,
+                    "top_k": 2,
                 },
             )
 

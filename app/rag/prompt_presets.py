@@ -44,7 +44,6 @@ def save_prompt_preset(
     query_transform: dict[str, Any] | None = None,
     preset_id: str | None = None,
     owner_id: str | None = None,
-    uses_sources: bool = True,
 ) -> dict[str, Any]:
     presets = load_prompt_presets(path)
     existing = next((preset for preset in presets if preset["id"] == preset_id), None) if preset_id else None
@@ -68,7 +67,6 @@ def save_prompt_preset(
         "note": note,
         "system_prompt": system_prompt,
         "user_prompt_template": user_prompt_template,
-        "uses_sources": bool(uses_sources),
         "placeholders": _normalize_placeholders(placeholders),
         "query_transform": normalize_query_transform(query_transform),
         "owner_id": resolved_owner,
@@ -153,8 +151,6 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
         "note": str(item.get("note") or ""),
         "system_prompt": str(item.get("system_prompt") or ""),
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
-        # Presets saved before prompts could skip retrieval all use sources.
-        "uses_sources": item.get("uses_sources") is not False,
         "placeholders": _normalize_placeholders(item.get("placeholders")),
         "query_transform": normalize_query_transform(item.get("query_transform")),
         "owner_id": str(item.get("owner_id") or ""),

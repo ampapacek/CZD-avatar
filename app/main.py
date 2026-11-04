@@ -126,8 +126,6 @@ from app.rag.llm_providers import (
 )
 from app.rag.llm import REASONING, check_public_base_url, validate_api_key
 from app.rag.prompts import (
-    default_no_sources_system_prompt,
-    default_no_sources_user_prompt_template,
     default_system_prompt_template,
     default_user_prompt_template,
     resolve_placeholder_defs,
@@ -456,6 +454,10 @@ def _enforce_retrieval_backend_policy(wp_id: str | None, retrieval_backend: str 
         )
 
 
+def _retrieval_enabled(request: ChatRequest) -> bool:
+    return pipeline.retrieval_enabled(use_sources=request.use_sources, top_k=request.top_k)
+
+
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, str | None]:
     _ensure_provider_state()
     resolved_provider = resolve_llm_provider(request.llm_provider, provider_presets, request.llm_base_url)
@@ -631,11 +633,6 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
         "prompt_defaults": {
             "system_prompt": default_system_prompt_template(),
             "user_prompt_template": default_user_prompt_template(),
-            # Starting texts for a prompt that answers without sources.
-            "no_sources": {
-                "system_prompt": default_no_sources_system_prompt(),
-                "user_prompt_template": default_no_sources_user_prompt_template(),
-            },
         },
         "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
@@ -995,7 +992,6 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
             ),
             preset_id=request.id,
             owner_id=request.owner_id,
-            uses_sources=request.uses_sources,
         )
     except OSError as exc:
         logger.exception("Could not save prompt preset to %s", settings.prompt_presets_path)
@@ -1385,13 +1381,8 @@ def _resolve_chat_placeholders(request: ChatRequest) -> tuple[dict, dict[str, st
     name the request omits. Selections come from the dedicated request fields.
     """
 
-    if request.use_sources:
-        system_template = (request.system_prompt or "").strip() or default_system_prompt_template()
-        user_template = (request.user_prompt_template or "").strip() or default_user_prompt_template()
-    else:
-        # Mirrors build_messages: without sources the texts are used as written.
-        system_template = (request.system_prompt or "").strip()
-        user_template = (request.user_prompt_template or "").strip() or "{question}"
+    system_template = (request.system_prompt or "").strip() or default_system_prompt_template()
+    user_template = (request.user_prompt_template or "").strip() or default_user_prompt_template()
     names = template_placeholder_names(system_template) | template_placeholder_names(user_template)
     inline_defs = {
         name: placeholder_def_from_record(definition)
@@ -1618,9 +1609,9 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
         key_source = _key_source(request, resolved_api_key)
         fields.update(provider=resolved_provider, requested_model=resolved_model, endpoint_host=endpoint_host(resolved_base_url), key_source=key_source)
-        # Without sources no collection content reaches the provider, so the
+        # With retrieval off no collection content reaches the provider, so the
         # per-WP provider restriction does not apply.
-        if request.use_sources:
+        if _retrieval_enabled(request):
             _enforce_msearch_collection_policy(
                 request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
             )
@@ -2000,7 +1991,8 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 endpoint_host=endpoint_host(resolved_base_url),
                 key_source=key_source,
             )
-            if request.use_sources:
+            use_sources = _retrieval_enabled(request)
+            if use_sources:
                 _enforce_msearch_collection_policy(
                     request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
                 )
@@ -2030,7 +2022,6 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                     selections=selections,
                     system_prompt=request.system_prompt,
                     user_prompt_template=request.user_prompt_template,
-                    use_sources=request.use_sources,
                 )
             if request.retrieval_query is None:
                 rewrite_attempted = pipeline.should_rewrite_query_for_retrieval(
@@ -2038,7 +2029,7 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                     conversation_history=request.conversation_history,
                     enabled=request.rewrite_query_for_retrieval,
                     model=resolved_model,
-                    use_sources=request.use_sources,
+                    use_sources=use_sources,
                 )
                 rewrite_skip_reason = (
                     None
@@ -2048,7 +2039,7 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                         conversation_history=request.conversation_history,
                         enabled=request.rewrite_query_for_retrieval,
                         model=resolved_model,
-                        use_sources=request.use_sources,
+                        use_sources=use_sources,
                     )
                 )
                 if rewrite_attempted:
@@ -2062,9 +2053,9 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                         model=resolved_model,
                         api_key=resolved_api_key,
                         base_url=resolved_base_url,
-                        use_sources=request.use_sources,
+                        use_sources=use_sources,
                     )
-                if request.use_sources:
+                if use_sources:
                     yield _sse_event("status", {"phase": "retrieval"})
             else:
                 rewrite_attempted = False
@@ -2080,7 +2071,7 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
             retrieval_started = time.perf_counter()
             candidates = pipeline.retrieve_candidates(
                 retrieval_query,
-                request.top_k if request.use_sources else 0,
+                request.top_k if use_sources else 0,
                 dense_weight=request.dense_weight,
                 bm25_weight=request.bm25_weight,
                 min_score=request.min_score,
@@ -2157,7 +2148,6 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
                 llm_api_key=resolved_api_key,
                 llm_base_url=resolved_base_url,
                     budget_config=budget_config,
-                    use_sources=request.use_sources,
                 )
             prompt_prepare_ms = ms(time.perf_counter() - prompt_started)
             final_sources_ms = ms(time.perf_counter() - started)

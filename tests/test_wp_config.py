@@ -75,7 +75,7 @@ class WPConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             set(first["builtin_prompts"][0]),
-            {"id", "name", "system_prompt", "user_prompt_template", "placeholders", "uses_sources"},
+            {"id", "name", "system_prompt", "user_prompt_template", "placeholders"},
         )
 
 

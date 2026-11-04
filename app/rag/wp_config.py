@@ -57,9 +57,6 @@ class BuiltInPrompt:
     system_prompt: str
     user_prompt_template: str
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
-    # False for prompts that answer without retrieval ("Bez zdrojů"); the UI
-    # offers each prompt only in its own mode.
-    uses_sources: bool = True
 
 
 @dataclass(frozen=True)
@@ -126,14 +123,13 @@ Forma odpovědi:
 
 
 def _no_sources_prompt(wp_number: int) -> BuiltInPrompt:
-    # Topic-neutral on purpose: WP-specific prompts without sources are made
-    # and shared from the UI, not shipped in code.
+    # Topic-neutral and without {retrieved_snippets}, so the UI runs it with
+    # Kolekce "Bez zdrojů". WP-specific prompts like it are made in the UI.
     return BuiltInPrompt(
         id=f"wp{wp_number}-obecny",
         name="Obecný asistent",
         system_prompt=default_no_sources_system_prompt(),
         user_prompt_template=default_no_sources_user_prompt_template(),
-        uses_sources=False,
     )
 
 

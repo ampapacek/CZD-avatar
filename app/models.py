@@ -37,8 +37,7 @@ class ChatRequest(BaseModel):
     retrieval_query: str | None = None
     use_retrieval_query_for_answer: bool = False
     wp_id: str | None = None
-    # False answers from the bare model: no retrieval, and the prompt is sent
-    # as written (an empty system prompt sends no system message).
+    # False is "Bez zdrojů": no retrieval, the same as top_k=0.
     use_sources: bool = True
     rewrite_query_for_retrieval: bool = False
     # Generic {placeholderName: value} map for the parameter placeholders the
@@ -128,7 +127,6 @@ class PromptPreset(BaseModel):
     note: str = ""
     system_prompt: str
     user_prompt_template: str
-    uses_sources: bool = True
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
     mine: bool = False
@@ -142,7 +140,6 @@ class PromptPresetSaveRequest(BaseModel):
     note: str = ""
     system_prompt: str
     user_prompt_template: str
-    uses_sources: bool = True
     placeholders: dict[str, InlinePlaceholderDef] = Field(default_factory=dict)
     query_transform: QueryTransformConfig | None = None
     owner_id: str | None = Field(default=None, max_length=OWNER_ID_MAX_LENGTH)

@@ -491,6 +491,7 @@ class RAGPipeline:
     ) -> ChatResponse:
         started = time.perf_counter()
         resolved_model = model or self.llm.model
+        use_sources = self.retrieval_enabled(use_sources=use_sources, top_k=top_k)
         budget_config = PromptBudgetConfig.from_settings(
             self.settings,
             context_window_tokens=context_window_tokens,
@@ -511,7 +512,6 @@ class RAGPipeline:
                 selections=selections,
                 system_prompt=system_prompt,
                 user_prompt_template=user_prompt_template,
-                use_sources=use_sources,
             )
         elif retrieval_query_override is not None:
             self.preflight_chat_prompt(
@@ -523,7 +523,6 @@ class RAGPipeline:
                 selections=selections,
                 system_prompt=system_prompt,
                 user_prompt_template=user_prompt_template,
-                use_sources=use_sources,
             )
         conversation = self._resolve_conversation_context(
             conversation_history or [],
@@ -604,7 +603,6 @@ class RAGPipeline:
             conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
-            use_sources=use_sources,
         )
         if conversation.warning:
             budget.warnings.append(conversation.warning)
@@ -675,7 +673,6 @@ class RAGPipeline:
         llm_api_key: str | None = None,
         llm_base_url: str | None = None,
         budget_config: PromptBudgetConfig | None = None,
-        use_sources: bool = True,
     ):
         resolved_config = budget_config or PromptBudgetConfig.from_settings(self.settings)
         conversation = self._resolve_conversation_context(
@@ -699,7 +696,6 @@ class RAGPipeline:
             conversation_summary=conversation.summary,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
-            use_sources=use_sources,
         )
         if conversation.warning:
             budget.warnings.append(conversation.warning)
@@ -717,7 +713,6 @@ class RAGPipeline:
         selections: dict[str, str] | None = None,
         system_prompt: str | None = None,
         user_prompt_template: str | None = None,
-        use_sources: bool = True,
     ) -> None:
         """Reject a current prompt that cannot fit before doing any remote work.
 
@@ -738,7 +733,6 @@ class RAGPipeline:
             conversation_summary=None,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
-            use_sources=use_sources,
         )
 
     def rewrite_query_for_retrieval(
@@ -811,6 +805,12 @@ class RAGPipeline:
             return clean_question
         return rewritten
 
+    def retrieval_enabled(self, *, use_sources: bool, top_k: int | None) -> bool:
+        """Whether a request retrieves at all: "Bez zdrojů" and top_k=0 are the same."""
+
+        resolved_top_k = self.settings.top_k if top_k is None else top_k
+        return use_sources and resolved_top_k > 0
+
     def should_rewrite_query_for_retrieval(
         self,
         question: str,
@@ -848,7 +848,8 @@ class RAGPipeline:
         """Explain why the optional conversation query rewrite will not run."""
 
         clean_question = question.strip()
-        # The rewrite only serves retrieval; without sources there is nothing to search.
+        # The rewrite only serves retrieval; with retrieval off ("Bez zdrojů" or
+        # top_k=0) there is nothing to search.
         if not use_sources:
             return "no_sources"
         if not enabled:
