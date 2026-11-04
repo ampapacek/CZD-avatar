@@ -1211,7 +1211,8 @@ function runQueryStatusText(retrieveOnlyMode) {
   return currentUsesSources() ? "Vyhledávám zdroje a generuji odpověď..." : "Generuji odpověď...";
 }
 
-async function runQuery(retrieveOnlyMode) {
+// `bypassCache`: "Vygenerovat znovu" after an answer from the answer cache.
+async function runQuery(retrieveOnlyMode, { bypassCache = false } = {}) {
   const controller = new AbortController();
   const turnId = activeQueryTransformTurnId() || newAnalyticsId();
   activeQueryController = controller;
@@ -1317,7 +1318,7 @@ async function runQuery(retrieveOnlyMode) {
         system_prompt: systemPrompt.value,
         user_prompt_template: userPromptTemplate.value,
       };
-      const data = await chatRequest(payload, {
+      const data = await chatRequest(bypassCache ? { ...payload, bypass_cache: true } : payload, {
         onPreliminarySources(prelimData) {
           currentRetrievalQuery = prelimData.retrieval_query || currentRetrievalQuery;
           currentAnswerQuestion = prelimData.answer_question || currentAnswerQuestion;
@@ -1364,7 +1365,12 @@ async function runQuery(retrieveOnlyMode) {
           currentRetrievalQuery = doneData.retrieval_query || currentRetrievalQuery;
           currentAnswerQuestion = doneData.answer_question || currentAnswerQuestion;
           const modelLabel = formatModelUsageLabel(doneData.model, doneData.upstream_model);
-          statusEl.textContent = formatTimingLabel(doneData, modelLabel);
+          if (Avatar.isCachedAnswer(doneData)) {
+            statusEl.textContent = Avatar.cachedAnswerStatus(doneData, modelLabel);
+            statusEl.append(" ", regenerateAnswerButton());
+          } else {
+            statusEl.textContent = formatTimingLabel(doneData, modelLabel);
+          }
           statusEl.title = rawModelUsageLabel(doneData.model, doneData.upstream_model);
           currentAnswerSources = doneData.sources || currentAnswerSources;
           currentRetrievedChunks = doneData.retrieved_chunks || currentRetrievedChunks;
@@ -1436,6 +1442,7 @@ async function runQuery(retrieveOnlyMode) {
         response_time_seconds: data.response_time_seconds,
         rerank_time_seconds: data.rerank_time_seconds ?? null,
         generation_time_seconds: data.generation_time_seconds ?? null,
+        cache_hit: Avatar.isCachedAnswer(data),
       });
       renderAnswerShare();
     }
@@ -1464,6 +1471,16 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   runQuery(false);
 });
+
+function regenerateAnswerButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "status-action";
+  button.textContent = "Vygenerovat znovu";
+  button.title = "Nechat model odpovědět znovu místo uložené odpovědi. Nová odpověď uloženou nahradí.";
+  button.addEventListener("click", () => runQuery(false, { bypassCache: true }));
+  return button;
+}
 
 retrieveButton.addEventListener("click", () => runQuery(true));
 
@@ -3336,6 +3353,8 @@ function selectedModelValue() {
 }
 
 function refreshModelOptions(settings = appSettings) {
+  // Every change of admin access ends up here.
+  renderCacheButton();
   const provider = selectedProviderConfig(settings);
   const browserApiKeyProvided = Boolean(selectedProviderApiKey(provider?.id));
   const unlocked = customModelAllowed(provider);
@@ -8102,7 +8121,9 @@ function renderConversationMessage(message, index = 0, conversationSummary = "")
       `<span title="${escapeHtml(rawModelUsageLabel(message.model_used, message.upstream_model))}">${escapeHtml(formatModelUsageLabel(message.model_used, message.upstream_model))}</span>`,
     );
   }
-  if (message.role === "assistant" && message.response_time_seconds) {
+  if (message.role === "assistant" && message.cache_hit) {
+    metaParts.push(`<span title="Odpověď byla uložená z dřívějšího stejného dotazu, model se znovu neptal.">z mezipaměti</span>`);
+  } else if (message.role === "assistant" && message.response_time_seconds) {
     metaParts.push(`${escapeHtml(message.response_time_seconds)}s`);
   }
   const budgetWarnings =
@@ -8460,6 +8481,7 @@ async function submitConversationTurn() {
           model_used: data.model || payload.model,
           upstream_model: data.upstream_model || null,
           response_time_seconds: data.response_time_seconds,
+          cache_hit: Avatar.isCachedAnswer(data),
           createdAt: new Date().toISOString(),
         };
         if (messages[messages.length - 1]?.role === "assistant") {
@@ -8590,6 +8612,7 @@ function saveHistoryEntry(entry) {
     model_used: entry.model_used || null,
     upstream_model: entry.upstream_model || null,
     response_time_seconds: entry.response_time_seconds ?? null,
+    cache_hit: entry.cache_hit === true,
     createdAt: new Date().toISOString(),
   });
   const savedHistory = saveHistoryEntriesSafely(history);
@@ -9977,7 +10000,9 @@ function renderHistorySettings(entry) {
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
         ${renderSetting("Model", formatModelUsageLabel(modelId, entry.upstream_model), rawModelUsageLabel(modelId, entry.upstream_model))}
-        ${renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
+        ${entry.cache_hit
+          ? renderSetting("Doba odpovědi", "z mezipaměti")
+          : renderSetting("Doba odpovědi", entry.response_time_seconds ? `${entry.response_time_seconds}s` : null)}
         ${renderSetting("Vygenerováno", generatedAt ? formatHistoryTime(generatedAt) : null)}
         ${entry.shared_at ? renderSetting("Sdíleno", formatHistoryTime(entry.shared_at)) : ""}
       </div>
@@ -10379,6 +10404,7 @@ function applyAccount(account) {
     llmModelsUnlocked = true;
     setUnlockStatus("Admin přístup je aktivní díky přihlášenému admin účtu.", "success");
   }
+  renderCacheButton();
   renderAccountQuota();
 }
 
@@ -10607,6 +10633,417 @@ registrationModeSelect.addEventListener("change", () => runAdminAction(
   () => accountRequest("admin/registration-mode", { method: "PUT", body: { mode: registrationModeSelect.value } }),
   "Režim registrace uložen.",
 ));
+
+// Admin Cache dialog ----------------------------------------------------------
+// The server's answer cache (docs/architecture.md#answer-cache): list, preview,
+// pin and delete entries. For a logged-in admin account or the unlocked shared
+// admin password, which goes in a header.
+
+const cacheDialog = document.querySelector("#cacheDialog");
+const cacheStats = document.querySelector("#cacheStats");
+const cacheFilterForm = document.querySelector("#cacheFilterForm");
+const cacheWpFilter = document.querySelector("#cacheWpFilter");
+const cachePinnedFilter = document.querySelector("#cachePinnedFilter");
+const cacheStaleFilter = document.querySelector("#cacheStaleFilter");
+const cacheQueryFilter = document.querySelector("#cacheQueryFilter");
+const cacheStatus = document.querySelector("#cacheStatus");
+const cacheEntriesBody = document.querySelector("#cacheEntriesBody");
+const cachePreview = document.querySelector("#cachePreview");
+const cachePreviewQuestion = document.querySelector("#cachePreviewQuestion");
+const cachePreviewSettings = document.querySelector("#cachePreviewSettings");
+const cachePreviewAnswer = document.querySelector("#cachePreviewAnswer");
+const cachePreviewSources = document.querySelector("#cachePreviewSources");
+let cacheLoadSequence = 0;
+let cacheQueryTimer = null;
+
+// Looks the button up itself: refreshModelOptions can run before this section.
+function renderCacheButton() {
+  document.querySelector("#cacheButton").hidden = !(appSettings.answer_cache_enabled && llmModelsUnlocked);
+}
+
+function cacheFilter() {
+  return {
+    wp_id: cacheWpFilter.value,
+    pinned: cachePinnedFilter.value,
+    stale: cacheStaleFilter.value,
+    q: cacheQueryFilter.value,
+  };
+}
+
+async function cacheRequest(url, { method = "GET", body } = {}) {
+  const headers = {};
+  const password = llmUnlockPassword.value.trim();
+  if (password && !accountIsAdmin()) {
+    headers["X-Admin-Password"] = password;
+  }
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  handleAccountResponse(response);
+  const data = response.status === 204 ? {} : await safeJson(response);
+  if (!response.ok) {
+    throw requestError(data.detail, "Požadavek na cache se nepovedl.");
+  }
+  return data;
+}
+
+function populateCacheWpFilter() {
+  const selected = cacheWpFilter.value;
+  cacheWpFilter.replaceChildren(
+    new Option("Vše", ""),
+    ...(appSettings.wps || []).map((wp) => new Option(wp.label || wp.id, wp.id, false, wp.id === selected)),
+  );
+}
+
+async function openCacheDialog() {
+  populateCacheWpFilter();
+  populateCacheWarmForm();
+  cacheDialog.showModal();
+  await Promise.all([loadCacheEntries(), loadCacheWarmStatus()]);
+}
+
+async function loadCacheEntries() {
+  const sequence = ++cacheLoadSequence;
+  setAccountStatus(cacheStatus, "Načítám…");
+  try {
+    const query = Avatar.cacheFilterQuery(cacheFilter());
+    const data = await cacheRequest(query ? `answer-cache?${query}` : "answer-cache");
+    if (sequence !== cacheLoadSequence) {
+      return;
+    }
+    const entries = data.entries || [];
+    cacheStats.textContent = Avatar.cacheStatsText(data.stats, data.matching, entries.length);
+    cacheEntriesBody.replaceChildren(...entries.map((entry) => cacheEntryRow(entry)));
+    setAccountStatus(cacheStatus, entries.length ? "" : "Žádné uložené odpovědi.");
+  } catch (error) {
+    if (sequence === cacheLoadSequence) {
+      setAccountStatus(cacheStatus, error.message, "error");
+    }
+  }
+}
+
+function wpLabel(wpId) {
+  return (appSettings.wps || []).find((wp) => wp.id === wpId)?.label || wpId || "—";
+}
+
+function cacheCell(text, title = "") {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  if (title) {
+    cell.title = title;
+  }
+  return cell;
+}
+
+function cacheActionButton(label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+// Every value goes in through textContent: questions are user input.
+function cacheEntryRow(entry) {
+  const row = document.createElement("tr");
+  row.classList.toggle("is-stale", Boolean(entry.stale));
+
+  const question = cacheCell(entry.question, entry.question);
+  if (entry.stale) {
+    const badge = document.createElement("span");
+    badge.className = "account-badge";
+    badge.textContent = "stará";
+    badge.title = "Vznikla při jiném nastavení serveru; žádný dotaz ji už nenajde.";
+    // First, so a long question cut by the ellipsis does not hide it.
+    question.prepend(badge);
+  }
+
+  const lastHit = entry.last_hit_at ? `Naposledy použito ${Avatar.formatCachedAt(entry.last_hit_at)}` : "Zatím nepoužito";
+  const pinnedCell = document.createElement("td");
+  const pinned = document.createElement("input");
+  pinned.type = "checkbox";
+  pinned.checked = Boolean(entry.pinned);
+  pinned.setAttribute("aria-label", `Připnout odpověď na ${entry.question}`);
+  pinned.addEventListener("change", () => runCacheAction(
+    () => cacheRequest(`answer-cache/${entry.key}/pin`, { method: "PUT", body: { pinned: pinned.checked } }),
+    pinned.checked ? "Odpověď připnuta." : "Odpověď odepnuta.",
+  ));
+  pinnedCell.append(pinned);
+
+  const actions = document.createElement("td");
+  const actionWrap = document.createElement("div");
+  actionWrap.className = "account-user-actions";
+  actionWrap.append(
+    cacheActionButton("Náhled", () => showCachePreview(entry)),
+    cacheActionButton("Smazat", () => deleteCacheEntry(entry)),
+  );
+  actions.append(actionWrap);
+
+  row.append(
+    question,
+    cacheCell(wpLabel(entry.wp_id)),
+    cacheCell(Avatar.cacheProfileLabel(entry), entry.prompt_preset_id || ""),
+    cacheCell(Avatar.shortenModelName(entry.model) || "—", [entry.llm_provider, entry.model].filter(Boolean).join(" / ")),
+    cacheCell(Avatar.formatCachedAt(entry.created_at)),
+    cacheCell(String(entry.hit_count), lastHit),
+    cacheCell(Avatar.formatBytes(entry.size)),
+    pinnedCell,
+    actions,
+  );
+  return row;
+}
+
+async function runCacheAction(action, successMessage) {
+  try {
+    await action();
+    await loadCacheEntries();
+    setAccountStatus(cacheStatus, typeof successMessage === "function" ? successMessage() : successMessage);
+  } catch (error) {
+    // Reload first: it rewrites the status line, which would hide the error.
+    await loadCacheEntries();
+    setAccountStatus(cacheStatus, error.message, "error");
+  }
+}
+
+function deleteCacheEntry(entry) {
+  if (!window.confirm(`Smazat uloženou odpověď na „${entry.question}“?`)) {
+    return;
+  }
+  if (cachePreview.dataset.key === entry.key) {
+    closeCachePreview();
+  }
+  return runCacheAction(
+    () => cacheRequest(`answer-cache/${entry.key}`, { method: "DELETE" }),
+    "Odpověď smazána.",
+  );
+}
+
+function deleteMatchingCacheEntries() {
+  const filter = cacheFilter();
+  const pinnedToo = filter.pinned === "false" ? "" : ", včetně připnutých";
+  const message = Object.values(filter).some((value) => String(value).trim())
+    ? `Smazat všechny uložené odpovědi, které odpovídají filtru${pinnedToo}?`
+    : "Filtr je prázdný: smazat úplně všechny uložené odpovědi, včetně připnutých?";
+  if (!window.confirm(message)) {
+    return;
+  }
+  closeCachePreview();
+  let deleted = 0;
+  return runCacheAction(
+    async () => {
+      deleted = (await cacheRequest("answer-cache/delete", { method: "POST", body: Avatar.cacheFilterBody(filter) })).deleted;
+    },
+    () => `Smazáno ${deleted}.`,
+  );
+}
+
+async function showCachePreview(entry) {
+  cachePreview.dataset.key = entry.key;
+  cachePreview.hidden = false;
+  cachePreviewQuestion.textContent = entry.question;
+  cachePreviewSettings.textContent = "Načítám…";
+  cachePreviewAnswer.replaceChildren();
+  cachePreviewSources.replaceChildren();
+  try {
+    const data = await cacheRequest(`answer-cache/${entry.key}`);
+    if (cachePreview.dataset.key !== entry.key) {
+      return;
+    }
+    const profile = `Profil: ${Avatar.cacheProfileLabel(entry)}`;
+    cachePreviewSettings.textContent = [profile, Avatar.cacheSettingsSummary(data.settings)].join(" · ");
+    cachePreviewAnswer.innerHTML = Avatar.renderMarkdown(data.answer, data.sources || []);
+    cachePreviewSources.replaceChildren(...(data.sources || []).map((source) => cachePreviewSource(source)));
+    cachePreview.scrollIntoView({ block: "nearest" });
+  } catch (error) {
+    cachePreviewSettings.textContent = error.message;
+  }
+}
+
+function cachePreviewSource(source) {
+  const item = document.createElement("li");
+  const label = [source.citation_id, source.title, source.page_number ? `s. ${source.page_number}` : ""].filter(Boolean).join(" · ");
+  const url = source.document_url || source.url || source.source_url;
+  if (url && /^https?:\/\//i.test(url)) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = label;
+    item.append(link);
+  } else {
+    item.textContent = label;
+  }
+  return item;
+}
+
+function closeCachePreview() {
+  cachePreview.hidden = true;
+  delete cachePreview.dataset.key;
+}
+
+// Warming: a background run on the server (one at a time), polled while the
+// dialog is open. The form has the options of scripts/warm_cache.py.
+
+const cacheWarm = document.querySelector("#cacheWarm");
+const cacheWarmWp = document.querySelector("#cacheWarmWp");
+const cacheWarmQuestions = document.querySelector("#cacheWarmQuestions");
+const cacheWarmCustom = document.querySelector("#cacheWarmCustom");
+const cacheWarmProfile = document.querySelector("#cacheWarmProfile");
+const cacheWarmProvider = document.querySelector("#cacheWarmProvider");
+const cacheWarmModels = document.querySelector("#cacheWarmModels");
+const cacheWarmConcurrency = document.querySelector("#cacheWarmConcurrency");
+const cacheWarmForce = document.querySelector("#cacheWarmForce");
+const cacheWarmStart = document.querySelector("#cacheWarmStart");
+const cacheWarmCancel = document.querySelector("#cacheWarmCancel");
+const cacheWarmProgress = document.querySelector("#cacheWarmProgress");
+const cacheWarmStatus = document.querySelector("#cacheWarmStatus");
+const cacheWarmErrors = document.querySelector("#cacheWarmErrors");
+const CACHE_WARM_POLL_MS = 2000;
+let cacheWarmTimer = null;
+let cacheWarmRunning = false;
+
+function populateCacheWarmForm() {
+  const wp = cacheWarmWp.value;
+  cacheWarmWp.replaceChildren(
+    new Option("Všechna WP", "all"),
+    ...(appSettings.wps || []).map((item) => new Option(item.label || item.id, item.id, false, item.id === wp)),
+  );
+  const provider = cacheWarmProvider.value || appSettings.llm_provider;
+  cacheWarmProvider.replaceChildren(
+    ...(appSettings.llm_providers || []).map((item) => new Option(item.label || item.id, item.id, false, item.id === provider)),
+  );
+  populateCacheWarmModels();
+}
+
+function populateCacheWarmModels() {
+  const provider = (appSettings.llm_providers || []).find((item) => item.id === cacheWarmProvider.value);
+  const selected = new Set([...cacheWarmModels.selectedOptions].map((option) => option.value));
+  if (!selected.size && provider?.default_model) {
+    selected.add(provider.default_model);
+  }
+  const models = Avatar.modelSelectorView(provider, { unlocked: true, currentModel: provider?.default_model || "" }).models;
+  const labels = Avatar.modelDisplayLabels(models);
+  cacheWarmModels.replaceChildren(...models.map((name, index) => {
+    const option = new Option(labels[index] || name, name, false, selected.has(name));
+    option.title = name;
+    return option;
+  }));
+}
+
+function cacheWarmForm() {
+  return {
+    wp: cacheWarmWp.value,
+    questions: cacheWarmQuestions.value,
+    custom: cacheWarmCustom.value,
+    profile: cacheWarmProfile.value,
+    provider: cacheWarmProvider.value,
+    models: [...cacheWarmModels.selectedOptions].map((option) => option.value),
+    force: cacheWarmForce.checked,
+    concurrency: cacheWarmConcurrency.value,
+  };
+}
+
+async function startCacheWarm() {
+  const form = cacheWarmForm();
+  if (form.questions === "custom" && !Avatar.cacheWarmBody(form).questions.length) {
+    setAccountStatus(cacheWarmStatus, "Zadej aspoň jednu otázku.", "error");
+    return;
+  }
+  cacheWarmStart.disabled = true;
+  try {
+    const { jobs } = await cacheRequest("answer-cache/warm", { method: "POST", body: Avatar.cacheWarmBody(form, { dryRun: true }) });
+    const body = Avatar.cacheWarmBody(form);
+    const what = body.force ? "vygenerovat (i už uložené odpovědi znovu)" : "vygenerovat, pokud ještě nejsou v cache,";
+    if (!jobs) {
+      setAccountStatus(cacheWarmStatus, "Výběru neodpovídá žádný požadavek.", "error");
+      return;
+    }
+    if (!window.confirm(`${jobs} požadavků ${what} a připnout? Concurrency ${body.concurrency}.`)) {
+      return;
+    }
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm", { method: "POST", body }));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  } finally {
+    cacheWarmStart.disabled = cacheWarmRunning;
+  }
+}
+
+async function cancelCacheWarm() {
+  try {
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm/cancel", { method: "POST" }));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  }
+}
+
+async function loadCacheWarmStatus() {
+  try {
+    renderCacheWarmStatus(await cacheRequest("answer-cache/warm"));
+  } catch (error) {
+    setAccountStatus(cacheWarmStatus, error.message, "error");
+  }
+}
+
+function renderCacheWarmStatus(status) {
+  clearTimeout(cacheWarmTimer);
+  const wasRunning = cacheWarmRunning;
+  cacheWarmRunning = status.state === "running";
+  if (cacheWarmRunning) {
+    cacheWarm.open = true;
+  }
+  cacheWarmStart.disabled = cacheWarmRunning;
+  cacheWarmCancel.hidden = !cacheWarmRunning;
+  cacheWarmCancel.disabled = Boolean(status.cancelled);
+  cacheWarmProgress.hidden = status.state === "idle";
+  cacheWarmProgress.max = Math.max(status.total || 0, 1);
+  cacheWarmProgress.value = status.done || 0;
+  setAccountStatus(cacheWarmStatus, Avatar.cacheWarmStatusText(status), status.failed ? "error" : "");
+  cacheWarmErrors.replaceChildren(...(status.errors || []).map((item) => {
+    const line = document.createElement("li");
+    line.textContent = `${item.job}: ${item.error}`;
+    return line;
+  }));
+  if (cacheWarmRunning && cacheDialog.open) {
+    cacheWarmTimer = setTimeout(() => loadCacheWarmStatus(), CACHE_WARM_POLL_MS);
+  }
+  if (wasRunning && !cacheWarmRunning) {
+    loadCacheEntries();
+  }
+}
+
+cacheWarmQuestions.addEventListener("change", () => {
+  document.querySelector(".cache-warm-custom").hidden = cacheWarmQuestions.value !== "custom";
+});
+cacheWarmProvider.addEventListener("change", () => {
+  cacheWarmModels.replaceChildren();
+  populateCacheWarmModels();
+});
+cacheWarmStart.addEventListener("click", () => startCacheWarm());
+cacheWarmCancel.addEventListener("click", () => cancelCacheWarm());
+document.querySelector("#cacheWarmForm").addEventListener("submit", (event) => event.preventDefault());
+cacheDialog.addEventListener("close", () => clearTimeout(cacheWarmTimer));
+
+document.querySelector("#cacheButton").addEventListener("click", () => openCacheDialog());
+document.querySelector("#closeCacheButton").addEventListener("click", () => cacheDialog.close());
+cacheDialog.addEventListener("click", (event) => {
+  if (event.target === cacheDialog) {
+    cacheDialog.close();
+  }
+});
+document.querySelector("#cacheReloadButton").addEventListener("click", () => loadCacheEntries());
+document.querySelector("#cacheDeleteMatchingButton").addEventListener("click", () => deleteMatchingCacheEntries());
+document.querySelector("#cachePreviewClose").addEventListener("click", () => closeCachePreview());
+cacheFilterForm.addEventListener("submit", (event) => event.preventDefault());
+for (const select of [cacheWpFilter, cachePinnedFilter, cacheStaleFilter]) {
+  select.addEventListener("change", () => loadCacheEntries());
+}
+cacheQueryFilter.addEventListener("input", () => {
+  clearTimeout(cacheQueryTimer);
+  cacheQueryTimer = setTimeout(() => loadCacheEntries(), 300);
+});
 
 const sharedItemRequest = fetchSharedItemFromUrl();
 refreshStoragePressure();

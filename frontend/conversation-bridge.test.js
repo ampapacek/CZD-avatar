@@ -119,7 +119,7 @@ describe("continue-in-conversation wiring", () => {
     expect(updateBody).toContain("continueInConversationButton.hidden = currentAnswerContinuation === null");
 
     const runQueryBody = appSource.slice(
-      appSource.indexOf("async function runQuery(retrieveOnlyMode)"),
+      appSource.indexOf("async function runQuery(retrieveOnlyMode"),
       appSource.indexOf("form.addEventListener(\"submit\""),
     );
     expect(runQueryBody).toContain("currentAnswerContinuation = null;");

@@ -29,6 +29,9 @@ TEST_ENV = {
     "MSEARCH_BASE_URL": "https://msearch.test.invalid",
     "MSEARCH_USERNAME": "test",
     "MSEARCH_PASSWORD": "test",
+    # Endpoint tests must not read or fill a cache file in the checkout; the
+    # cache tests hand the app their own temporary one.
+    "ANSWER_CACHE_ENABLED": "false",
 }
 
 

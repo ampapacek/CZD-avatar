@@ -83,6 +83,9 @@ class ChatRequest(BaseModel):
     prompt_preset_id: str | None = None
     query_transform_ms: int | None = Field(default=None, ge=0)
     query_transform_kind: Literal["llm", "other"] | None = None
+    # Generate a fresh answer even when the answer cache has one ("Vygenerovat
+    # znovu"); the new answer replaces the cached one.
+    bypass_cache: bool = False
 
 
 class OptionDef(BaseModel):
@@ -379,3 +382,31 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     collection: str
+
+
+class AnswerCacheFilter(BaseModel):
+    """Which entries of the admin Cache dialog a list or bulk delete covers."""
+
+    wp_id: str | None = None
+    pinned: bool | None = None
+    stale: bool | None = None
+    q: str | None = None
+
+
+class AnswerCachePinRequest(BaseModel):
+    pinned: bool
+
+
+class AnswerCacheWarmRequest(BaseModel):
+    """A warming run of the admin Cache dialog, with the options of
+    scripts/warm_cache.py; questions are "prepared" or a list."""
+
+    wp: list[str] = Field(default_factory=lambda: ["all"], max_length=100)
+    questions: Literal["prepared"] | list[str] = "prepared"
+    profile: list[str] = Field(default_factory=lambda: ["default"], max_length=100)
+    provider: str | None = None
+    model: list[str] = Field(default_factory=list, max_length=100)
+    force: bool = False
+    concurrency: int = Field(default=4, ge=1, le=20)
+    # Only count the requests.
+    dry_run: bool = False

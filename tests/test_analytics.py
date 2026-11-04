@@ -13,7 +13,7 @@ import app.analytics as analytics_module
 from app.analytics import AnalyticsContext, AnalyticsWriter, question_metadata
 from app import main
 from app.rag.llm import OpenAICompatibleLLM
-from scripts.usage_report import build_report, load_events, percentile
+from scripts.usage_report import build_parser, build_report, filter_events, load_events, percentile
 
 
 class AnalyticsWriterTests(unittest.TestCase):
@@ -306,6 +306,22 @@ class UsageReportTests(unittest.TestCase):
         self.assertEqual(percentile([10, 100], .5), 10)
         timing = next(row for row in report["rows"] if row.get("section") == "timings" and row.get("metric") == "total_ms")
         self.assertEqual(timing["p95"], 100)
+
+    def test_cache_hits_are_counted_filtered_and_left_out_of_timings(self):
+        events = [
+            {"event": "turn", "ts": "2026-08-01T00:00:01Z", "total_ms": 5000},
+            {"event": "turn", "ts": "2026-08-01T00:00:02Z", "total_ms": 4000, "cache_hit": False},
+            {"event": "turn", "ts": "2026-08-01T00:00:03Z", "total_ms": 10, "cache_hit": True},
+        ]
+        report = build_report(events, 0)
+        hits = {row["cache_hit"]: row["count"] for row in report["rows"] if row.get("section") == "cache_hit"}
+        self.assertEqual(hits, {False: 2, True: 1})
+        timing = next(row for row in report["rows"] if row.get("section") == "timings" and row.get("metric") == "total_ms")
+        self.assertEqual(timing["count"], 2)
+        args = build_parser().parse_args(["--cache-hit", "no"])
+        self.assertEqual(len(filter_events(events, args)), 2)
+        args = build_parser().parse_args(["--cache-hit", "yes"])
+        self.assertEqual(filter_events(events, args), events[2:])
 
 
 if __name__ == "__main__":

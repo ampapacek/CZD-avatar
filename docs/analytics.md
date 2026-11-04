@@ -32,6 +32,12 @@ The report skips malformed or unknown-schema lines and prints how many it
 skipped. It supports filters for event, WP, operation, provider, model, endpoint,
 collection, prompt, key source, status, error code, date range, and browser ID.
 
+A streamed answer served from the [answer cache](architecture.md#answer-cache)
+is still a `turn` event, with `cache_hit: true` (other streamed turns have
+`false`, older events no flag). It makes no `upstream_call`. The report counts
+hits in its `cache_hit` section, leaves them out of the timings (they are a
+fixed-pace replay) and filters them with `--cache-hit yes|no`.
+
 ## Logs
 
 Each server or script start creates a new timestamped log file in:

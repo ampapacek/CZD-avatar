@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import hashlib
 import json
@@ -12,21 +13,32 @@ import re
 import threading
 import time
 import httpx
+from collections.abc import Iterator
 from html import escape
 from pathlib import Path
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager, closing, suppress
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.answer_cache import (
+    CACHE_VERSION as ANSWER_CACHE_VERSION,
+    AnswerCache,
+    cache_key as answer_cache_key,
+    is_cacheable as answer_is_cacheable,
+    key_input as answer_cache_key_input,
+    replay_pieces,
+)
+from app import cache_warming
 from app.auth import (
     AuthMiddleware,
     account_payload,
+    count_request,
     current_user,
     get_store as get_account_store,
     is_admin_user,
@@ -48,6 +60,9 @@ from app.analytics import (
 )
 from app.logging_config import configure_logging
 from app.models import (
+    AnswerCacheFilter,
+    AnswerCachePinRequest,
+    AnswerCacheWarmRequest,
     BuiltinPromptOverride,
     BuiltinPromptOverrideSaveRequest,
     ChatRequest,
@@ -116,6 +131,7 @@ from app.rag.prompts import (
     default_system_prompt_template,
     default_user_prompt_template,
     resolve_placeholder_defs,
+    substitute_value,
     template_placeholder_names,
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
@@ -624,6 +640,7 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
         "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
         "account": account_payload(current_user.get()),
+        "answer_cache_enabled": settings.answer_cache_enabled,
     }
 
 
@@ -1681,8 +1698,182 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+_answer_cache: AnswerCache | None = None
+_answer_cache_lock = threading.Lock()
+# Pause between the pieces of a replayed answer; tests replace it.
+_replay_sleep = time.sleep
+
+# The settings a request field falls back to when it is unset, plus the ones
+# that shape retrieval and the prompt without a request field. They are part
+# of the cache key, so changing one in .env does not serve answers made under
+# the old value.
+_ANSWER_CACHE_SETTINGS = (
+    "retrieval_backend",
+    "top_k",
+    "min_score",
+    "min_relative_score",
+    "qdrant_collection",
+    "embedding_model",
+    "reranker_enabled",
+    "reranker_model",
+    "reranker_weight",
+    "reranker_candidates",
+    "reranker_max_length",
+    "msearch_base_url",
+    "msearch_collection",
+    "msearch_max_results",
+    "msearch_mode",
+    "msearch_min_confidence",
+    "msearch_rescore",
+    "context_window_tokens",
+    "output_token_budget_short",
+    "output_token_budget_medium",
+    "output_token_budget_long",
+    "min_prompt_chunks",
+    "token_budget_safety_margin",
+)
+# Everything of the "sources" event that the stored "done" payload carries too.
+_CACHED_SOURCES_FIELDS = (
+    "original_question",
+    "retrieval_query",
+    "answer_question",
+    "retrieval_query_was_rewritten",
+    "retrieval_query_rewrite_attempted",
+    "retrieval_query_rewrite_skip_reason",
+    "used_chunks",
+    "omitted_chunks",
+    "baseline_chunks",
+    "sources",
+    "token_budget",
+    "chunk_budget_warnings",
+    "conversation_summary",
+    "conversation_folded_message_count",
+)
+
+
+def _get_answer_cache() -> AnswerCache | None:
+    global _answer_cache
+    if not settings.answer_cache_enabled:
+        return None
+    with _answer_cache_lock:
+        if _answer_cache is None:
+            _answer_cache = AnswerCache(
+                settings.answer_cache_path,
+                ttl_seconds=settings.answer_cache_ttl_days * 86400,
+                max_entries=settings.answer_cache_max_entries,
+            )
+    return _answer_cache
+
+
+def _chat_cache_key_input(
+    request: ChatRequest,
+    placeholder_defs: dict,
+    selections: dict[str, str],
+    length: str,
+    provider: str,
+    model: str,
+    base_url: str | None,
+) -> dict[str, object]:
+    """The key input with every value as the pipeline will use it.
+
+    An omitted field and the default it stands for give the same key, so a
+    request from scripts/warm_cache.py, which leaves most fields out, hits the
+    entry of a browser request that sends the defaults explicitly.
+    """
+
+    budget = PromptBudgetConfig.from_settings(
+        settings,
+        context_window_tokens=request.context_window_tokens,
+        output_token_budget_short=request.output_token_budget_short,
+        output_token_budget_medium=request.output_token_budget_medium,
+        output_token_budget_long=request.output_token_budget_long,
+        min_prompt_chunks=request.min_prompt_chunks,
+        token_budget_safety_margin=request.token_budget_safety_margin,
+        conversation_summary_trigger_tokens=request.conversation_summary_trigger_tokens,
+    )
+
+    def resolved(value: object, default: object) -> object:
+        return default if value is None else value
+
+    return answer_cache_key_input(
+        request,
+        llm_provider=provider,
+        model=model,
+        llm_base_url=(base_url or "").rstrip("/"),
+        wp_id=resolve_wp_id(request.wp_id),
+        system_prompt=(request.system_prompt or "").strip() or default_system_prompt_template(),
+        user_prompt_template=(request.user_prompt_template or "").strip() or default_user_prompt_template(),
+        # The text each placeholder renders, not its def and selection: a
+        # missing selection and its default render the same.
+        placeholder_defs=None,
+        selections=None,
+        placeholder_values={
+            name: substitute_value(definition, selections.get(name)) for name, definition in placeholder_defs.items()
+        },
+        output_length=length,
+        reasoning_effort=(request.reasoning_effort or "").strip() or None,
+        top_k=resolved(request.top_k, settings.top_k),
+        retrieval_backend=request.retrieval_backend or settings.retrieval_backend,
+        msearch_collection=request.msearch_collection or settings.msearch_collection,
+        msearch_mode=request.msearch_mode or settings.msearch_mode,
+        msearch_min_confidence=resolved(request.msearch_min_confidence, settings.msearch_min_confidence),
+        msearch_rescore=resolved(request.msearch_rescore, settings.msearch_rescore),
+        min_score=resolved(request.min_score, settings.min_score),
+        min_relative_score=resolved(request.min_relative_score, settings.min_relative_score),
+        rerank_enabled=resolved(request.rerank_enabled, settings.reranker_enabled),
+        rerank_weight=resolved(request.rerank_weight, settings.reranker_weight),
+        rerank_candidates=resolved(request.rerank_candidates, settings.reranker_candidates),
+        context_window_tokens=budget.context_window_tokens,
+        output_token_budget_short=budget.output_token_budget_short,
+        output_token_budget_medium=budget.output_token_budget_medium,
+        output_token_budget_long=budget.output_token_budget_long,
+        min_prompt_chunks=budget.min_prompt_chunks,
+        token_budget_safety_margin=budget.token_budget_safety_margin,
+        conversation_summary_trigger_tokens=budget.conversation_summary_trigger_tokens,
+        server=_answer_cache_server_settings(),
+    )
+
+
+def _answer_cache_server_settings() -> dict[str, object]:
+    return {name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS}
+
+
+def _cached_answer(cache: AnswerCache, key: str) -> dict[str, object] | None:
+    # A broken cache must not break the chat: it only costs a fresh answer.
+    try:
+        return cache.get(key)
+    except Exception:
+        logger.exception("Answer cache lookup failed")
+        return None
+
+
+def _store_answer(cache: AnswerCache, key: str, key_input: dict[str, object], response: dict[str, object], request: ChatRequest) -> None:
+    # retrieved_chunks repeats used_chunks; the replay restores it.
+    payload = {name: value for name, value in response.items() if name != "retrieved_chunks"}
+    try:
+        cache.put(key, key_input, payload, meta={"prompt_preset_id": request.prompt_preset_id})
+    except Exception:
+        logger.exception("Answer cache store failed")
+
+
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+    events, quota_headers = _chat_events(request, http_request)
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            **quota_headers,
+        },
+    )
+
+
+def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[str], dict[str, str]]:
+    """The SSE events of /chat/stream and its quota headers; warming the
+    cache consumes them in-process. A request over the daily limit raises."""
+
     placeholder_defs, selections = _resolve_chat_placeholders(request)
     length = _output_budget_length(placeholder_defs, selections)
     context = request_context(http_request, settings.analytics_instance_id)
@@ -1695,6 +1886,100 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
         base_url=request.llm_base_url,
         key_source="browser" if request.llm_api_key and request.llm_api_key.strip() else "none",
     )
+    initial_fields["cache_hit"] = False
+    # Resolved before the stream starts, because the cache key needs the
+    # resolved model; an error is reported from inside the stream as before.
+    resolved_llm: tuple[str, str, str | None, str | None] | None = None
+    resolve_error: HTTPException | None = None
+    try:
+        resolved_llm = _resolve_llm_request(request)
+    except HTTPException as exc:
+        resolve_error = exc
+    cache = _get_answer_cache() if resolved_llm is not None and answer_is_cacheable(request) else None
+    cache_input: dict[str, object] | None = None
+    cache_key: str | None = None
+    cached: dict[str, object] | None = None
+    if cache is not None:
+        provider, model, _, base_url = resolved_llm
+        cache_input = _chat_cache_key_input(request, placeholder_defs, selections, length, provider, model, base_url)
+        cache_key = answer_cache_key(cache_input)
+        if not request.bypass_cache:
+            cached = _cached_answer(cache, cache_key)
+    # Only an answer that costs an LLM call counts against the daily limit.
+    quota_headers = {} if cached is not None else count_request()
+
+    def cached_event_stream():
+        started = time.perf_counter()
+        resolved_provider, resolved_model, resolved_api_key, resolved_base_url = resolved_llm
+        fields = {
+            **initial_fields,
+            "provider": resolved_provider,
+            "requested_model": resolved_model,
+            "endpoint_host": endpoint_host(resolved_base_url),
+            "key_source": _key_source(request, resolved_api_key),
+            "upstream_model": cached.get("upstream_model"),
+            "cache_hit": True,
+        }
+        answer = str(cached.get("answer") or "")
+        try:
+            # The policy may have changed since the answer was stored.
+            _enforce_msearch_collection_policy(
+                request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+            )
+            _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
+            sources = {name: cached.get(name) for name in _CACHED_SOURCES_FIELDS}
+            yield _sse_event(
+                "sources",
+                {
+                    "question": request.question,
+                    **sources,
+                    "retrieved_chunks": cached.get("used_chunks"),
+                    "cache_hit": True,
+                    "cache_key": cache_key,
+                },
+            )
+            if cached.get("reasoning"):
+                yield _sse_event("reasoning", {"text": cached["reasoning"]})
+            # Streamed at a steady pace rather than all at once, so it reads
+            # like (and an avatar can speak it like) a generated answer.
+            pieces, pause = replay_pieces(answer)
+            for index, piece in enumerate(pieces):
+                if index:
+                    _replay_sleep(pause)
+                yield _sse_event("token", {"text": piece})
+            yield _sse_event(
+                "done",
+                {
+                    **cached,
+                    "retrieved_chunks": cached.get("used_chunks"),
+                    "response_time_seconds": round(time.perf_counter() - started, 3),
+                    "rerank_time_seconds": None,
+                    "generation_time_seconds": None,
+                    "cache_hit": True,
+                    "cache_key": cache_key,
+                },
+            )
+            analytics.event(
+                "turn", context, **fields, status="ok",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code=None,
+                **text_lengths(answer, "answer"), answer_tokens_estimated=estimated_tokens(answer),
+            )
+        except HTTPException as exc:
+            logger.info("Streaming chat rejected: %s", exc.detail)
+            yield _sse_event("error", {"detail": exc.detail})
+            analytics.event(
+                "turn", context, **fields, status="error",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code=analytics_error_code(exc, exc.status_code),
+            )
+        except GeneratorExit:
+            analytics.event(
+                "turn", context, **fields, status="cancelled",
+                duration_ms=ms(time.perf_counter() - started), total_ms=ms(time.perf_counter() - started),
+                http_status=200, error_code="client_cancelled",
+            )
+            raise
 
     def event_stream():
         started = time.perf_counter()
@@ -1705,7 +1990,9 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
         budget = None
         answer = ""
         try:
-            resolved_provider, resolved_model, resolved_api_key, resolved_base_url = _resolve_llm_request(request)
+            if resolve_error is not None:
+                raise resolve_error
+            resolved_provider, resolved_model, resolved_api_key, resolved_base_url = resolved_llm
             key_source = _key_source(request, resolved_api_key)
             fields.update(
                 provider=resolved_provider,
@@ -1893,6 +2180,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "chunk_budget_warnings": budget.warnings,
                     "conversation_summary": conversation.summary,
                     "conversation_folded_message_count": conversation.folded_message_count,
+                    "cache_hit": False,
+                    "cache_key": cache_key,
                 },
             )
             answer_parts: list[str] = []
@@ -1961,6 +2250,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 "response_time_seconds": round(elapsed, 3),
                 "rerank_time_seconds": round(rerank_seconds, 3) if candidates.rerank_active else None,
                 "generation_time_seconds": round(generation_seconds, 3),
+                "cache_hit": False,
+                "cache_key": cache_key,
             }
             logger.info(
                 "Streamed answer length=%s model=%s response_time=%.2fs rerank=%.2fs generation=%.2fs answer_chars=%s",
@@ -1971,6 +2262,11 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 generation_seconds,
                 len(answer),
             )
+            # Only a finished answer: an aborted or failed stream never gets here.
+            # Stored before "done", so the entry exists once a client sees it
+            # (scripts/warm_cache.py pins it then).
+            if cache_key is not None and answer.strip():
+                _store_answer(cache, cache_key, cache_input, response, request)
             yield _sse_event("done", response)
             event_fields = {
                 **fields,
@@ -2043,14 +2339,210 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 answer_tokens_estimated=estimated_tokens(answer),
             )
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+    return (cached_event_stream() if cached is not None else event_stream()), quota_headers
+
+
+# Admin Cache dialog -----------------------------------------------------------
+# Admin access as elsewhere: a logged-in admin account, or the shared admin
+# password, sent in a header so it stays out of URLs and access logs.
+
+# Rows the list returns; the rest is counted but left out.
+ANSWER_CACHE_LIST_LIMIT = 500
+
+
+def _admin_answer_cache(admin_password: str | None) -> AnswerCache:
+    if not _admin_authorized(admin_password):
+        raise HTTPException(status_code=403, detail="Správa cache vyžaduje admin přístup.")
+    cache = _get_answer_cache()
+    if cache is None:
+        raise HTTPException(status_code=404, detail="Cache odpovědí je vypnutá (ANSWER_CACHE_ENABLED).")
+    return cache
+
+
+def _answer_cache_entries(cache: AnswerCache) -> list[dict[str, object]]:
+    """The live entries, each marked stale when it was made for another server
+    configuration or cache version: an identical request now has another key,
+    so such an entry is never hit again."""
+
+    # Compared as stored, so Path and similar values match their JSON form.
+    server = json.loads(json.dumps(_answer_cache_server_settings(), ensure_ascii=False, default=str))
+    names = {
+        **{prompt.id: prompt.name for wp in WP_CONFIGS for prompt in wp.builtin_prompts},
+        **{preset["id"]: preset.get("name") for preset in load_prompt_presets(settings.prompt_presets_path)},
+    }
+    entries = cache.entries()
+    for entry in entries:
+        entry["stale"] = entry.pop("cache_version") != ANSWER_CACHE_VERSION or entry.pop("server") != server
+        entry["prompt_preset_name"] = names.get(entry["prompt_preset_id"])
+    return entries
+
+
+def _matches(entry: dict[str, object], selection: AnswerCacheFilter) -> bool:
+    query = (selection.q or "").strip().casefold()
+    return (
+        (not selection.wp_id or entry["wp_id"] == selection.wp_id)
+        and (selection.pinned is None or entry["pinned"] == selection.pinned)
+        and (selection.stale is None or entry["stale"] == selection.stale)
+        and (not query or query in str(entry["question"]).casefold())
     )
+
+
+@app.get("/answer-cache")
+def list_answer_cache(
+    wp_id: str | None = None,
+    pinned: bool | None = None,
+    stale: bool | None = None,
+    q: str | None = None,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    cache = _admin_answer_cache(x_admin_password)
+    entries = _answer_cache_entries(cache)
+    selection = AnswerCacheFilter(wp_id=wp_id, pinned=pinned, stale=stale, q=q)
+    matching = [entry for entry in entries if _matches(entry, selection)]
+    return {
+        "stats": {
+            "entries": len(entries),
+            "pinned": sum(entry["pinned"] for entry in entries),
+            "stale": sum(entry["stale"] for entry in entries),
+            "hits": sum(entry["hit_count"] for entry in entries),
+            "size_bytes": cache.size_bytes(),
+            "ttl_days": settings.answer_cache_ttl_days,
+            "max_entries": settings.answer_cache_max_entries,
+        },
+        "matching": len(matching),
+        "entries": matching[:ANSWER_CACHE_LIST_LIMIT],
+    }
+
+
+# Warming runs one at a time, in worker threads of this process; a restart
+# ends it. Before /answer-cache/{key}, which would match these paths too.
+_warm_run: cache_warming.WarmRun | None = None
+_warm_lock = threading.Lock()
+# Warming requests carry no browser headers, so analytics sees them as "api".
+_WARM_HTTP_REQUEST = Request({"type": "http", "method": "POST", "path": "/chat/stream", "headers": []})
+
+
+def _warm_fetch(path: str, params: dict[str, str]) -> object:
+    """What scripts/warm_cache.py reads over HTTP, read in-process."""
+
+    if path == "/settings":
+        return jsonable_encoder(get_public_settings(_WARM_HTTP_REQUEST))
+    if path == "/prompt-presets":
+        return jsonable_encoder(get_prompt_presets())
+    if path == "/questions":
+        return list_questions(params.get("wp_id"))
+    raise ValueError(path)
+
+
+def _warm_stream(body: dict[str, object]) -> Iterator[str]:
+    """The lines of /chat/stream for one request, as warm() reads them."""
+
+    try:
+        events, _ = _chat_events(ChatRequest(**body), _WARM_HTTP_REQUEST)
+    except HTTPException as exc:
+        yield _sse_event("error", {"detail": exc.detail})
+        return
+    with closing(events):
+        for event in events:
+            yield from event.split("\n")
+
+
+def _warm_status() -> dict[str, object]:
+    return _warm_run.snapshot() if _warm_run is not None else {"state": "idle"}
+
+
+@app.get("/answer-cache/warm")
+def get_answer_cache_warm(x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    _admin_answer_cache(x_admin_password)
+    return _warm_status()
+
+
+@app.post("/answer-cache/warm")
+def start_answer_cache_warm(
+    request: AnswerCacheWarmRequest, x_admin_password: str | None = Header(default=None)
+) -> dict[str, object]:
+    """Count the requests (dry_run) or start warming. The answers are pinned."""
+
+    global _warm_run
+    cache = _admin_answer_cache(x_admin_password)
+    options = request.model_dump(include={"wp", "questions", "profile", "provider", "model"})
+    try:
+        # The shared password unlocks the models that are not public, as for
+        # the script; an admin account unlocks them by itself (the workers run
+        # in its context).
+        jobs = cache_warming.build_jobs(_warm_fetch, options, settings.admin_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.dry_run:
+        return {"jobs": len(jobs)}
+    if not jobs:
+        raise HTTPException(status_code=400, detail="Výběru neodpovídá žádný požadavek.")
+    with _warm_lock:
+        if _warm_run is not None and not _warm_run.finished:
+            raise HTTPException(status_code=409, detail="Předgenerování už běží.")
+        run = cache_warming.WarmRun(
+            jobs,
+            lambda job: cache_warming.warm(_warm_stream, cache, job, request.force),
+            request.concurrency,
+        )
+        # Each worker in its own copy of this request's context, so it runs as
+        # the logged-in admin, if any.
+        run.start(lambda work: functools.partial(contextvars.copy_context().run, work))
+        _warm_run = run
+    logger.info("Answer cache warming started: %d requests, concurrency %d", len(jobs), run.concurrency)
+    return run.snapshot()
+
+
+@app.post("/answer-cache/warm/cancel")
+def cancel_answer_cache_warm(x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    """Drop the requests not started yet; the running ones finish."""
+
+    _admin_answer_cache(x_admin_password)
+    if _warm_run is not None:
+        _warm_run.cancel()
+    return _warm_status()
+
+
+@app.get("/answer-cache/{key}")
+def get_answer_cache_entry(key: str, x_admin_password: str | None = Header(default=None)) -> dict[str, object]:
+    stored = _admin_answer_cache(x_admin_password).peek(key)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    key_input, payload = stored
+    # Credentials never reach the key input; the prompts are long but are the
+    # point of a preview.
+    return {"key": key, "settings": key_input, "answer": payload.get("answer", ""), "sources": payload.get("sources", [])}
+
+
+@app.put("/answer-cache/{key}/pin")
+def pin_answer_cache_entry(
+    key: str,
+    body: AnswerCachePinRequest,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    cache = _admin_answer_cache(x_admin_password)
+    if not (cache.pin(key) if body.pinned else cache.unpin(key)):
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    return {"key": key, "pinned": body.pinned}
+
+
+@app.delete("/answer-cache/{key}", status_code=204)
+def delete_answer_cache_entry(key: str, x_admin_password: str | None = Header(default=None)) -> Response:
+    if not _admin_answer_cache(x_admin_password).delete(key):
+        raise HTTPException(status_code=404, detail="Záznam v cache neexistuje.")
+    return Response(status_code=204)
+
+
+@app.post("/answer-cache/delete")
+def delete_answer_cache_entries(
+    selection: AnswerCacheFilter,
+    x_admin_password: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Delete every entry the filter matches, beyond the listed ones too."""
+
+    cache = _admin_answer_cache(x_admin_password)
+    keys = [entry["key"] for entry in _answer_cache_entries(cache) if _matches(entry, selection)]
+    return {"deleted": cache.delete_many(keys)}
 
 
 def _sse_event(event: str, payload: dict[str, object]) -> str:
