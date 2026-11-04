@@ -2533,16 +2533,32 @@ def start_answer_cache_warm(
     with _warm_lock:
         if _warm_run is not None and not _warm_run.finished:
             raise HTTPException(status_code=409, detail="Předgenerování už běží.")
+        cached = 0
+        if not request.force:
+            # The answers already there are pinned now, so the workers only
+            # wait on the ones to generate and the count is right from the start.
+            to_generate = []
+            for job in jobs:
+                key = _chat_cache_key(ChatRequest(**job.body))
+                if key and cache.contains(key) and cache.pin(key):
+                    cached += 1
+                else:
+                    to_generate.append(job)
+            jobs = to_generate
         run = cache_warming.WarmRun(
             jobs,
             lambda job: cache_warming.warm(_warm_stream, cache, job, request.force),
             request.concurrency,
+            cached,
         )
         # Each worker in its own copy of this request's context, so it runs as
         # the logged-in admin, if any.
         run.start(lambda work: functools.partial(contextvars.copy_context().run, work))
         _warm_run = run
-    logger.info("Answer cache warming started: %d requests, concurrency %d", len(jobs), run.concurrency)
+    logger.info(
+        "Answer cache warming started: %d requests, %d already cached, concurrency %d",
+        len(jobs), cached, run.concurrency,
+    )
     return run.snapshot()
 
 

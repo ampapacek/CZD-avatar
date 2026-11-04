@@ -118,6 +118,24 @@ class WarmEndpointTests(AdminTestCase):
         self.assertEqual(self.finish()["generated"], 1)
         self.assertEqual(len(self.generated), 3)
 
+    def test_cached_answers_are_pinned_and_counted_up_front(self) -> None:
+        self.warm(questions=["Kdo byl Jan Hus?"])
+        self.finish()
+        key = self.client.get("/answer-cache", headers=ADMIN).json()["entries"][0]["key"]
+        self.cache.unpin(key)
+
+        started = self.warm(questions=["Kdo byl Jan Hus?", "Kdo byl Žižka?"])
+        # Counted and pinned before any worker gets to it.
+        self.assertEqual({name: started[name] for name in ("total", "cached")}, {"total": 2, "cached": 1})
+        status = self.finish()
+        self.assertEqual({name: status[name] for name in ("done", "generated", "cached", "running")},
+                         {"done": 2, "generated": 1, "cached": 1, "running": 0})
+        self.assertTrue(all(entry["pinned"] for entry in self.client.get("/answer-cache", headers=ADMIN).json()["entries"]))
+        self.assertEqual(len(self.generated), 2)
+
+        # Everything cached: the run is over at once.
+        self.assertEqual(self.warm(questions=["Kdo byl Žižka?"])["state"], "finished")
+
     def test_failures_are_listed(self) -> None:
         self.answer = []
         self.warm(questions=["Kdo byl Jan Hus?"])

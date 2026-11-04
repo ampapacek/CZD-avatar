@@ -257,17 +257,19 @@ class WarmRun:
     """Jobs run by ``concurrency`` worker threads in queue order.
 
     Cancelling drops the jobs not started yet; the running ones finish.
-    ``run_job`` returns a status as warm() does and must not raise.
+    ``run_job`` returns a status as warm() does and must not raise. ``cached``
+    counts the requests found (and pinned) before the run, which need no job.
     """
 
-    def __init__(self, jobs: list[Job], run_job: Callable[[Job], str], concurrency: int) -> None:
+    def __init__(self, jobs: list[Job], run_job: Callable[[Job], str], concurrency: int, cached: int = 0) -> None:
         self.jobs = jobs
         self.run_job = run_job
         self.concurrency = max(1, min(concurrency, MAX_CONCURRENCY))
         self.started_at = time.time()
         self.finished_at: float | None = None
         self.cancelled = False
-        self.generated = self.cached = self.failed = 0
+        self.generated = self.failed = 0
+        self.cached = self._cached_up_front = cached
         self.errors: list[dict[str, str]] = []
         self._next = 0
         self._running = 0
@@ -336,12 +338,13 @@ class WarmRun:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             done = self.generated + self.cached + self.failed
+            started = self._next + self._cached_up_front
             return {
                 "state": "running" if self.finished_at is None else "cancelled" if self.cancelled else "finished",
                 "cancelled": self.cancelled,
-                "total": len(self.jobs),
+                "total": len(self.jobs) + self._cached_up_front,
                 "done": done,
-                "running": self._next - done,
+                "running": started - done,
                 "pending": 0 if self.cancelled else len(self.jobs) - self._next,
                 "generated": self.generated,
                 "cached": self.cached,
