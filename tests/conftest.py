@@ -32,6 +32,9 @@ TEST_ENV = {
     # Endpoint tests must not read or fill a cache file in the checkout; the
     # cache tests hand the app their own temporary one.
     "ANSWER_CACHE_ENABLED": "false",
+    # Nor append test turns to the real usage log in logs/events; the analytics
+    # tests write to their own temporary directory.
+    "ANALYTICS_ENABLED": "false",
 }
 
 
