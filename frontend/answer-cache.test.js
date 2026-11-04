@@ -98,6 +98,7 @@ describe("admin Cache dialog", () => {
     })).toBe("WP: WP1 · Model: aiufal / m · Délka: medium · Kolekce: c1 · Vyhledávání: hybrid · Počet zdrojů: 10 · Context window: 32000");
     expect(cacheSettingsSummary({ retrieval_backend: "msearch", msearch_collection: "c1" }, (id) => `Sbírka ${id}`))
       .toBe("Kolekce: Sbírka c1");
+    expect(cacheSettingsSummary({ use_sources: false, output_length: "short" })).toBe("Délka: short · Zdroje: bez zdrojů");
   });
 
   it("builds the warm request from the form", () => {

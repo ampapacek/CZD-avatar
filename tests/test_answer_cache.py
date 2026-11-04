@@ -279,6 +279,26 @@ class EndpointTests(EndpointTestCase):
         self.ask(selections={"length": "long"})
         self.assertEqual(len(self.generated), 3)
 
+    def test_only_the_parts_that_run_are_in_the_key(self) -> None:
+        with patch.object(main.settings, "retrieval_backend", "msearch"), patch.object(main.settings, "reranker_enabled", False):
+            self.ask()
+            # Neither the reranker nor the local backend runs.
+            with patch.object(main.settings, "reranker_model", "other-reranker"), \
+                    patch.object(main.settings, "qdrant_collection", "other-collection"):
+                self.ask(rerank_weight=0.5, rerank_candidates=80, dense_weight=0.1)
+            self.assertEqual(len(self.generated), 1)
+            with patch.object(main.settings, "msearch_max_results", 3):
+                self.ask()
+            self.ask(rerank_enabled=True, rerank_weight=0.5)
+            self.assertEqual(len(self.generated), 3)
+
+    def test_without_sources_the_retrieval_settings_do_not_matter(self) -> None:
+        self.ask(use_sources=False)
+        self.ask(top_k=0, msearch_mode="keyword", rerank_enabled=True, rerank_weight=0.5)
+        with patch.object(main.settings, "msearch_collection", "other-collection"):
+            self.ask(use_sources=False)
+        self.assertEqual(len(self.generated), 1)
+
     def test_follow_up_turns_are_not_cached(self) -> None:
         history = [{"role": "user", "content": "Ahoj"}, {"role": "assistant", "content": "Dobrý den"}]
         self.ask(conversation_history=history)

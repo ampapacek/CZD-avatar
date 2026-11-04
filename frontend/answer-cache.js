@@ -141,7 +141,9 @@ export function cacheSettingsSummary(settings = {}, collectionLabel = (id) => id
   add("Model", [settings.llm_provider, settings.model].filter(Boolean).join(" / "));
   add("Uvažování", settings.reasoning_effort);
   add("Délka", settings.output_length);
-  if (settings.retrieval_backend === "msearch") {
+  if (settings.use_sources === false) {
+    add("Zdroje", "bez zdrojů");
+  } else if (settings.retrieval_backend === "msearch") {
     add("Kolekce", settings.msearch_collection ? collectionLabel(settings.msearch_collection) : null);
     add("Vyhledávání", settings.msearch_mode);
   } else {

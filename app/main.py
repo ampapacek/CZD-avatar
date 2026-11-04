@@ -1710,35 +1710,42 @@ _answer_cache_lock = threading.Lock()
 # Pause between the pieces of a replayed answer; tests replace it.
 _replay_sleep = time.sleep
 
-# The settings a request field falls back to when it is unset, plus the ones
-# that shape retrieval and the prompt without a request field. They are part
-# of the cache key, so changing one in .env does not serve answers made under
-# the old value.
-_ANSWER_CACHE_SETTINGS = (
-    "retrieval_backend",
-    "top_k",
-    "min_score",
-    "min_relative_score",
-    "qdrant_collection",
-    "embedding_model",
-    "reranker_enabled",
-    "reranker_model",
-    "reranker_weight",
-    "reranker_candidates",
-    "reranker_max_length",
-    "msearch_base_url",
-    "msearch_collection",
-    "msearch_max_results",
-    "msearch_mode",
-    "msearch_min_confidence",
-    "msearch_rescore",
-    "context_window_tokens",
-    "output_token_budget_short",
-    "output_token_budget_medium",
-    "output_token_budget_long",
-    "min_prompt_chunks",
-    "token_budget_safety_margin",
-)
+# The parts of the pipeline, each with its request fields and the settings a
+# field falls back to when unset or that shape the step without a field. The
+# settings are part of the cache key, so changing one in .env does not serve
+# answers made under the old value. A part's fields and settings are in the
+# key only when it runs for the request: the reranker model does not matter
+# for an answer made without reranking, nor mSearch for one without sources.
+_ANSWER_CACHE_KEY_PARTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "budget": ((), (
+        "context_window_tokens",
+        "output_token_budget_short",
+        "output_token_budget_medium",
+        "output_token_budget_long",
+        "min_prompt_chunks",
+        "token_budget_safety_margin",
+    )),
+    "retrieval": (
+        ("retrieval_backend", "top_k", "min_score", "min_relative_score"),
+        ("retrieval_backend", "top_k", "min_score", "min_relative_score"),
+    ),
+    "msearch": (
+        ("msearch_collection", "msearch_mode", "msearch_min_confidence", "msearch_rescore"),
+        (
+            "msearch_base_url",
+            "msearch_collection",
+            "msearch_max_results",
+            "msearch_mode",
+            "msearch_min_confidence",
+            "msearch_rescore",
+        ),
+    ),
+    "local": (("dense_weight", "bm25_weight"), ("qdrant_collection", "embedding_model")),
+    "rerank": (
+        ("rerank_enabled", "rerank_weight", "rerank_candidates"),
+        ("reranker_enabled", "reranker_model", "reranker_weight", "reranker_candidates", "reranker_max_length"),
+    ),
+}
 # Everything of the "sources" event that the stored "done" payload carries too.
 _CACHED_SOURCES_FIELDS = (
     "original_question",
@@ -1802,7 +1809,8 @@ def _chat_cache_key_input(
     def resolved(value: object, default: object) -> object:
         return default if value is None else value
 
-    return answer_cache_key_input(
+    parts = _answer_cache_key_parts(request)
+    key_input = answer_cache_key_input(
         request,
         llm_provider=provider,
         model=model,
@@ -1837,8 +1845,15 @@ def _chat_cache_key_input(
         min_prompt_chunks=budget.min_prompt_chunks,
         token_budget_safety_margin=budget.token_budget_safety_margin,
         conversation_summary_trigger_tokens=budget.conversation_summary_trigger_tokens,
-        server=_answer_cache_server_settings(),
+        # "Bez zdrojů" and top_k=0 are the same request.
+        use_sources="retrieval" in parts,
+        server=_answer_cache_server_settings(parts),
     )
+    for part, (fields, _) in _ANSWER_CACHE_KEY_PARTS.items():
+        if part not in parts:
+            for name in fields:
+                key_input.pop(name, None)
+    return key_input
 
 
 def _chat_cache_key(request: ChatRequest) -> str | None:
@@ -1858,8 +1873,27 @@ def _chat_cache_key(request: ChatRequest) -> str | None:
     )
 
 
-def _answer_cache_server_settings() -> dict[str, object]:
-    return {name: getattr(settings, name) for name in _ANSWER_CACHE_SETTINGS}
+def _answer_cache_key_parts(request: ChatRequest) -> set[str]:
+    """The parts of the pipeline that run for this request (see _ANSWER_CACHE_KEY_PARTS)."""
+
+    parts = {"budget"}
+    if not _retrieval_enabled(request):
+        return parts
+    parts |= {"retrieval", request.retrieval_backend or settings.retrieval_backend}
+    rerank_weight = settings.reranker_weight if request.rerank_weight is None else request.rerank_weight
+    rerank_enabled = settings.reranker_enabled if request.rerank_enabled is None else request.rerank_enabled
+    if rerank_enabled and rerank_weight > 0:
+        parts.add("rerank")
+    return parts
+
+
+def _answer_cache_server_settings(parts: set[str]) -> dict[str, object]:
+    return {
+        name: getattr(settings, name)
+        for part, (_, names) in _ANSWER_CACHE_KEY_PARTS.items()
+        if part in parts
+        for name in names
+    }
 
 
 def _cached_answer(cache: AnswerCache, key: str) -> dict[str, object] | None:
@@ -2402,15 +2436,20 @@ def _answer_cache_entries(cache: AnswerCache) -> list[dict[str, object]]:
     configuration or cache version: an identical request now has another key,
     so such an entry is never hit again."""
 
-    # Compared as stored, so Path and similar values match their JSON form.
-    server = json.loads(json.dumps(_answer_cache_server_settings(), ensure_ascii=False, default=str))
+    def as_stored(value: object) -> object:
+        # Path and similar values compared in their JSON form.
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
     names = {
         **{prompt.id: prompt.name for wp in WP_CONFIGS for prompt in wp.builtin_prompts},
         **{preset["id"]: preset.get("name") for preset in load_prompt_presets(settings.prompt_presets_path)},
     }
     entries = cache.entries()
     for entry in entries:
-        entry["stale"] = entry.pop("cache_version") != ANSWER_CACHE_VERSION or entry.pop("server") != server
+        # The entry's settings are those of the parts that ran for it.
+        server = entry.pop("server") or {}
+        entry["stale"] = entry.pop("cache_version") != ANSWER_CACHE_VERSION or server != {
+            name: as_stored(getattr(settings, name, None)) for name in server
+        }
         entry["prompt_preset_name"] = names.get(entry["prompt_preset_id"])
     return entries
 

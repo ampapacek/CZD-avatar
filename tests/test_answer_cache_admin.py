@@ -149,6 +149,12 @@ class AdminEndpointTests(AdminTestCase):
             self.client.post("/answer-cache/delete", json={"stale": True}, headers=ADMIN)
         self.assertEqual(self.cache.count(), 1)
 
+    def test_a_setting_of_a_part_that_did_not_run_does_not_make_it_stale(self) -> None:
+        with patch.object(main.settings, "reranker_enabled", False):
+            self.ask()
+            with patch.object(main.settings, "reranker_model", "other-reranker"):
+                self.assertEqual(self.listing()["stats"]["stale"], 0)
+
     def test_disabled_cache(self) -> None:
         with patch.object(main, "_get_answer_cache", lambda: None):
             self.assertEqual(self.client.get("/answer-cache", headers=ADMIN).status_code, 404)
