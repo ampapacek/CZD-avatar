@@ -39,13 +39,13 @@ Browser state lives in `localStorage`. Important keys include `czdemos4ai-local-
 
 ## Answering without sources
 
-The Kolekce selector ends with **Bez zdrojů**. It answers from the bare model: no retrieval, no Sources panel, and the retrieval sliders and `Pouze vyhledat zdroje` are disabled. Query transformations still run, so a transform with `use_transformed_for_answer` still changes the question the model answers. Without sources no collection content goes to the provider, so the per-WP AI-Ufal restriction does not apply.
+The Kolekce selector ends with **Bez zdrojů**, which turns retrieval off. It behaves exactly like `top_k=0` (Dokumentů: 0): no retrieval, no conversation query rewrite (`retrieval_query_rewrite_skip_reason: "no_sources"`), no Sources panel, and `Pouze vyhledat zdroje` and `Kopírovat se zdroji` are hidden; Bez zdrojů also disables the retrieval sliders. Query transformations still run. With retrieval off no collection content goes to the provider, so the per-WP AI-Ufal restriction does not apply.
 
-- **Prompts declare their mode** with `uses_sources` (built-ins in `wp_config.py`, shared presets in `data/prompt_presets.json`, local ones in `localStorage`). A prompt without the flag uses sources. The main-page Profil list shows only the current mode's prompts; Settings lists all of them and marks those without sources. Picking a prompt of the other mode moves Kolekce with it, and switching Kolekce loads the prompt last used in the new mode (else the WP's first built-in for it).
-- **Every WP ships `Obecný asistent`** (`wpN-obecny`), a topic-neutral prompt without sources (answer in the question's language, `{length}`, Markdown). WP-specific prompts without sources are created in the UI by unticking `Používá zdroje` in the prompt editor; untouched default texts are swapped for the no-sources ones.
-- **The prompt is taken literally.** The request carries `use_sources: false` and the prompt texts verbatim. An empty system prompt sends no system message at all; an empty user template sends just the question. `{retrieved_snippets}` renders empty. The conversation query rewrite is skipped (`retrieval_query_rewrite_skip_reason: "no_sources"`).
-- The mode is stored as the sentinel collection value `__no_sources__` wherever the collection already is (conversation settings, history entries), so restoring them restores the mode. Conversation turns follow the current setting, so one thread can mix turns with and without sources.
-- CLI: `uv run python scripts/ask.py "…" --no-sources`.
+- **The profile stays the same.** Whenever nothing is retrieved (Bez zdrojů, `top_k=0`, or a search that finds nothing) `{retrieved_snippets}` renders as `NO_SOURCES_CONTEXT` in `app/rag/prompts.py`: "Nebyly nalezeny žádné zdroje. Odpověz podle svých znalostí." Empty prompt texts fall back to the defaults as usual.
+- **A prompt without `{retrieved_snippets}`** (in either text; an empty text counts as the default) has no use for sources, so while it is active the UI switches Kolekce to Bez zdrojů and locks it, with a note under Profil. The next prompt with sources restores the collection it replaced (the WP's default after a WP switch). The prompt editor shows a note when the variable is missing. There is no per-prompt flag; the mode follows from the text.
+- **Every WP ships `Obecný asistent`** (`wpN-obecny`), a topic-neutral prompt without `{retrieved_snippets}` or citation rules (answer in the question's language, `{length}`, Markdown).
+- The request carries `use_sources: false`. The mode is stored as the sentinel collection value `__no_sources__` wherever the collection already is (conversation settings, history entries), so restoring them restores the mode. Conversation turns follow the current setting, so one thread can mix turns with and without sources.
+- CLI: `uv run python scripts/ask.py "…" --no-sources` (same as `--top-k 0`).
 
 ## Random Questions
 
