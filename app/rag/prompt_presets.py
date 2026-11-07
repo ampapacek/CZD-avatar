@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.rag.query_transforms import normalize_query_transform
-from app.rag.wp_config import default_wp_id
+from app.rag.wp_config import builtin_prompt_names, default_wp_id
 
 
 def load_prompt_presets(path: Path) -> list[dict[str, Any]]:
@@ -48,10 +49,14 @@ def save_prompt_preset(
     presets = load_prompt_presets(path)
     existing = next((preset for preset in presets if preset["id"] == preset_id), None) if preset_id else None
     resolved_id = preset_id or _slugify(name)
-    if any(preset["id"] != preset_id and preset["id"] == resolved_id for preset in presets):
+    # A new id also avoids the built-in prompt ids, which it would hide.
+    taken = {preset["id"] for preset in presets if preset["id"] != preset_id}
+    if not preset_id:
+        taken |= set(builtin_prompt_names())
+    if resolved_id in taken:
         suffix = 2
         base_id = resolved_id
-        while any(preset["id"] != preset_id and preset["id"] == f"{base_id}-{suffix}" for preset in presets):
+        while f"{base_id}-{suffix}" in taken:
             suffix += 1
         resolved_id = f"{base_id}-{suffix}"
     # Keep ownership stable across updates. An ownerless preset has no owner_id to
@@ -165,7 +170,9 @@ def _preset_wp_id(value: Any) -> str:
 
 
 def _slugify(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+    # Drop the accents first so "Rodič WS" becomes "rodic-ws", not "rodi-ws".
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_value.strip().lower()).strip("-")
     return slug or f"prompt-{int(datetime.now(timezone.utc).timestamp())}"
 
 

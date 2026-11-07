@@ -163,6 +163,18 @@ class PromptPresetStorageTests(unittest.TestCase):
         record = self._save("No scope", wp_id="")
         self.assertEqual(record["wp_id"], "WP1-historie")
 
+    def test_new_id_keeps_accented_letters_as_ascii(self) -> None:
+        self.assertEqual(self._save("Rodič WS")["id"], "rodic-ws")
+        self.assertEqual(self._save("Žák pokus")["id"], "zak-pokus")
+
+    def test_new_id_avoids_builtin_prompt_ids(self) -> None:
+        # The fixture defines a built-in prompt "wp1-laik".
+        self.assertEqual(self._save("WP1 Laik")["id"], "wp1-laik-2")
+
+    def test_existing_id_is_kept_on_update(self) -> None:
+        updated = self._save("Rodič WS", preset_id="rodi-ws")
+        self.assertEqual(updated["id"], "rodi-ws")
+
     def test_save_round_trips_inline_placeholders(self) -> None:
         record = save_prompt_preset(
             self.path,
