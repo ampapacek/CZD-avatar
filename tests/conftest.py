@@ -11,12 +11,18 @@ before `app.rag.llm_providers` binds `load_env_values` and before
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 import pytest
 
 import app.config
+from app.rag import wp_config
+
+# A synthetic instance config; nothing reads the server's real one.
+TEST_INSTANCE_CONFIG = Path(__file__).parent / "fixtures" / "instance.toml"
 
 TEST_ENV = {
+    "INSTANCE_CONFIG_PATH": str(TEST_INSTANCE_CONFIG),
     "LLM_PROVIDERS": "test",
     "LLM_PROVIDER": "test",
     "LLM_PROVIDER_TEST_NAME": "Test provider",
@@ -47,6 +53,8 @@ app.config.load_env_values = _test_env_values
 # Settings also reads `.env` by itself for any field not passed explicitly.
 app.config.Settings.model_config["env_file"] = None
 app.config.get_settings.cache_clear()
+# Modules that read the WP config without importing app.main need it loaded too.
+wp_config.set_instance_config(wp_config.load_instance_config(TEST_INSTANCE_CONFIG))
 
 
 @pytest.fixture(autouse=True)
@@ -57,3 +65,12 @@ def _fresh_admin_password_guard():
 
     main.admin_password_guard.reset()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_instance_config():
+    """A test may swap the active instance config; the next one gets it back."""
+
+    previous = wp_config.instance_config()
+    yield
+    wp_config.set_instance_config(previous)

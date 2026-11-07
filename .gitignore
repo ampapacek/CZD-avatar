@@ -34,6 +34,7 @@ data/answer_cache.sqlite3-*
 data/warm_cache.json
 data/query_transforms.json
 data/questions/
+data/instances/
 data/raw/*
 !data/raw/agent.md
 !data/raw/.gitkeep

@@ -288,13 +288,24 @@ class CollectionGroupingTests(unittest.TestCase):
             {"collection_id": "", "collection_name": "wp2-zaplavy-v1", "last_modified": "2026-01-01"},
         ]
 
-        grouped = _group_collections_by_prefix(collections)
+        grouped = _group_collections_by_prefix(collections, {"wp1", "wp2", "wp3", "public-x"})
 
-        # All wp1 versions kept, newest first; non-wp and id-less entries dropped.
+        # All wp1 versions kept, newest first; entries outside the configured
+        # prefixes and id-less entries dropped.
         self.assertEqual([entry["collection_id"] for entry in grouped["wp1"]], ["b", "a"])
         self.assertEqual([entry["collection_id"] for entry in grouped["wp3"]], ["c"])
         self.assertNotIn("wp2", grouped)
-        self.assertNotIn("wp4", grouped)
+        self.assertNotIn("public", grouped)
+
+    def test_groups_only_the_configured_prefixes(self) -> None:
+        collections = [
+            {"collection_id": "a", "collection_name": "WP1-histoedu-v1", "last_modified": "2026-01-10"},
+            {"collection_id": "b", "collection_name": "kurz-dejepis-v1", "last_modified": "2026-02-10"},
+        ]
+
+        grouped = _group_collections_by_prefix(collections, {"kurz"})
+
+        self.assertEqual(grouped, {"kurz": [{"collection_id": "b", "collection_name": "kurz-dejepis-v1", "last_modified": "2026-02-10"}]})
 
 
 def _full_doc(index: int) -> dict:

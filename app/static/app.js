@@ -346,7 +346,6 @@ window.fetch = function analyticsFetch(input, init = {}) {
 const CUSTOM_PROVIDER_ID = "custom";
 const DEFAULT_CUSTOM_PROVIDER_LABEL = "Custom provider";
 const LEGACY_DEFAULT_PROMPT_PRESET_ID = "default";
-const BUILTIN_PROMPT_PREFIX = "builtin-";
 const LOCAL_PROMPT_PREFIX = "local-";
 // Profiles are read-only in Settings until "Upravit" turns edit mode on; any
 // (re)load of a profile turns it off again.
@@ -1120,26 +1119,17 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
   });
 }
 
-const AI_UFAL_HOST = "ai.ufal.mff.cuni.cz";
-
-// Whether a WP's collections are only retrievable via the AI Ufal provider.
-// Gating lives on the WP (requires_aiufal), not on individual collection ids,
-// which change as new collection versions are published.
-function wpRequiresAiufal(wp) {
-  return Boolean(wp?.requires_aiufal);
-}
-
-function isAiUfalBaseUrl(baseUrl) {
-  try {
-    const parsed = new URL(String(baseUrl || "").trim());
-    return parsed.protocol === "https:" && parsed.hostname === AI_UFAL_HOST;
-  } catch {
-    return false;
+// Whether the selected provider may receive this WP's collection content. The
+// restriction lives on the WP (allowed_providers in the instance config), not on
+// individual collection ids, which change as new collection versions are
+// published. A custom provider never matches a configured one.
+function wpAllowsSelectedProvider(wp) {
+  const allowed = wp?.allowed_providers;
+  if (!Array.isArray(allowed)) {
+    return true;
   }
-}
-
-function currentProviderBaseUrl() {
-  return selectedProviderBaseUrl();
+  const selected = normalizeProviderId(llmProvider.value);
+  return selected !== CUSTOM_PROVIDER_ID && allowed.includes(selected);
 }
 
 async function loadSettings() {
@@ -4658,7 +4648,10 @@ function promptNoteTitleAttribute(preset) {
 }
 
 function presetWpId(preset) {
-  return resolveWpId(preset?.wp_id);
+  // A WP this server does not offer is kept, so such a preset is listed under
+  // no WP here instead of landing under the default one.
+  const wpId = String(preset?.wp_id || "").trim();
+  return wpId || resolveWpId("");
 }
 
 function promptPresetExists(presetId) {
@@ -5330,8 +5323,7 @@ async function deleteSelectedPromptPreset() {
 function populateMsearchCollections(currentCollection) {
   const wp = getWpConfig(activeWpId);
   const collections = wp?.collections || [];
-  const aiUfalSelected = isAiUfalBaseUrl(currentProviderBaseUrl());
-  const wpGated = wpRequiresAiufal(wp) && !aiUfalSelected;
+  const wpGated = !wpAllowsSelectedProvider(wp);
   const collectionOptions = collections
     .map((collection) => {
       const value = collection.msearch_collection_id || "";
@@ -5340,8 +5332,8 @@ function populateMsearchCollections(currentCollection) {
       return `<option value="${escapeHtml(value)}"${disabled}>${escapeHtml(label)}</option>`;
     })
     .join("");
-  // "Bez zdrojů" sends nothing from a collection, so the AI Ufal gate never
-  // disables it.
+  // "Bez zdrojů" sends nothing from a collection, so the provider restriction
+  // never disables it.
   msearchCollection.innerHTML = `${collectionOptions}<option value="${Avatar.NO_SOURCES_COLLECTION}">${escapeHtml(Avatar.NO_SOURCES_LABEL)}</option>`;
   const options = Array.from(msearchCollection.options);
   const realOptions = options.filter((option) => Avatar.collectionUsesSources(option.value));
@@ -10149,12 +10141,6 @@ function promptPresetIdFromSettings(settings) {
   const savedId = settings?.prompt_preset_id;
   if (promptPresetExists(savedId)) {
     return normalizePromptPresetId(savedId);
-  }
-  // Legacy history used builtin-<style> ids; map them to the matching WP1 built-in.
-  const style = String(settings?.style || savedId || "").replace(BUILTIN_PROMPT_PREFIX, "");
-  const legacyId = `wp1-${style}`;
-  if (promptPresetExists(legacyId)) {
-    return legacyId;
   }
   return defaultPromptPresetId(resolveWpId(settings?.wp_id));
 }

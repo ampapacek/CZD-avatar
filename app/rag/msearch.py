@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.rag.wp_config import gated_wp_collection_prefixes
+from app.rag.wp_config import restricted_collection_prefixes, wp_collection_prefixes
 
 
 # mSearch publishes new collection versions rarely, so the full collection list
@@ -75,22 +75,26 @@ class MSearchRetriever:
         return collections
 
     def live_collections_by_prefix(self, force_refresh: bool = False) -> dict[str, list[dict[str, str]]]:
-        """Live mSearch collections grouped by WP prefix (``wp1``..``wp4``).
+        """Live mSearch collections grouped by the configured WP collection prefixes.
 
-        Each WP's list is newest-first. Empty dict when the live list is
+        A collection named ``<prefix>-...`` belongs to the WP with that
+        ``collection_prefix``. Each WP's list is newest-first. Empty dict when the live list is
         unavailable, so callers fall back to the static WP config collections.
         """
 
-        return _group_collections_by_prefix(self._fetch_collections(force_refresh))
+        return _group_collections_by_prefix(self._fetch_collections(force_refresh), wp_collection_prefixes())
 
-    def gated_collection_ids(self) -> set[str]:
-        """Live mSearch collection ids whose WP is AI-Ufal-only (for policy)."""
+    def restricted_collection_ids(self) -> dict[str, list[str]]:
+        """Live mSearch collection id -> allowed provider ids, for the
+        collections of provider-restricted WPs (for policy)."""
 
-        gated_prefixes = gated_wp_collection_prefixes()
+        restricted = restricted_collection_prefixes()
+        if not restricted:
+            return {}
         grouped = self.live_collections_by_prefix()
         return {
-            collection["collection_id"]
-            for prefix in gated_prefixes
+            collection["collection_id"]: allowed
+            for prefix, allowed in restricted.items()
             for collection in grouped.get(prefix, [])
         }
 
@@ -260,13 +264,16 @@ def _unique_word_count(text: str) -> int:
     return len({word.casefold() for word in re.findall(r"[^\W_]+", text)})
 
 
-def _group_collections_by_prefix(collections: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+def _group_collections_by_prefix(
+    collections: list[dict[str, Any]],
+    prefixes: set[str],
+) -> dict[str, list[dict[str, str]]]:
     grouped: dict[str, list[dict[str, str]]] = {}
     for item in collections:
         name = _string(item.get("collection_name"))
         collection_id = _string(item.get("collection_id"))
         prefix = name.split("-", 1)[0].lower()
-        if prefix not in {"wp1", "wp2", "wp3", "wp4"} or not collection_id:
+        if prefix not in prefixes or not collection_id:
             continue
         grouped.setdefault(prefix, []).append(
             {

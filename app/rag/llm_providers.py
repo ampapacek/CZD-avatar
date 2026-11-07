@@ -168,6 +168,12 @@ def _discover_provider_ids(env: dict[str, str]) -> list[str]:
     return sorted(discovered)
 
 
+def configured_provider_ids(env: dict[str, str] | None = None) -> list[str]:
+    """The configured provider ids, without fetching any model list."""
+
+    return _discover_provider_ids(env or load_env_values())
+
+
 def _extract_model_names(payload: Any) -> list[str]:
     names: list[str] = []
     if isinstance(payload, dict):

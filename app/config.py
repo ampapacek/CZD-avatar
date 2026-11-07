@@ -109,6 +109,10 @@ class Settings(BaseSettings):
         default=Path("data/models.json"),
         alias="MODEL_METADATA_PATH",
     )
+    # The TOML file listing this server's WPs, built-in prompts, collections and
+    # questions (see instance.example.toml). Required: the app will not start
+    # without it.
+    instance_config_path: Path | None = Field(default=None, alias="INSTANCE_CONFIG_PATH")
     prompt_presets_path: Path = Field(default=Path("data/prompt_presets.json"), alias="PROMPT_PRESETS_PATH")
     shared_history_path: Path = Field(default=Path("data/shared_history.json"), alias="SHARED_HISTORY_PATH")
     placeholders_path: Path = Field(default=Path("data/placeholders.json"), alias="PLACEHOLDERS_PATH")

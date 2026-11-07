@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.rag.query_transforms import normalize_query_transform
-from app.rag.wp_config import resolve_wp_id
+from app.rag.wp_config import default_wp_id
 
 
 def load_prompt_presets(path: Path) -> list[dict[str, Any]]:
@@ -59,7 +59,7 @@ def save_prompt_preset(
     # _can_modify_prompt_preset); that admin-authorized edit claims it for the
     # editing browser.
     resolved_owner = (existing.get("owner_id") if existing else "") or (owner_id or "").strip()
-    resolved_wp_id = resolve_wp_id(wp_id if wp_id is not None else (existing.get("wp_id") if existing else None))
+    resolved_wp_id = _preset_wp_id(wp_id if wp_id is not None else (existing.get("wp_id") if existing else None))
     record = {
         "id": resolved_id,
         "name": name.strip(),
@@ -147,7 +147,7 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": preset_id,
         "name": name,
-        "wp_id": resolve_wp_id(item.get("wp_id")),
+        "wp_id": _preset_wp_id(item.get("wp_id")),
         "note": str(item.get("note") or ""),
         "system_prompt": str(item.get("system_prompt") or ""),
         "user_prompt_template": str(item.get("user_prompt_template") or ""),
@@ -156,6 +156,12 @@ def _normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
         "owner_id": str(item.get("owner_id") or ""),
         "updated_at": str(item.get("updated_at") or ""),
     }
+
+
+def _preset_wp_id(value: Any) -> str:
+    # A WP this server does not define is kept, not rewritten to the default:
+    # the presets file can be shared by servers that offer different WPs.
+    return str(value or "").strip() or default_wp_id()
 
 
 def _slugify(value: str) -> str:
