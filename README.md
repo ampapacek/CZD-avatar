@@ -41,10 +41,16 @@ uv venv --python python3.12
 source .venv/bin/activate
 uv pip install -e .
 cp .env.example .env
+mkdir -p data/instances
+cp instance.example.toml data/instances/local.toml
 ```
 
-Edit `.env` with your mSearch and LLM provider credentials. See
-[Configuration and LLM providers](docs/configuration.md) for details.
+Edit `.env` with your mSearch and LLM provider credentials and set
+`INSTANCE_CONFIG_PATH=data/instances/local.toml`. The instance file lists the
+work packages, built-in prompts, collections and prepared questions this server
+offers; the app does not start without it. See
+[Configuration and LLM providers](docs/configuration.md) and
+[Instance config](docs/prompts.md#instance-config) for details.
 
 Start the app:
 
@@ -55,12 +61,12 @@ uvicorn app.main:app --reload
 Open http://127.0.0.1:8000.
 
 Select a work package, collection, model, and prompt, then ask a question.
-For WP1, try `Jaký byl význam husitských válek?` and inspect the answer's
+Try a question the collection covers and inspect the answer's
 citations and retrieved passages. Ask a question weakly covered by the collection
 and check whether the answer makes its limited evidence clear.
 
-Prepared and random questions require private per-WP files under
-`data/questions/`. These files are optional and are not included in the repository.
+Prepared and random questions come from each WP's `questions` list in the
+instance file; without one the question buttons are hidden.
 
 ## Development and tests
 
