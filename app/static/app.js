@@ -1031,6 +1031,34 @@ function populateWpSelect() {
     settingsWpSelect.innerHTML = options;
     settingsWpSelect.value = settingsWpScope();
   }
+  applyWpSelectorVisibility();
+}
+
+// With a single WP there is nothing to choose: every WP selector is hidden,
+// together with the block that labels it.
+function applyWpSelectorVisibility() {
+  const single = getWpConfigs().length <= 1;
+  const selectors = [
+    [wpSelect, ".topic-controls"],
+    [convWpSelect, ".field"],
+    [settingsWpSelect, ".settings-wp-section"],
+    [historyFilterWp, null],
+    [document.querySelector("#cacheWpFilter"), ".field"],
+    [document.querySelector("#cacheWarmWp"), ".field"],
+  ];
+  for (const [select, containerSelector] of selectors) {
+    const container = (containerSelector && select?.closest(containerSelector)) || select;
+    if (container) {
+      container.hidden = single;
+    }
+  }
+  // The welcome guide starts with "Vyber Oblast" only when there is a choice.
+  const guideWp = document.querySelector("#answerWelcomeGuideWp");
+  const guideSingleWp = document.querySelector("#answerWelcomeGuideSingleWp");
+  if (guideWp && guideSingleWp) {
+    guideWp.hidden = single;
+    guideSingleWp.hidden = !single;
+  }
 }
 
 // Open the Settings dialog scoped to a WP: initialize settingsWpId to the active
@@ -4738,7 +4766,8 @@ function updatePromptSaveShareState(presetId) {
   promptShareNote.textContent = info.note;
   editPromptButton.hidden = !editable || editing;
   savePromptButton.hidden = !editing;
-  sharePromptButton.hidden = !editable || editing;
+  // The instance config can turn shared presets off for the whole server.
+  sharePromptButton.hidden = !editable || editing || appSettings.shared_presets === false;
   // runPromptAction disables a button while its request runs; this re-enables it.
   savePromptButton.disabled = false;
   sharePromptButton.disabled = false;
