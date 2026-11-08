@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.rag.llm import LLMGeneration
 from app.rag.pipeline import RAGPipeline
-from app.rag.prompts import NO_SOURCES_CONTEXT, build_messages, default_no_sources_system_prompt
-from app.rag.wp_config import WP_CONFIGS, gated_msearch_collection_ids
+from app.rag.prompts import NO_SOURCES_CONTEXT, build_messages
+from app.rag.wp_config import restricted_msearch_collection_ids
 
 
 class _FakeLLM:
@@ -109,7 +109,7 @@ class NoSourcesEndpointTests(unittest.TestCase):
             )
 
         with (
-            # A non-AI-Ufal provider together with a gated WP2 collection.
+            # A provider outside the WP's allowed_providers, with its restricted collection.
             patch("app.main._resolve_llm_request", return_value=(
                 "provider-1", "requested-model", "server-key", "https://provider.example/v1"
             )),
@@ -124,14 +124,14 @@ class NoSourcesEndpointTests(unittest.TestCase):
                 json={
                     "question": "Co je mediální gramotnost?",
                     "wp_id": "WP2-média",
-                    "msearch_collection": next(iter(gated_msearch_collection_ids())),
+                    "msearch_collection": next(iter(restricted_msearch_collection_ids())),
                     "user_prompt_template": "{question}\n{retrieved_snippets}",
                     **body,
                 },
             )
         return response.text, upstream_bodies
 
-    def test_stream_skips_retrieval_and_the_ai_ufal_gate(self) -> None:
+    def test_stream_skips_retrieval_and_the_provider_restriction(self) -> None:
         for body in ({"use_sources": False, "top_k": 10}, {"top_k": 0}):
             with self.subTest(**body):
                 text, upstream_bodies = self._stream(body)
@@ -144,17 +144,6 @@ class NoSourcesEndpointTests(unittest.TestCase):
                     upstream_bodies[0]["messages"][-1],
                     {"role": "user", "content": f"Co je mediální gramotnost?\n{NO_SOURCES_CONTEXT}"},
                 )
-
-
-class NoSourcesPromptConfigTests(unittest.TestCase):
-    def test_every_wp_ships_one_generic_prompt_without_snippets(self) -> None:
-        for wp in WP_CONFIGS:
-            without = [
-                prompt for prompt in wp.builtin_prompts
-                if "{retrieved_snippets}" not in prompt.system_prompt + prompt.user_prompt_template
-            ]
-            self.assertEqual(len(without), 1, wp.id)
-            self.assertEqual(without[0].system_prompt, default_no_sources_system_prompt())
 
 
 if __name__ == "__main__":

@@ -64,6 +64,7 @@ The app filters internal/non-chat model ids matching `rag-*` and `openwebuidocs`
 
 Important `.env` variables:
 
+- `INSTANCE_CONFIG_PATH` (required): the TOML file listing this server's WPs, built-in prompts, collections and prepared questions. Start from `instance.example.toml`; see [Instance config](prompts.md#instance-config).
 - `LLM_PROVIDER`
 - `LLM_PROVIDERS`
 - `ADMIN_PASSWORD`

@@ -1,0 +1,133 @@
+# Synthetic instance config for the tests (wired in tests/conftest.py).
+# The ids mirror a real multi-WP server; the texts and collection ids are made up.
+
+shared_presets = true
+
+[[wps]]
+id = "WP1-historie"
+label = "WP1 – Historie"
+description = "Testovací WP s místním vyhledáváním a připravenými otázkami."
+collection_prefix = "wp1"
+default_prompt = "wp1-ucitel"
+default_collection = "wp1-histoedu"
+local_retrieval = true
+questions = [
+  "Kdo byl Karel IV.?",
+  "Co byla normalizace?",
+]
+
+[[wps.collections]]
+id = "wp1-histoedu"
+label = "wp1-histoedu-v2026-02"
+msearch_collection_id = "00000000-0000-4000-8000-000000000001"
+
+[[wps.prompts]]
+id = "wp1-ucitel"
+name = "Učitel"
+system_prompt = '''
+Jsi testovací učitel. Cituj zdroje jako [^Z1].
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Vlastní instrukce uživatele (může být prázdné):
+{custom_instructions}
+
+Nalezený kontext:
+{retrieved_snippets}'''
+
+[[wps.prompts]]
+id = "wp1-historik"
+name = "Historik"
+system_prompt = '''
+Jsi testovací historik.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Nalezený kontext:
+{retrieved_snippets}'''
+
+[[wps.prompts]]
+id = "wp1-laik"
+name = "Laik"
+system_prompt = '''
+Jsi testovací průvodce pro laiky.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Nalezený kontext:
+{retrieved_snippets}'''
+
+[[wps.prompts]]
+id = "wp1-obecny"
+name = "Obecný asistent"
+system_prompt = '''
+Jsi testovací obecný asistent bez zdrojů.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}'''
+
+[[wps]]
+id = "WP2-média"
+label = "WP2 – Média"
+description = "Testovací WP omezený na jednoho poskytovatele."
+collection_prefix = "wp2"
+default_prompt = "wp2-vychozi"
+default_collection = "wp2-zaplavy"
+allowed_providers = ["test"]
+
+[[wps.collections]]
+id = "wp2-zaplavy"
+label = "wp2-zaplavy-v2026-6"
+msearch_collection_id = "00000000-0000-4000-8000-000000000002"
+
+[[wps.prompts]]
+id = "wp2-vychozi"
+name = "Výchozí"
+system_prompt = '''
+Jsi testovací mediální asistent.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Nalezený kontext:
+{retrieved_snippets}'''
+
+[[wps]]
+id = "WP3-právo"
+label = "WP3 – Právo"
+description = "Testovací WP bez otázek."
+collection_prefix = "wp3"
+default_prompt = "wp3-vychozi"
+default_collection = "wp3-law"
+
+[[wps.collections]]
+id = "wp3-law"
+label = "wp3-law-v2026-02"
+msearch_collection_id = "00000000-0000-4000-8000-000000000003"
+
+[[wps.prompts]]
+id = "wp3-vychozi"
+name = "Výchozí"
+system_prompt = '''
+Jsi testovací právní asistent.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Nalezený kontext:
+{retrieved_snippets}'''

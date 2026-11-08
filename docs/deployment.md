@@ -4,7 +4,7 @@ These instructions describe the tracked pull-based deployment tooling. They do n
 
 ## Deployment
 
-The server pulls; nothing pushes to it. A systemd timer runs `deploy/deploy.sh` every minute. When the `production` branch on GitHub points at a new commit, the script checks it out, reinstalls dependencies if `pyproject.toml` or `uv.lock` changed, restarts `czdemos.service` and waits up to 90 s for `/settings` to answer. If it does not, the script goes back to the previous commit and skips the bad one until the next push. It refuses to deploy over files edited by hand on the server. `.env`, `data/` and other untracked files are left alone.
+The server pulls; nothing pushes to it. A systemd timer runs `deploy/deploy.sh` every minute. When the `production` branch on GitHub points at a new commit, the script checks it out, reinstalls dependencies if `pyproject.toml` or `uv.lock` changed, restarts `czdemos.service` and waits up to 90 s for `/settings` to answer. If it does not, the script goes back to the previous commit and skips the bad one until the next push. It refuses to deploy over files edited by hand on the server. `.env`, `data/` and other untracked files are left alone, including the server's instance config (`INSTANCE_CONFIG_PATH`, usually `data/instances/<server>.toml`), which is copied there by hand. Without a valid one the app does not start, so the health check fails and the deploy rolls back.
 
 Deploy from any machine with push access:
 

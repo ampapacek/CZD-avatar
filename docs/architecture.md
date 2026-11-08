@@ -10,7 +10,7 @@ Selected API endpoints (the complete schema is available at `/docs` when the app
 
 - `GET /health`
 - `GET /settings`
-- `GET /questions/random` (per-WP; reads the private files under `data/questions/`, see [Random Questions](prompts.md#random-questions))
+- `GET /questions/random` (per-WP; the WP's `questions` from the instance config, see [Random Questions](prompts.md#random-questions))
 - `GET /questions` (per-WP prepared-question list)
 - `POST /llm-providers/refresh`
 - `GET /prompt-presets`
@@ -114,7 +114,8 @@ The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake 
 - `app/config.py`, `app/models.py`, `app/logging_config.py`
 - `app/accounts.py`, `app/auth.py` — optional user accounts, login gate and daily request limit ([User accounts](accounts.md))
 - `app/rag/` — ingestion, chunking, retrieval, prompting, vector store, pipeline
-- `app/rag/wp_config.py` — single source of WP config (labels, built-in prompts, collections, defaults)
+- `app/rag/wp_config.py` — loads and validates the instance config (WPs, built-in prompts, collections, questions, provider restriction); the code itself knows no specific WP
+- `instance.example.toml` — documented template for a server's instance config ([Instance config](prompts.md#instance-config))
 - `app/rag/placeholders.py` — placeholder engine + `DEFAULT_PLACEHOLDERS` floor
 - `app/static/` — frontend (index.html, app.js, styles.css) + the built `avatar.bundle.js`
   `/` serves index.html with `Cache-Control: no-cache` and rewrites each `static/<file>?v=...`
@@ -128,7 +129,7 @@ The Python tests never read `.env`: `tests/conftest.py` gives them a fixed fake 
 - `data/raw/` source docs · `data/processed/chunks.jsonl` · `data/qdrant/` local store
 - `data/models.json` — the one tracked file describing models: context window, reasoning support, room for more. `MODEL_METADATA_PATH` overrides it.
 - `data/prompt_presets.json`, `data/placeholders.json` — shared overlays (gitignored, may be absent)
-- `data/questions/*.txt` — private per-WP random/prepared questions (gitignored, may be absent)
+- `data/instances/*.toml` — the real per-server instance configs (gitignored; `INSTANCE_CONFIG_PATH` picks one)
 - `data/collections/czech_history/` — Czech-history assets/metadata kept for the current WP1 setup
 
 ## Development conventions

@@ -313,7 +313,7 @@ class AdminTests(AuthTestCase):
 
     def test_logged_in_admin_needs_no_shared_password(self) -> None:
         # The built-in prompt override is guarded by the shared admin password.
-        url = f"/prompt-presets/builtin-overrides/{main.WP_CONFIGS[0].builtin_prompts[0].id}"
+        url = f"/prompt-presets/builtin-overrides/{main.load_wp_configs()[0].builtin_prompts[0].id}"
         with patch.object(main, "delete_builtin_prompt_override") as delete_override:
             self.login("jan@seznam.cz", "user password")
             self.assertEqual(self.client.delete(url).status_code, 403)
@@ -323,7 +323,7 @@ class AdminTests(AuthTestCase):
         delete_override.assert_called_once()
 
     def test_blocked_shared_password_does_not_stop_admin_accounts(self) -> None:
-        url = f"/prompt-presets/builtin-overrides/{main.WP_CONFIGS[0].builtin_prompts[0].id}"
+        url = f"/prompt-presets/builtin-overrides/{main.load_wp_configs()[0].builtin_prompts[0].id}"
         main.admin_password_guard._locked_until = float("inf")
         with patch.object(main.settings, "admin_password", "s3cret"), patch.object(main, "delete_builtin_prompt_override"):
             self.login("admin@seznam.cz", "admin password")

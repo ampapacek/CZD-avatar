@@ -1,55 +1,43 @@
-"""Single source of truth for WP (work package) configuration.
+"""WP (work package) configuration, loaded from the instance config file.
 
-Each WP groups a set of built-in (read-only) prompts, the mSearch collections
-it may search, and optional placeholder definitions. Shared and local prompt
-presets reference a WP through `wp_id`,
-so the UI can later show only the prompts and collections relevant to the
-selected WP.
+The code knows no specific WP. Each server points ``INSTANCE_CONFIG_PATH`` at a
+TOML file that lists its WPs: their built-in (read-only) prompts, the mSearch
+collections they search, their prepared questions and an optional provider
+restriction. What the file defines is what the server offers.
+``instance.example.toml`` in the repo root documents every field.
 
-This is intentionally a Python module rather than a JSON/YAML file: the prompt
-bodies are long multi-line Czech text that is far easier to read, edit, and
-unit-test as source than as escaped strings, and it matches how ``prompts.py``
-already holds prompt text.
+Shared and local prompt presets reference a WP through ``wp_id``.
 """
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
-from app.rag.prompts import (
-    PlaceholderDef,
-    default_no_sources_system_prompt,
-    default_no_sources_user_prompt_template,
-    default_system_prompt_template,
-    default_user_prompt_template,
+from app.rag.prompts import OptionDef, PlaceholderDef
+
+
+INSTANCE_CONFIG_HELP = (
+    "Set INSTANCE_CONFIG_PATH in .env to this server's instance config file "
+    "(for example data/instances/<server>.toml). Start from instance.example.toml "
+    "in the repo root; it documents every field."
 )
 
 
-# WP1 persona guidance, baked into each WP1 built-in system prompt. These were
-# the old global persona-style texts; they now live as WP1 content (the
-# persona axis is gone — a persona is just which prompt you picked).
-_WP1_PERSONA_PROMPTS = {
-    "laik": """
-Piš srozumitelně pro běžného čtenáře bez odborného žargonu. Relevantní dodaný kontext používej jako hlavní oporu, ale můžeš doplnit obecné znalosti, pokud odpovědi pomohou. Citace nevyžaduj u každé věty; použij je jen tehdy, když se přímo opíráš o konkrétní nalezený zdroj. Pokud kontext nestačí nebo je mimo téma, řekni to jednoduše, nevnucuj citace a odpověz opatrně z obecné znalosti. Nejistotu pojmenuj přirozeně a nevymýšlej zdroje ani bibliografické údaje.
-""".strip(),
-    "ucitel": """
-Piš didakticky, jako učitel, který chce látku dobře vysvětlit. Začni od relevantního dodaného kontextu a tvrzení převzatá ze zdrojů cituj markdownovými poznámkami pod čarou ve tvaru [^Z1], [^Z2] atd. Poznámku dávej vždy až za interpunkci, bez mezery mezi interpunkcí a značkou, např. věta končí tečkou.[^Z1] nebo vsuvka končí čárkou,[^Z2] a text pokračuje. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. tvrzení podporuje více zdrojů.[^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5]. Obecné znalosti můžeš použít pro vysvětlení souvislostí, příkladů a důsledků, ale nesmíš předstírat, že pocházejí z nalezených dokumentů. Pokud jsou zdroje slabé, okrajové nebo nepokrývají otázku, řekni to a odděl podložené informace od obecného vysvětlení. Nejistotu formuluj jasně, bez falešné přesnosti a bez vymyšlených citací.
-""".strip(),
-    "historik": """
-Piš přesně, formálně a opatrně. Primárně vycházej z relevantních nalezených zdrojů; každé podstatné tvrzení, které lze opřít o kontext, opatři poznámkou pod čarou ve tvaru [^Z1], [^Z2] atd. Poznámku dávej vždy až za interpunkci, bez mezery mezi interpunkcí a značkou, např. věta končí tečkou.[^Z1] nebo vsuvka končí čárkou,[^Z2] a text pokračuje. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. tvrzení podporuje více zdrojů.[^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5]. Cituj pouze zdroje, které skutečně podporují dané tvrzení, a vynech pasáže, které jsou jen slovně podobné nebo zavádějící. Obecné znalosti používej střídmě; pokud nejsou doložené dodaným kontextem, uveď to přirozeně a označ míru nejistoty. Nevymýšlej autory, editory, bibliografické údaje ani zdrojovou oporu.
-""".strip(),
-}
+class InstanceConfigError(ValueError):
+    """The instance config file is missing or invalid."""
+
 
 @dataclass(frozen=True)
 class BuiltInPrompt:
     """A read-only prompt shipped with a WP.
 
     The body uses the same finalized preset shape as saved presets: a full
-    ``system_prompt`` (style is already baked in, ``{length}`` stays as the one
-    orthogonal placeholder) and a ``user_prompt_template``. An optional inline
-    ``placeholders`` map overrides global placeholder defs wholesale (highest
-    precedence in resolution).
+    ``system_prompt`` (``{length}`` stays as the one orthogonal placeholder) and
+    a ``user_prompt_template``. An optional inline ``placeholders`` map overrides
+    global placeholder defs wholesale (highest precedence in resolution).
     """
 
     id: str
@@ -64,7 +52,8 @@ class WPCollection:
     """A document collection a WP may search, mapped to an mSearch collection.
 
     These are the offline fallback / default selection; at runtime the live list
-    of all mSearch collections for the WP replaces them (see
+    of all mSearch collections whose name starts with the WP's
+    ``collection_prefix`` replaces them (see
     ``MSearchRetriever.live_collections_by_prefix``).
     """
 
@@ -82,181 +71,276 @@ class WPConfig:
     default_prompt_id: str
     collections: list[WPCollection]
     default_collection_id: str
-    questions_path: str | None = None
+    # Live mSearch collections named ``<collection_prefix>-...`` belong to this WP.
+    collection_prefix: str = ""
+    questions: list[str] = field(default_factory=list)
     local_retrieval_enabled: bool = False
     placeholders: dict[str, PlaceholderDef] = field(default_factory=dict)
-    # When true, every collection in this WP is only retrievable through the AI
-    # Ufal provider. The backend policy and the frontend selector both read this
-    # flag, so the restriction lives in one place (the WP, not per-collection ids
-    # that change as new collection versions are published).
-    requires_aiufal: bool = False
+    # None: any provider. Otherwise the ids of the only LLM providers that may
+    # receive this WP's collection content. Backend policy and the frontend
+    # collection selector both read it.
+    allowed_providers: list[str] | None = None
 
 
-def _wp1_prompt(persona_key: str) -> str:
-    # WP1 keeps the existing history behavior: take the generic system prompt
-    # template and bake the chosen persona guidance in, leaving `{length}` for
-    # chat-time rendering.
-    return f"{default_system_prompt_template()}\n\nStyl:\n{_WP1_PERSONA_PROMPTS[persona_key]}"
+@dataclass(frozen=True)
+class InstanceConfig:
+    wps: list[WPConfig]
+    # Whether the shared presets from PROMPT_PRESETS_PATH are offered.
+    shared_presets: bool = True
+    source: str = ""
 
 
-def _generic_prompt(domain: str) -> str:
-    return f"""
-Jsi pečlivý asistent pro RAG systém v oblasti: {domain}.
+# --- loading and validation -------------------------------------------------
 
-Úkol:
-- Odpověz ve stejném jazyce jako otázka; pro české otázky odpovídej česky.
-- Používej jen pasáže, které otázku skutečně podporují; slabé, okrajové nebo zavádějící pasáže vynech.
-- Tvrzení převzatá ze zdrojů cituj markdownovými poznámkami pod čarou ve tvaru [^Z1], [^Z2] atd. Poznámku dávej vždy až za interpunkci, bez mezery mezi interpunkcí a značkou, např. věta končí tečkou.[^Z1] nebo vsuvka končí čárkou,[^Z2] a text pokračuje. Pokud jedno tvrzení opíráš o více zdrojů, piš každou poznámku zvlášť bez mezer, např. tvrzení podporuje více zdrojů.[^Z1][^Z5]; neslučuj více ID do jedné poznámky jako [^Z1, ^Z5] nebo [^Z1, Z5].
-- Nepředstírej, že nepodložené tvrzení pochází ze zdrojů.
-- Pokud relevantní kontext nestačí, řekni to jasně a odpověz opatrně z obecné znalosti.
-- Nevymýšlej bibliografické údaje ani citace.
+_TOP_KEYS = {"shared_presets", "wps"}
+_WP_KEYS = {
+    "id",
+    "label",
+    "description",
+    "collection_prefix",
+    "default_prompt",
+    "default_collection",
+    "allowed_providers",
+    "local_retrieval",
+    "questions",
+    "placeholders",
+    "collections",
+    "prompts",
+}
+_COLLECTION_KEYS = {"id", "label", "msearch_collection_id"}
+_PROMPT_KEYS = {"id", "name", "system_prompt", "user_prompt_template", "placeholders"}
+_PLACEHOLDER_KEYS = {"label", "kind", "help", "default", "options"}
+_OPTION_KEYS = {"name", "label", "text"}
 
-Délka: {{length}}
 
-Forma odpovědi:
-- Piš v Markdownu.
-- Zvol přirozenou strukturu podle otázky.
-- Zmiňuj pouze zdroje, které v odpovědi skutečně používáš.
-- Nevytvářej na konci samostatný seznam "Použité zdroje" a nepiš ani definiční řádky poznámek pod čarou ve tvaru "[^Z1]: ..."; přehled zdrojů vytvoří rozhraní samo.
-- Odpověz přímo a přirozeně, bez závěrečných nabídek typu "Pokud chceš...".
-""".strip()
+def load_instance_config(path: str | Path | None) -> InstanceConfig:
+    """Read and validate an instance config file; raise InstanceConfigError."""
+
+    if path is None or str(path).strip() in {"", "."}:
+        raise InstanceConfigError(f"No instance config is set. {INSTANCE_CONFIG_HELP}")
+    file = Path(path)
+    if not file.is_file():
+        raise InstanceConfigError(f"Instance config {file} was not found. {INSTANCE_CONFIG_HELP}")
+    try:
+        data = tomllib.loads(file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise InstanceConfigError(f"Instance config {file} could not be read: {exc}") from exc
+    try:
+        return parse_instance_config(data, source=str(file))
+    except InstanceConfigError as exc:
+        raise InstanceConfigError(f"Instance config {file}: {exc}") from exc
 
 
-def _no_sources_prompt(wp_number: int) -> BuiltInPrompt:
-    # Topic-neutral and without {retrieved_snippets}, so the UI runs it with
-    # Kolekce "Bez zdrojů". WP-specific prompts like it are made in the UI.
-    return BuiltInPrompt(
-        id=f"wp{wp_number}-obecny",
-        name="Obecný asistent",
-        system_prompt=default_no_sources_system_prompt(),
-        user_prompt_template=default_no_sources_user_prompt_template(),
+def parse_instance_config(data: dict[str, Any], source: str = "") -> InstanceConfig:
+    _check_keys(data, _TOP_KEYS, "top level")
+    shared_presets = data.get("shared_presets", True)
+    if not isinstance(shared_presets, bool):
+        raise InstanceConfigError("shared_presets must be true or false.")
+    raw_wps = data.get("wps")
+    if not isinstance(raw_wps, list) or not raw_wps:
+        raise InstanceConfigError("define at least one [[wps]] table.")
+    wps = [_parse_wp(raw, index) for index, raw in enumerate(raw_wps)]
+    _check_unique([wp.id for wp in wps], "WP id")
+    _check_unique([wp.collection_prefix for wp in wps if wp.collection_prefix], "collection_prefix")
+    _check_unique([prompt.id for wp in wps for prompt in wp.builtin_prompts], "prompt id")
+    return InstanceConfig(wps=wps, shared_presets=shared_presets, source=source)
+
+
+def _parse_wp(raw: Any, index: int) -> WPConfig:
+    where = f"wps[{index}]"
+    if not isinstance(raw, dict):
+        raise InstanceConfigError(f"{where} must be a table.")
+    wp_id = _required_str(raw, "id", where)
+    where = f"WP {wp_id}"
+    _check_keys(raw, _WP_KEYS, where)
+    prompts = [_parse_prompt(item, f"{where} prompts[{i}]") for i, item in enumerate(_table_list(raw, "prompts", where))]
+    if not prompts:
+        raise InstanceConfigError(f"{where} needs at least one [[wps.prompts]].")
+    collections = [
+        _parse_collection(item, f"{where} collections[{i}]")
+        for i, item in enumerate(_table_list(raw, "collections", where))
+    ]
+    if not collections:
+        raise InstanceConfigError(f"{where} needs at least one [[wps.collections]].")
+    _check_unique([collection.id for collection in collections], f"{where} collection id")
+    default_prompt = _optional_str(raw, "default_prompt", where) or prompts[0].id
+    if default_prompt not in {prompt.id for prompt in prompts}:
+        raise InstanceConfigError(f"{where} default_prompt '{default_prompt}' is not one of its prompts.")
+    default_collection = _optional_str(raw, "default_collection", where) or collections[0].id
+    if default_collection not in {collection.id for collection in collections}:
+        raise InstanceConfigError(f"{where} default_collection '{default_collection}' is not one of its collections.")
+    questions = raw.get("questions", [])
+    if not isinstance(questions, list) or not all(isinstance(item, str) for item in questions):
+        raise InstanceConfigError(f"{where} questions must be a list of strings.")
+    allowed = raw.get("allowed_providers")
+    if allowed is not None:
+        if not isinstance(allowed, list) or not allowed or not all(isinstance(item, str) and item.strip() for item in allowed):
+            raise InstanceConfigError(f"{where} allowed_providers must be a non-empty list of provider ids.")
+        allowed = [item.strip().lower() for item in allowed]
+    collection_prefix = _optional_str(raw, "collection_prefix", where).lower()
+    if "-" in collection_prefix:
+        raise InstanceConfigError(f"{where} collection_prefix must not contain '-' (it is the part before the first '-').")
+    local_retrieval = raw.get("local_retrieval", False)
+    if not isinstance(local_retrieval, bool):
+        raise InstanceConfigError(f"{where} local_retrieval must be true or false.")
+    return WPConfig(
+        id=wp_id,
+        label=_optional_str(raw, "label", where) or wp_id,
+        description=_optional_str(raw, "description", where),
+        builtin_prompts=prompts,
+        default_prompt_id=default_prompt,
+        collections=collections,
+        default_collection_id=default_collection,
+        collection_prefix=collection_prefix,
+        questions=[item.strip() for item in questions if item.strip()],
+        local_retrieval_enabled=local_retrieval,
+        placeholders=_parse_placeholders(raw.get("placeholders"), where),
+        allowed_providers=allowed,
     )
 
 
-WP_CONFIGS: list[WPConfig] = [
-    WPConfig(
-        id="WP1-historie",
-        label="WP1 – Historie",
-        description="Historický avatar: české dějiny a historicko-vzdělávací obsah.",
-        builtin_prompts=[
-            BuiltInPrompt(
-                id="wp1-ucitel",
-                name="Učitel",
-                system_prompt=_wp1_prompt("ucitel"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            BuiltInPrompt(
-                id="wp1-historik",
-                name="Historik",
-                system_prompt=_wp1_prompt("historik"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            BuiltInPrompt(
-                id="wp1-laik",
-                name="Laik",
-                system_prompt=_wp1_prompt("laik"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            _no_sources_prompt(1),
-        ],
-        default_prompt_id="wp1-ucitel",
-        collections=[
-            WPCollection(
-                id="wp1-histoedu",
-                label="wp1-histoedu-v2026-02",
-                msearch_collection_id="64d6f521-5044-4b02-8658-380b639801af",
-            ),
-        ],
-        default_collection_id="wp1-histoedu",
-        questions_path="data/questions/wp1-historie.txt",
-        local_retrieval_enabled=True,
-    ),
-    WPConfig(
-        id="WP2-média",
-        label="WP2 – Média",
-        description="Mediální avatar.",
-        builtin_prompts=[
-            BuiltInPrompt(
-                id="wp2-vychozi",
-                name="Výchozí",
-                system_prompt=_generic_prompt("média a mediální studia"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            _no_sources_prompt(2),
-        ],
-        default_prompt_id="wp2-vychozi",
-        collections=[
-            WPCollection(
-                id="wp2-zaplavy",
-                label="wp2-zaplavy-v2026-6",
-                msearch_collection_id="ab79b4f6-6a91-45a3-908e-edb2c771d3b0",
-            ),
-        ],
-        default_collection_id="wp2-zaplavy",
-        questions_path="data/questions/wp2-media.txt",
-        requires_aiufal=True,
-    ),
-    WPConfig(
-        id="WP3-právo",
-        label="WP3 – Právo",
-        description="Právní avatar.",
-        builtin_prompts=[
-            BuiltInPrompt(
-                id="wp3-vychozi",
-                name="Výchozí",
-                system_prompt=_generic_prompt("právo"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            _no_sources_prompt(3),
-        ],
-        default_prompt_id="wp3-vychozi",
-        collections=[
-            WPCollection(
-                id="wp3-law",
-                label="wp3-law-v2026-02",
-                msearch_collection_id="d4be44d5-689c-4bbe-a372-b959929cd511",
-            ),
-        ],
-        default_collection_id="wp3-law",
-        questions_path="data/questions/wp3-pravo.txt",
-    ),
-    WPConfig(
-        id="WP4-adiktologie",
-        label="WP4 – Adiktologie",
-        description="Adiktologický avatar.",
-        builtin_prompts=[
-            BuiltInPrompt(
-                id="wp4-vychozi",
-                name="Výchozí",
-                system_prompt=_generic_prompt("adiktologie"),
-                user_prompt_template=default_user_prompt_template(),
-            ),
-            _no_sources_prompt(4),
-        ],
-        default_prompt_id="wp4-vychozi",
-        collections=[
-            WPCollection(
-                id="wp4-default",
-                label="wp4-v2026-03",
-                msearch_collection_id="3429956e-8a21-4502-ad21-a41fddc5ef99",
-            ),
-        ],
-        default_collection_id="wp4-default",
-        questions_path="data/questions/wp4-adiktologie.txt",
-    ),
-]
+def _parse_prompt(raw: Any, where: str) -> BuiltInPrompt:
+    if not isinstance(raw, dict):
+        raise InstanceConfigError(f"{where} must be a table.")
+    _check_keys(raw, _PROMPT_KEYS, where)
+    prompt_id = _required_str(raw, "id", where)
+    where = f"{where} ({prompt_id})"
+    return BuiltInPrompt(
+        id=prompt_id,
+        name=_required_str(raw, "name", where),
+        # Kept verbatim: no stripping, the text is what the model gets.
+        system_prompt=_required_text(raw, "system_prompt", where),
+        user_prompt_template=_required_text(raw, "user_prompt_template", where),
+        placeholders=_parse_placeholders(raw.get("placeholders"), where),
+    )
+
+
+def _parse_collection(raw: Any, where: str) -> WPCollection:
+    if not isinstance(raw, dict):
+        raise InstanceConfigError(f"{where} must be a table.")
+    _check_keys(raw, _COLLECTION_KEYS, where)
+    collection_id = _required_str(raw, "id", where)
+    return WPCollection(
+        id=collection_id,
+        label=_optional_str(raw, "label", where) or collection_id,
+        msearch_collection_id=_required_str(raw, "msearch_collection_id", where),
+    )
+
+
+def _parse_placeholders(raw: Any, where: str) -> dict[str, PlaceholderDef]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise InstanceConfigError(f"{where} placeholders must be a table.")
+    result: dict[str, PlaceholderDef] = {}
+    for name, item in raw.items():
+        item_where = f"{where} placeholder {name}"
+        if not isinstance(item, dict):
+            raise InstanceConfigError(f"{item_where} must be a table.")
+        _check_keys(item, _PLACEHOLDER_KEYS, item_where)
+        kind = _optional_str(item, "kind", item_where) or "text"
+        if kind not in {"select", "text"}:
+            raise InstanceConfigError(f"{item_where} kind must be 'select' or 'text'.")
+        options: list[OptionDef] = []
+        for i, option in enumerate(_table_list(item, "options", item_where)):
+            option_where = f"{item_where} options[{i}]"
+            if not isinstance(option, dict):
+                raise InstanceConfigError(f"{option_where} must be a table.")
+            _check_keys(option, _OPTION_KEYS, option_where)
+            option_name = _required_str(option, "name", option_where)
+            options.append(
+                OptionDef(
+                    name=option_name,
+                    label=_optional_str(option, "label", option_where) or option_name,
+                    text=_optional_text(option, "text", option_where),
+                )
+            )
+        result[str(name)] = PlaceholderDef(
+            label=_optional_str(item, "label", item_where) or str(name),
+            kind=kind,
+            help=_optional_str(item, "help", item_where) or None,
+            default=_optional_text(item, "default", item_where),
+            options=options if kind == "select" else [],
+        )
+    return result
+
+
+def _check_keys(raw: dict[str, Any], allowed: set[str], where: str) -> None:
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise InstanceConfigError(f"{where}: unknown key(s) {', '.join(unknown)}.")
+
+
+def _check_unique(values: list[str], what: str) -> None:
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            raise InstanceConfigError(f"duplicate {what} '{value}'.")
+        seen.add(value)
+
+
+def _table_list(raw: dict[str, Any], key: str, where: str) -> list[Any]:
+    value = raw.get(key, [])
+    if not isinstance(value, list):
+        raise InstanceConfigError(f"{where} {key} must be a list of tables.")
+    return value
+
+
+def _required_str(raw: dict[str, Any], key: str, where: str) -> str:
+    value = _optional_str(raw, key, where)
+    if not value:
+        raise InstanceConfigError(f"{where} needs a non-empty '{key}'.")
+    return value
+
+
+def _optional_str(raw: dict[str, Any], key: str, where: str) -> str:
+    return _optional_text(raw, key, where).strip()
+
+
+def _required_text(raw: dict[str, Any], key: str, where: str) -> str:
+    value = _optional_text(raw, key, where)
+    if not value.strip():
+        raise InstanceConfigError(f"{where} needs a non-empty '{key}'.")
+    return value
+
+
+def _optional_text(raw: dict[str, Any], key: str, where: str) -> str:
+    value = raw.get(key, "")
+    if not isinstance(value, str):
+        raise InstanceConfigError(f"{where} '{key}' must be a string.")
+    return value
+
+
+# --- the active instance ----------------------------------------------------
+
+_instance: InstanceConfig | None = None
+
+
+def set_instance_config(config: InstanceConfig | None) -> InstanceConfig | None:
+    """Make ``config`` the active instance; return the previous one."""
+
+    global _instance
+    previous = _instance
+    _instance = config
+    return previous
+
+
+def instance_config() -> InstanceConfig:
+    if _instance is None:
+        raise RuntimeError(f"The instance config has not been loaded. {INSTANCE_CONFIG_HELP}")
+    return _instance
 
 
 def load_wp_configs() -> list[WPConfig]:
-    return list(WP_CONFIGS)
+    return list(instance_config().wps)
 
 
 def get_wp_config(wp_id: str) -> WPConfig | None:
-    return next((wp for wp in WP_CONFIGS if wp.id == wp_id), None)
+    return next((wp for wp in instance_config().wps if wp.id == wp_id), None)
 
 
 def default_wp_id() -> str:
-    return WP_CONFIGS[0].id
+    return instance_config().wps[0].id
 
 
 def is_valid_wp_id(wp_id: str) -> bool:
@@ -270,45 +354,55 @@ def resolve_wp_id(wp_id: str | None) -> str:
     return candidate if is_valid_wp_id(candidate) else default_wp_id()
 
 
+def shared_presets_enabled() -> bool:
+    return instance_config().shared_presets
+
+
+def builtin_prompt_names() -> dict[str, str]:
+    return {prompt.id: prompt.name for wp in instance_config().wps for prompt in wp.builtin_prompts}
+
+
 def wp_public_payload() -> list[dict[str, Any]]:
-    """Serialize WP configs for the API (and the future WP selector)."""
+    """Serialize WP configs for the API (``/settings``)."""
 
-    return [asdict(wp) for wp in WP_CONFIGS]
-
-
-def wp_collection_prefix(wp_id: str) -> str:
-    """The ``wp1``..``wp4`` token that mSearch collection names start with.
-
-    mSearch collection names are ``wp1-histoedu-...``, ``wp2-zaplavy-...`` etc.;
-    the WP ids are ``WP1-historie`` etc. Both share the same leading token, which
-    is how the live collection list is grouped back onto a WP.
-    """
-
-    return (wp_id or "").split("-", 1)[0].strip().lower()
+    return [asdict(wp) for wp in instance_config().wps]
 
 
-def wp_requires_aiufal(wp_id: str | None) -> bool:
+def wp_collection_prefixes() -> set[str]:
+    return {wp.collection_prefix for wp in instance_config().wps if wp.collection_prefix}
+
+
+def wp_collection_prefix(wp_id: str | None) -> str:
     wp = get_wp_config((wp_id or "").strip())
-    return bool(wp and wp.requires_aiufal)
+    return wp.collection_prefix if wp else ""
 
 
-def gated_wp_collection_prefixes() -> set[str]:
-    """Collection-name prefixes (``wp2`` etc.) whose WP is AI-Ufal-only."""
+def wp_allowed_providers(wp_id: str | None) -> list[str] | None:
+    wp = get_wp_config((wp_id or "").strip())
+    return wp.allowed_providers if wp else None
 
-    return {wp_collection_prefix(wp.id) for wp in WP_CONFIGS if wp.requires_aiufal}
+
+def restricted_collection_prefixes() -> dict[str, list[str]]:
+    """Collection-name prefix -> allowed provider ids, for restricted WPs."""
+
+    return {
+        wp.collection_prefix: wp.allowed_providers
+        for wp in instance_config().wps
+        if wp.allowed_providers is not None and wp.collection_prefix
+    }
 
 
-def gated_msearch_collection_ids() -> set[str]:
-    """Static fallback mSearch collection ids that are AI-Ufal-only.
+def restricted_msearch_collection_ids() -> dict[str, list[str]]:
+    """Static fallback mSearch collection id -> allowed provider ids.
 
-    Live enforcement also folds in the current mSearch collections for the gated
-    WP prefixes; this static set keeps the known ids gated even when the live list
-    is unavailable.
+    Live enforcement also folds in the current mSearch collections under the
+    restricted WPs' prefixes; this keeps the configured ids restricted even when
+    the live list is unavailable.
     """
 
     return {
-        collection.msearch_collection_id
-        for wp in WP_CONFIGS
-        if wp.requires_aiufal
+        collection.msearch_collection_id: wp.allowed_providers
+        for wp in instance_config().wps
+        if wp.allowed_providers is not None
         for collection in wp.collections
     }

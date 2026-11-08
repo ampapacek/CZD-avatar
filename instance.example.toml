@@ -1,0 +1,100 @@
+# Instance configuration: what this server offers.
+#
+# Copy this file (for example to data/instances/<server>.toml, which git
+# ignores), edit it, and point INSTANCE_CONFIG_PATH in .env at the copy. The
+# app does not start without a valid file. Restart the app after editing.
+#
+# The file lists WPs (areas). Each WP has its own built-in prompts, document
+# collections and prepared questions. With a single WP, the UI hides every WP
+# selector.
+#
+# Text values: "..." is a normal string. '''...''' is a literal multi-line
+# string: kept exactly as written, with no escapes, so prompts can be pasted
+# verbatim. The newline right after the opening ''' is dropped.
+
+# Whether the shared prompt presets (PROMPT_PRESETS_PATH) are offered next to the
+# built-in prompts. false: none are listed and none can be saved. Browser-local
+# profiles stay available. Default: true.
+shared_presets = true
+
+[[wps]]
+# Stable id. Saved presets, history and the answer cache refer to it, so
+# renaming it detaches them. The first WP is the default.
+id = "WP1-ukazka"
+label = "WP1 – Ukázka"
+description = "Ukázková oblast."
+# mSearch collections named "<collection_prefix>-..." are offered for this WP,
+# newest first. No "-" inside. Optional: without it only the collections below are offered.
+collection_prefix = "wp1"
+# Optional: the first prompt / collection below when omitted.
+default_prompt = "wp1-vychozi"
+default_collection = "wp1-dokumenty"
+# Optional: only these LLM provider ids (from LLM_PROVIDERS) may receive this
+# WP's collection content; other providers can still answer without sources.
+# Omit for any provider.
+# allowed_providers = ["provider_id"]
+# Optional: allow the local Qdrant backend for this WP. Default: false.
+# local_retrieval = true
+# Optional: prepared questions for the question buttons. Without them the
+# buttons are hidden.
+questions = [
+  "Jaká je první ukázková otázka?",
+  "Jaká je druhá ukázková otázka?",
+]
+
+# One or more collections. They are the fallback when the live mSearch list is
+# unavailable, and the default selection when present in the live list.
+[[wps.collections]]
+id = "wp1-dokumenty"
+label = "wp1-dokumenty-v1"
+msearch_collection_id = "00000000-0000-0000-0000-000000000000"
+
+# One or more built-in (read-only) prompts. Ids must be unique across all WPs.
+# The system prompt may use {length}; the user template uses {question},
+# {custom_instructions} and {retrieved_snippets}. A prompt without
+# {retrieved_snippets} runs without sources.
+[[wps.prompts]]
+id = "wp1-vychozi"
+name = "Výchozí"
+system_prompt = '''
+Jsi pečlivý asistent pro RAG systém.
+
+Úkol:
+- Odpověz ve stejném jazyce jako otázka.
+- Používej jen pasáže, které otázku skutečně podporují.
+- Tvrzení převzatá ze zdrojů cituj poznámkami pod čarou ve tvaru [^Z1], [^Z2] atd.
+- Pokud kontext nestačí, řekni to a odpověz opatrně z obecné znalosti.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Vlastní instrukce uživatele (může být prázdné):
+{custom_instructions}
+
+Nalezený kontext:
+{retrieved_snippets}'''
+# Optional placeholder definitions for this prompt (they override the global
+# ones of the same name):
+# [wps.prompts.placeholders.tone]
+# label = "Tón"
+# kind = "select"            # "select" or "text"
+# default = "klidny"
+# options = [
+#   { name = "klidny", label = "Klidný", text = "Piš klidně." },
+# ]
+
+[[wps.prompts]]
+id = "wp1-obecny"
+name = "Obecný asistent"
+system_prompt = '''
+Jsi užitečný asistent. Odpověz ve stejném jazyce jako otázka.
+
+Délka: {length}'''
+user_prompt_template = '''
+Otázka:
+{question}
+
+Vlastní instrukce uživatele (může být prázdné):
+{custom_instructions}'''

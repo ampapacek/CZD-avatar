@@ -18,7 +18,6 @@ from collections.abc import Iterator
 from html import escape
 from pathlib import Path
 from contextlib import asynccontextmanager, closing, suppress
-from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -118,6 +117,7 @@ from app.rag.placeholders import (
     save_placeholder,
 )
 from app.rag.llm_providers import (
+    configured_provider_ids,
     load_provider_configs,
     provider_default_model,
     provider_api_key,
@@ -135,14 +135,19 @@ from app.rag.prompts import (
 )
 from app.rag.token_budget import PromptBudgetConfig, PromptBudgetError
 from app.rag.wp_config import (
-    WP_CONFIGS,
+    InstanceConfigError,
+    builtin_prompt_names,
     default_wp_id,
-    gated_msearch_collection_ids,
     get_wp_config,
+    is_valid_wp_id,
+    load_instance_config,
+    load_wp_configs,
     resolve_wp_id,
-    wp_collection_prefix,
+    restricted_msearch_collection_ids,
+    set_instance_config,
+    shared_presets_enabled,
+    wp_allowed_providers,
     wp_public_payload,
-    wp_requires_aiufal,
 )
 
 
@@ -175,6 +180,35 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 settings = get_settings()
+
+
+def _load_instance() -> None:
+    """Load the instance config; without a valid one the app does not start."""
+
+    try:
+        instance = load_instance_config(settings.instance_config_path)
+        provider_ids = set(configured_provider_ids())
+        for wp in instance.wps:
+            unknown = sorted(set(wp.allowed_providers or []) - provider_ids)
+            if unknown:
+                raise InstanceConfigError(
+                    f"Instance config {instance.source}: WP {wp.id} allowed_providers names "
+                    f"provider(s) {', '.join(unknown)} that LLM_PROVIDERS does not configure."
+                )
+    except InstanceConfigError as exc:
+        raise SystemExit(f"Cannot start: {exc}") from None
+    set_instance_config(instance)
+    restricted = {wp.id: wp.allowed_providers for wp in instance.wps if wp.allowed_providers is not None}
+    logger.info(
+        "Loaded instance config %s: wps=%s shared_presets=%s provider_restricted=%s",
+        instance.source,
+        [wp.id for wp in instance.wps],
+        instance.shared_presets,
+        restricted or "none",
+    )
+
+
+_load_instance()
 admin_password_guard = AdminPasswordGuard()
 analytics = AnalyticsWriter(
     False,
@@ -424,38 +458,61 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> Re
     return Response(body, status_code=422, media_type="application/json")
 
 static_dir = Path(__file__).parent / "static"
-project_root = Path(__file__).resolve().parents[1]
 ufal_logo_path = static_dir / "logo_ufal_110u.png"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-AI_UFAL_HOST = "ai.ufal.mff.cuni.cz"
+def _restricted_msearch_collection_ids() -> dict[str, list[str]]:
+    """mSearch collection id -> allowed provider ids: the live collections of
+    every provider-restricted WP, plus its configured ids for when the live list
+    is unavailable."""
+
+    return {**pipeline.msearch_retriever.restricted_collection_ids(), **restricted_msearch_collection_ids()}
 
 
-def _is_ai_ufal_base_url(base_url: str | None) -> bool:
-    parsed = urlparse((base_url or "").strip())
-    return parsed.scheme == "https" and parsed.hostname == AI_UFAL_HOST
+def _provider_is(provider_id: str, llm_provider: str | None, llm_base_url: str | None) -> bool:
+    """Whether the request goes to the configured provider ``provider_id``: its
+    id and also its configured base URL, so a custom URL never passes as it."""
 
-
-def _gated_msearch_collection_ids() -> set[str]:
-    """mSearch collection ids that are AI-Ufal-only: the live collections of every
-    gated WP, plus the static fallback ids when the live list is unavailable."""
-
-    return gated_msearch_collection_ids() | pipeline.msearch_retriever.gated_collection_ids()
+    provider = next((item for item in provider_presets if item.get("id") == provider_id), None)
+    if provider is None or (llm_provider or "").strip().lower() != provider_id:
+        return False
+    configured = str(provider.get("base_url") or "").strip().rstrip("/")
+    return bool(configured) and (llm_base_url or "").strip().rstrip("/") == configured
 
 
 def _enforce_msearch_collection_policy(
     wp_id: str | None,
     msearch_collection: str | None,
+    llm_provider: str | None,
     llm_base_url: str | None,
 ) -> None:
-    # Gate per WP, but also enforce by collection id so a forged ``wp_id`` cannot
-    # smuggle a gated collection in through an ungated WP.
-    gated = wp_requires_aiufal(wp_id) or (msearch_collection or "").strip() in _gated_msearch_collection_ids()
-    if gated and not _is_ai_ufal_base_url(llm_base_url):
-        raise HTTPException(
-            status_code=400,
-            detail="This mSearch collection is available only with the AI Ufal provider.",
+    # Restricted per WP, but also by collection id so a forged ``wp_id`` cannot
+    # smuggle a restricted collection in through an unrestricted WP.
+    restrictions = [
+        allowed
+        for allowed in (
+            wp_allowed_providers(wp_id),
+            _restricted_msearch_collection_ids().get((msearch_collection or "").strip()),
         )
+        if allowed is not None
+    ]
+    if all(
+        any(_provider_is(provider_id, llm_provider, llm_base_url) for provider_id in allowed)
+        for allowed in restrictions
+    ):
+        return
+    names = {str(item.get("id")): str(item.get("label") or item.get("id")) for item in provider_presets}
+    allowed_names = sorted({names.get(provider_id, provider_id) for allowed in restrictions for provider_id in allowed})
+    raise HTTPException(
+        status_code=400,
+        detail=f"This mSearch collection is available only with the provider(s): {', '.join(allowed_names)}.",
+    )
+
+
+def _require_known_wp(wp_id: str | None) -> None:
+    candidate = (wp_id or "").strip()
+    if candidate and not is_valid_wp_id(candidate):
+        raise HTTPException(status_code=400, detail=f"Unknown WP '{candidate}'.")
 
 
 def _enforce_retrieval_backend_policy(wp_id: str | None, retrieval_backend: str | None) -> None:
@@ -464,9 +521,11 @@ def _enforce_retrieval_backend_policy(wp_id: str | None, retrieval_backend: str 
     resolved_wp_id = resolve_wp_id(wp_id)
     wp = get_wp_config(resolved_wp_id)
     if not wp or not wp.local_retrieval_enabled:
+        enabled = [item.id for item in load_wp_configs() if item.local_retrieval_enabled]
+        available = f"available only for {', '.join(enabled)}" if enabled else "not enabled for any WP"
         raise HTTPException(
             status_code=400,
-            detail=f"Local retrieval is available only for {default_wp_id()}. Use mSearch for {resolved_wp_id}.",
+            detail=f"Local retrieval is {available}. Use mSearch for {resolved_wp_id}.",
         )
 
 
@@ -475,6 +534,7 @@ def _retrieval_enabled(request: ChatRequest) -> bool:
 
 
 def _resolve_llm_request(request: ChatRequest) -> tuple[str, str, str | None, str | None]:
+    _require_known_wp(request.wp_id)
     _ensure_provider_state()
     resolved_provider = resolve_llm_provider(request.llm_provider, provider_presets, request.llm_base_url)
     provider_config = provider_preset(resolved_provider, provider_presets, request.llm_base_url)
@@ -652,6 +712,7 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
         },
         "wps": _wps_payload_with_live_collections(),
         "default_wp": default_wp_id(),
+        "shared_presets": shared_presets_enabled(),
         "account": account_payload(current_user.get()),
         "answer_cache_enabled": settings.answer_cache_enabled,
     }
@@ -673,7 +734,7 @@ def _wps_payload_with_live_collections() -> list[dict[str, object]]:
             override = builtin_overrides.get(prompt["id"])
             if override is not None:
                 prompt["query_transform"] = override["query_transform"]
-        live = grouped.get(wp_collection_prefix(wp["id"])) or []
+        live = grouped.get(wp["collection_prefix"], []) if wp["collection_prefix"] else []
         if not live:
             continue
         static_collections = wp["collections"]
@@ -747,27 +808,15 @@ def refresh_llm_providers() -> dict[str, object]:
     return {**_llm_settings_payload(), "wps": _wps_payload_with_live_collections()}
 
 
-def _questions_path_for_wp(wp_id: str | None) -> tuple[str, Path | None]:
-    resolved_wp_id = resolve_wp_id(wp_id)
-    wp = get_wp_config(resolved_wp_id)
-    if not wp or not wp.questions_path:
-        return resolved_wp_id, None
-    questions_path = Path(wp.questions_path)
-    if not questions_path.is_absolute():
-        questions_path = project_root / questions_path
-    return resolved_wp_id, questions_path
-
-
 def _load_questions_for_wp(wp_id: str | None) -> tuple[str, list[str]]:
-    resolved_wp_id, questions_path = _questions_path_for_wp(wp_id)
-    if questions_path is None:
+    candidate = (wp_id or "").strip()
+    if candidate and not is_valid_wp_id(candidate):
+        raise HTTPException(status_code=404, detail=f"Unknown WP '{candidate}'.")
+    resolved_wp_id = resolve_wp_id(candidate)
+    wp = get_wp_config(resolved_wp_id)
+    if not wp or not wp.questions:
         raise HTTPException(status_code=404, detail=f"No questions are configured for {resolved_wp_id}.")
-    if not questions_path.exists():
-        raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} was not found.")
-    questions = [line.strip() for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    if not questions:
-        raise HTTPException(status_code=404, detail=f"Questions file for {resolved_wp_id} does not contain any questions.")
-    return resolved_wp_id, questions
+    return resolved_wp_id, list(wp.questions)
 
 
 def _questions_for_analytics(wp_id: str | None) -> list[str]:
@@ -779,7 +828,7 @@ def _questions_for_analytics(wp_id: str | None) -> list[str]:
 
 def _prompt_kind(prompt_id: str | None) -> str:
     clean = (prompt_id or "").strip()
-    if any(clean == prompt.id for wp in WP_CONFIGS for prompt in wp.builtin_prompts):
+    if clean in builtin_prompt_names():
         return "builtin"
     if clean.startswith(("local-", "draft-")) or not clean:
         return "custom"
@@ -862,11 +911,23 @@ def _secure_eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+SHARED_PRESETS_DISABLED_DETAIL = "Sdílené profily jsou na tomto serveru vypnuté."
+
+
+def _shared_presets() -> list[dict[str, object]]:
+    """The shared presets this server offers: none when the instance config
+    turns them off."""
+
+    return load_prompt_presets(settings.prompt_presets_path) if shared_presets_enabled() else []
+
+
+def _require_shared_presets() -> None:
+    if not shared_presets_enabled():
+        raise HTTPException(status_code=403, detail=SHARED_PRESETS_DISABLED_DETAIL)
+
+
 def _find_prompt_preset(preset_id: str) -> dict[str, object] | None:
-    return next(
-        (preset for preset in load_prompt_presets(settings.prompt_presets_path) if preset["id"] == preset_id),
-        None,
-    )
+    return next((preset for preset in _shared_presets() if preset["id"] == preset_id), None)
 
 
 def _owned_by(record: dict[str, object], owner_id: str | None) -> bool:
@@ -961,18 +1022,14 @@ def _require_admin_password(password: str | None) -> None:
 
 
 def _builtin_prompt_exists(prompt_id: str) -> bool:
-    return any(
-        prompt.id == prompt_id
-        for wp in WP_CONFIGS
-        for prompt in wp.builtin_prompts
-    )
+    return prompt_id in builtin_prompt_names()
 
 
 @app.get("/prompt-presets", response_model=list[PromptPreset])
 def get_prompt_presets(owner_id: str | None = None) -> list[PromptPreset]:
     return [
         PromptPreset(**_for_requester(preset, owner_id))
-        for preset in load_prompt_presets(settings.prompt_presets_path)
+        for preset in _shared_presets()
     ]
 
 
@@ -983,9 +1040,11 @@ def unlock_models(request: UnlockRequest) -> UnlockResponse:
 
 @app.post("/prompt-presets", response_model=PromptPreset)
 def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
+    _require_shared_presets()
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Prompt preset name is required.")
+    _require_known_wp(request.wp_id)
     existing = _find_prompt_preset(request.id) if request.id else None
     if existing is not None and not _can_modify_prompt_preset(existing, request.owner_id, request.admin_password):
         raise HTTPException(status_code=403, detail=PROMPT_PRESET_FORBIDDEN_DETAIL)
@@ -1078,6 +1137,7 @@ def remove_prompt_preset(
     owner_id: str | None = None,
     admin_password: str | None = None,
 ) -> Response:
+    _require_shared_presets()
     existing = _find_prompt_preset(preset_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Prompt preset not found.")
@@ -1629,7 +1689,10 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         # per-WP provider restriction does not apply.
         if _retrieval_enabled(request):
             _enforce_msearch_collection_policy(
-                request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+                request.wp_id,
+                request.msearch_collection or settings.msearch_collection,
+                resolved_provider,
+                resolved_base_url,
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
         with bind_context(context, provider=resolved_provider, key_source=key_source, purpose="answer"):
@@ -1987,7 +2050,10 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
         try:
             # The policy may have changed since the answer was stored.
             _enforce_msearch_collection_policy(
-                request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+                request.wp_id,
+                request.msearch_collection or settings.msearch_collection,
+                resolved_provider,
+                resolved_base_url,
             )
             _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
             sources = {name: cached.get(name) for name in _CACHED_SOURCES_FIELDS}
@@ -2066,7 +2132,10 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
             use_sources = _retrieval_enabled(request)
             if use_sources:
                 _enforce_msearch_collection_policy(
-                    request.wp_id, request.msearch_collection or settings.msearch_collection, resolved_base_url
+                    request.wp_id,
+                    request.msearch_collection or settings.msearch_collection,
+                    resolved_provider,
+                    resolved_base_url,
                 )
                 _enforce_retrieval_backend_policy(request.wp_id, request.retrieval_backend)
             budget_config = PromptBudgetConfig.from_settings(
@@ -2440,8 +2509,8 @@ def _answer_cache_entries(cache: AnswerCache) -> list[dict[str, object]]:
         # Path and similar values compared in their JSON form.
         return json.loads(json.dumps(value, ensure_ascii=False, default=str))
     names = {
-        **{prompt.id: prompt.name for wp in WP_CONFIGS for prompt in wp.builtin_prompts},
-        **{preset["id"]: preset.get("name") for preset in load_prompt_presets(settings.prompt_presets_path)},
+        **builtin_prompt_names(),
+        **{preset["id"]: preset.get("name") for preset in _shared_presets()},
     }
     entries = cache.entries()
     for entry in entries:
