@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cacheCountOptions,
   cacheFilterBody,
   cacheFilterOptions,
   cacheFilterQuery,
+  cacheListModeButtonLabel,
   cacheProfileLabel,
   cacheSettingsSummary,
   cacheStatsText,
@@ -14,6 +16,7 @@ import {
   formatBytes,
   formatCachedAt,
   isCachedAnswer,
+  nextCacheListMode,
 } from "./answer-cache.js";
 
 // 2026-11-03 16:23:19 UTC
@@ -50,15 +53,41 @@ describe("admin Cache dialog", () => {
   });
 
   it("turns the filter into a query and a delete body", () => {
-    const filter = { wp_id: "WP1", model: "m1", pinned: "false", stale: "", q: "  Hus " };
-    expect(cacheFilterQuery(filter)).toBe("wp_id=WP1&model=m1&pinned=false&q=Hus");
+    const filter = { wp_id: "WP1", model: "m1", collection: "__no_sources__", pinned: "false", stale: "", q: "  Hus " };
+    expect(cacheFilterQuery(filter)).toBe("wp_id=WP1&model=m1&collection=__no_sources__&pinned=false&q=Hus");
     expect(cacheFilterQuery({})).toBe("");
     expect(cacheFilterBody(filter)).toEqual({
-      wp_id: "WP1", llm_provider: null, model: "m1", pinned: false, stale: null, q: "Hus",
+      wp_id: "WP1", llm_provider: null, model: "m1", prompt_preset_id: null, collection: "__no_sources__",
+      pinned: false, stale: null, q: "Hus",
     });
-    expect(cacheFilterBody({ stale: "true" })).toEqual({
-      wp_id: null, llm_provider: null, model: null, pinned: null, stale: true, q: null,
+    expect(cacheFilterBody({ stale: "true", prompt_preset_id: "p1" })).toEqual({
+      wp_id: null, llm_provider: null, model: null, prompt_preset_id: "p1", collection: null,
+      pinned: null, stale: true, q: null,
     });
+  });
+
+  it("offers the profiles and collections present in the cache", () => {
+    const profiles = [
+      { prompt_preset_id: "laik", prompt_preset_name: "Laik", entries: 2 },
+      { prompt_preset_id: "local-1", prompt_preset_name: null, entries: 1 },
+    ];
+    const labelOf = (id, item) => item.prompt_preset_name || id;
+    expect(cacheCountOptions(profiles, "prompt_preset_id", { labelOf })).toEqual([
+      ["laik", "Laik", 2], ["local-1", "local-1", 1],
+    ]);
+    expect(cacheCountOptions([{ collection: "c1", entries: 3 }], "collection", { selected: "gone" })).toEqual([
+      ["c1", "c1", 3], ["gone", "gone", 0],
+    ]);
+  });
+
+  it("steps the list through ten rows, all rows and collapsed", () => {
+    expect(nextCacheListMode("limited")).toBe("all");
+    expect(nextCacheListMode("all")).toBe("collapsed");
+    expect(nextCacheListMode("collapsed")).toBe("limited");
+    expect(nextCacheListMode("junk")).toBe("all");
+    expect(cacheListModeButtonLabel("limited")).toBe("Zobrazit vše");
+    expect(cacheListModeButtonLabel("all")).toBe("Sbalit");
+    expect(cacheListModeButtonLabel("collapsed")).toBe("Rozbalit");
   });
 
   it("offers the providers and models present in the cache", () => {
@@ -107,11 +136,12 @@ describe("admin Cache dialog", () => {
       models: ["m1", "m2"], force: true, concurrency: "8",
     }, { dryRun: true })).toEqual({
       wp: ["WP1"], questions: ["A?", "B?"], profile: ["all"], provider: "aiufal",
-      model: ["m1", "m2"], force: true, concurrency: 8, dry_run: true,
+      model: ["m1", "m2"], collection: "", force: true, concurrency: 8, dry_run: true,
     });
+    expect(cacheWarmBody({ collection: "__no_sources__" }).collection).toBe("__no_sources__");
     expect(cacheWarmBody({ questions: "prepared", custom: "ignored", concurrency: "" })).toEqual({
       wp: ["all"], questions: "prepared", profile: ["default"], provider: null,
-      model: [], force: false, concurrency: 4, dry_run: false,
+      model: [], collection: "", force: false, concurrency: 4, dry_run: false,
     });
     expect(cacheWarmBody({ concurrency: "50" }).concurrency).toBe(20);
     expect(cacheWarmBody({ concurrency: "0" }).concurrency).toBe(1);
