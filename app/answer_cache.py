@@ -245,6 +245,8 @@ class AnswerCache:
                        json_extract(key_input, '$.llm_provider') AS llm_provider,
                        json_extract(key_input, '$.model') AS model,
                        json_extract(key_input, '$.cache_version') AS cache_version,
+                       json_extract(key_input, '$.use_sources') AS use_sources,
+                       json_extract(key_input, '$.msearch_collection') AS msearch_collection,
                        json_extract(key_input, '$.server') AS server
                 FROM answers ORDER BY created_at DESC
                 """
@@ -257,6 +259,9 @@ class AnswerCache:
                 "llm_provider": row["llm_provider"],
                 "model": row["model"],
                 "prompt_preset_id": json.loads(row["meta"]).get("prompt_preset_id"),
+                # "__no_sources__" (as in the browser) for an answer without
+                # sources; None when it used another retrieval backend.
+                "collection": NO_SOURCES_COLLECTION if row["use_sources"] == 0 else row["msearch_collection"],
                 "created_at": row["created_at"],
                 "last_hit_at": row["last_hit_at"],
                 "hit_count": row["hit_count"],

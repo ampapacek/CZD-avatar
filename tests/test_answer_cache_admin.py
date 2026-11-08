@@ -137,6 +137,30 @@ class AdminEndpointTests(AdminTestCase):
         self.assertEqual(deleted, {"deleted": 2})
         self.assertEqual([entry["key"] for entry in self.listing()["entries"]], [jan])
 
+    def test_profile_and_collection_filters(self) -> None:
+        self.ask(prompt_preset_id="wp1-ucitel", retrieval_backend="msearch", msearch_collection="col-a")
+        self.ask(prompt_preset_id="wp1-ucitel", retrieval_backend="msearch", msearch_collection="col-b")
+        self.ask(prompt_preset_id="wp1-laik", msearch_collection="__no_sources__", use_sources=False)
+        listed = self.listing()
+        self.assertEqual(
+            sorted(entry["collection"] for entry in listed["entries"]), ["__no_sources__", "col-a", "col-b"]
+        )
+        self.assertEqual(
+            listed["collections"],
+            [{"collection": "__no_sources__", "entries": 1}, {"collection": "col-a", "entries": 1},
+             {"collection": "col-b", "entries": 1}],
+        )
+        self.assertEqual(
+            [(item["prompt_preset_id"], item["entries"]) for item in listed["profiles"]],
+            [("wp1-laik", 1), ("wp1-ucitel", 2)],
+        )
+        self.assertEqual(self.listing(prompt_preset_id="wp1-ucitel")["matching"], 2)
+        self.assertEqual(self.listing(collection="__no_sources__")["entries"][0]["prompt_preset_id"], "wp1-laik")
+        self.assertEqual(self.listing(prompt_preset_id="wp1-ucitel", collection="col-a")["matching"], 1)
+        deleted = self.client.post("/answer-cache/delete", json={"collection": "col-b"}, headers=ADMIN).json()
+        self.assertEqual(deleted, {"deleted": 1})
+        self.assertEqual(self.listing()["matching"], 2)
+
     def test_entries_for_another_configuration_are_stale(self) -> None:
         old = self.done(self.ask())["cache_key"]
         with patch.object(main.settings, "top_k", main.settings.top_k + 1):

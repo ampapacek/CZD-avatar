@@ -390,6 +390,9 @@ class AnswerCacheFilter(BaseModel):
     pinned: bool | None = None
     stale: bool | None = None
     q: str | None = None
+    prompt_preset_id: str | None = None
+    # An msearch collection id, or "__no_sources__" for answers without sources.
+    collection: str | None = None
 
 
 class AnswerCachePinRequest(BaseModel):

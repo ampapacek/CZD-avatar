@@ -2532,6 +2532,8 @@ def _matches(entry: dict[str, object], selection: AnswerCacheFilter) -> bool:
         and (selection.pinned is None or entry["pinned"] == selection.pinned)
         and (selection.stale is None or entry["stale"] == selection.stale)
         and (not query or query in str(entry["question"]).casefold())
+        and (not selection.prompt_preset_id or entry["prompt_preset_id"] == selection.prompt_preset_id)
+        and (not selection.collection or entry["collection"] == selection.collection)
     )
 
 
@@ -2543,16 +2545,24 @@ def list_answer_cache(
     pinned: bool | None = None,
     stale: bool | None = None,
     q: str | None = None,
+    prompt_preset_id: str | None = None,
+    collection: str | None = None,
     x_admin_password: str | None = Header(default=None),
 ) -> dict[str, object]:
     cache = _admin_answer_cache(x_admin_password)
     entries = _answer_cache_entries(cache)
     selection = AnswerCacheFilter(
-        wp_id=wp_id, llm_provider=llm_provider, model=model, pinned=pinned, stale=stale, q=q
+        wp_id=wp_id, llm_provider=llm_provider, model=model, pinned=pinned, stale=stale, q=q,
+        prompt_preset_id=prompt_preset_id, collection=collection,
     )
     matching = [entry for entry in entries if _matches(entry, selection)]
-    # The provider and model filters offer what is stored, whatever the filter.
+    # The provider, model, profile and collection filters offer what is
+    # stored, whatever the filter.
     models = Counter((entry["llm_provider"], entry["model"]) for entry in entries if entry["model"])
+    profiles = Counter(
+        (entry["prompt_preset_id"], entry["prompt_preset_name"]) for entry in entries if entry["prompt_preset_id"]
+    )
+    collections = Counter(entry["collection"] for entry in entries if entry["collection"])
     return {
         "stats": {
             "entries": len(entries),
@@ -2569,6 +2579,11 @@ def list_answer_cache(
             {"llm_provider": provider, "model": model, "entries": count}
             for (provider, model), count in sorted(models.items(), key=lambda item: (item[0][0] or "", item[0][1]))
         ],
+        "profiles": [
+            {"prompt_preset_id": preset_id, "prompt_preset_name": name, "entries": count}
+            for (preset_id, name), count in sorted(profiles.items(), key=lambda item: (item[0][1] or item[0][0]).casefold())
+        ],
+        "collections": [{"collection": value, "entries": count} for value, count in sorted(collections.items())],
     }
 
 
