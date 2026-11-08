@@ -121,7 +121,7 @@ Important `.env` variables:
 - `CHUNK_CATALOG_PATH`
 - `PROMPT_PRESETS_PATH` (gitignored mutable overlay; may be absent)
 - `PLACEHOLDERS_PATH` (gitignored mutable overlay; may be absent)
-- `AUTH_ENABLED`, `AUTH_DB_PATH`, `AUTH_REGISTRATION_MODE`, `AUTH_SESSION_DAYS`, `AUTH_COOKIE_SECURE`, `AUTH_COOKIE_NAME`, `USER_DAILY_REQUEST_LIMIT` (see [User accounts](accounts.md))
+- `AUTH_ENABLED`, `AUTH_DB_PATH`, `AUTH_REGISTRATION_MODE`, `AUTH_SESSION_DAYS`, `AUTH_COOKIE_SECURE`, `AUTH_COOKIE_NAME`, `USER_DAILY_REQUEST_LIMIT`, `USER_HISTORY_MAX_ENTRIES`, `USER_HISTORY_MAX_MB` (see [User accounts](accounts.md))
 - `ANSWER_CACHE_ENABLED` (default `true`), `ANSWER_CACHE_PATH` (default `data/answer_cache.sqlite3`, gitignored), `ANSWER_CACHE_TTL_DAYS` (default 14), `ANSWER_CACHE_MAX_ENTRIES` (default 10000); see [Answer cache](architecture.md#answer-cache)
 - `LLM_TIMEOUT_SECONDS` (default 180) is the longest wait for the next piece of a model reply, including the first one; `CACHE_WARM_LLM_TIMEOUT_SECONDS` (default 600) replaces it for warming in the Cache dialog, whose parallel requests a provider may queue
 

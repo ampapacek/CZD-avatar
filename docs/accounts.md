@@ -10,7 +10,8 @@ Optional login for instances whose URL might spread further than intended, so th
 - Registration has three modes that an admin switches in the app: `open` (the new account works at once), `approval` (the account waits until an admin activates it; the default) and `closed`. `AUTH_REGISTRATION_MODE` only sets the mode used until an admin picks one.
 - Admins manage users in the `Účet` dialog: activate, block, make admin, set a new password (not on their own row, which would log them out; they use `Změnit heslo`), delete, with today's and total request counts. An admin cannot block, demote or delete their own account.
 - A logged-in admin counts as having entered `ADMIN_PASSWORD`: all models are unlocked and shared prompts, placeholders and history can be edited without the shared password. The shared password keeps working as before.
-- History, local prompt profiles and API keys stay in the browser; they are not tied to the account.
+- History and conversations are stored with the account on the server, unless the user keeps them in the browser or does not store them (see [History](#history)). Local prompt profiles and API keys stay in the browser; API keys never go to the server.
+- Shared history, prompts and placeholders belong to the account, including those shared from a browser before accounts (see [Shared items](#shared-items)). The sharing name (`Sdílím jako`) is kept with the account.
 
 ## Setup
 
@@ -34,6 +35,7 @@ Settings:
 - `AUTH_COOKIE_SECURE` (default `true`; browsers keep Secure cookies off plain http except on `localhost`, so turn it off only for a test server reached over plain http)
 - `AUTH_COOKIE_NAME` (default `czd_session`; give two instances on the same host different names)
 - `USER_DAILY_REQUEST_LIMIT` (default `100`; `0` turns the limit off)
+- `USER_HISTORY_MAX_ENTRIES` (default `2000`) and `USER_HISTORY_MAX_MB` (default `50`): the server history limit per user
 
 ## How it works
 
@@ -50,8 +52,39 @@ Settings:
 - Cross-site requests: SameSite=Lax keeps the cookie off cross-site POSTs, and every state-changing endpoint takes JSON or uses PUT/PATCH/DELETE, which need a CORS preflight the app never grants.
 - Frontend: `app/static/login.html` + `login.js` (login and registration), the `Účet` button and dialog in `index.html`/`app.js`, shared helpers in `frontend/account.js`. A 401 from any API call sends the browser back to the login page.
 
+## History
+
+Each user picks where their history and conversations go, in the History dialog under `Úložiště` (the `Účet` dialog links there):
+
+- `server` (`Na serveru`): rows in the accounts database, visible on every device the user logs in from.
+- `browser` (`Jen v tomto prohlížeči`): localStorage, exactly as without accounts, including the storage meter and free-up dialog.
+- `none` (`Neukládat`): kept only in the open page until it is closed or reloaded. The user's `/chat/stream` answers are also not written to the [answer cache](architecture.md#answer-cache) (a cached answer is still replayed; cache warming always stores).
+
+The choice is stored per account (`user_prefs.history_mode`), not per browser. Until the user makes one it is `NULL`, and each browser decides: one that already holds history (entries, or a conversation with messages) keeps showing it from the browser, so nobody's history seems to vanish after the first login; one with nothing in it uses the server. In the first case a notice above `Moje historie` says how much is in the browser and offers `Ukládat na server` (saves the choice and uploads the browser's history) or `Nechat v prohlížeči` (saves the choice). On the server the server mode is the default, so `Neukládat` is the only choice that changes server behaviour.
+
+Switching never moves or deletes anything: it only decides where new entries are saved and which list is shown, so switching back shows the old entries again. While the server copy is shown and the browser still holds entries the server lacks, the same notice offers `Nahrát na server` (or `Skrýt`, remembered in the browser), and `Úložiště` has `Nahrát historii z prohlížeče na server`. Uploading adds entries by id (an id already on the server keeps the server's version) and leaves the browser copy in place.
+
+- Storage: `history_entries(user_id, kind, entry_id, created_at, updated_at, size, payload)`, one row per history entry or per conversation (rewritten after each turn), so two tabs or devices never overwrite each other's other entries. `payload` is the browser's entry as JSON after the same compaction as in localStorage. Deleting a user deletes their rows and preference (foreign keys with `ON DELETE CASCADE`).
+- Limit: a save that would take a user over `USER_HISTORY_MAX_ENTRIES` or `USER_HISTORY_MAX_MB` answers 413 with a readable message; nothing old is dropped. The import adds what fits and reports the rest.
+- Frontend: `frontend/history-store.js` (`PageHistoryStore`) keeps the working copy in memory, so `app.js` reads and writes whole lists synchronously as before. Each save is diffed against that copy and only changed entries are sent, one request per entry, after a short delay (a conversation rewritten on every streamed token becomes one request once the stream pauses). A failed save is reported and retried with the entry's next save. The browser mode keeps its own code path in `app.js`. Until `/settings` says which mode applies, entries wait in memory and are then added to the chosen store.
+- The page loads the whole server history at start (`GET /me/history` returns full entries). Fine at the expected sizes; if users get near the limit, switch to a light list plus fetching one entry on demand.
+- Privacy: anyone with access to the database file can read the stored conversations. Shared history items are a separate, explicit action and still go to the shared history.
+
+## Shared items
+
+Without accounts, a shared history item, prompt or placeholder belongs to the random owner id of the browser that made it (`czdemos4ai-browser-owner-id` in localStorage). With accounts:
+
+- New items are stored with the account's owner id, `user:<id>`, so they are the user's from every browser.
+- Each browser owner id a logged-in user sends is linked to their account (`owner_links`), the first time and to the first account only. Items shared from that browser before accounts, or before the user logged in there, become theirs on every device. On a computer several people used before accounts, the first to log in gets the old items; nobody else can claim them.
+- An id starting with `user:` is never linked, so nobody can claim an account's items by sending its id.
+- `requester_owner_ids` and `new_owner_id` in `app/auth.py` do this; `_owned_by` in `app/main.py` accepts any of the requester's ids. The browser still only learns `mine`, never an owner id.
+
+The sharing name (`Sdílím jako`) is `user_prefs.author_name`. Until the user sets one, it is the name typed in that browser before accounts (saved to the account on the next load) or the part of the email before the `@`. The email itself is never shown to others.
+
 ## API
 
 - `GET /auth/me`: accounts on/off, registration mode, daily limit, the current user and today's count (also in `/settings` as `account`)
 - `POST /auth/login`, `POST /auth/register`, `POST /auth/logout`, `POST /auth/password`
+- `PUT /me/prefs` (`{"history_mode": "server" | "browser" | "none", "author_name": "..."}`, either field alone; returns both). `/auth/me` carries them as `user.history_mode` and `user.author_name`, `null` until set.
+- `GET /me/history` (`history`, `conversations`, `usage` with the limits), `PUT /me/history/{history|conversations}/{id}` (`{"entry": {...}}`, its `id` must match), `DELETE /me/history/{history|conversations}/{id}`, `POST /me/history/import` (`{"history": [...], "conversations": [...]}`; returns `imported`, `existing`, `over_limit`)
 - `GET /admin/users`, `PATCH /admin/users/{id}`, `POST /admin/users/{id}/password`, `DELETE /admin/users/{id}`, `PUT /admin/registration-mode`
