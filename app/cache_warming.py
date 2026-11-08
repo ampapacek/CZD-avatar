@@ -5,8 +5,8 @@ HTTP, and the admin Cache dialog, which runs them inside the app. Both build
 the same request bodies, so both fill the entries visitors hit.
 
 Requests are built the way the browser builds them with its default settings:
-the WP's default collection, the model's context window, and the profile's
-prompts. A visitor who changed a setting (or uses a profile saved only in their
+the WP's default collection (or another collection of the WP, or "Bez zdrojů"),
+the model's context window, and the profile's prompts. A visitor who changed a setting (or uses a profile saved only in their
 browser) asks a different request and is not served the warmed answer.
 """
 
@@ -21,7 +21,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
-from app.answer_cache import AnswerCache
+from app.answer_cache import NO_SOURCES_COLLECTION, AnswerCache
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +117,13 @@ def request_body(
     model: str,
     question: str,
     admin_password: str | None,
+    collection: str = "",
 ) -> dict[str, Any]:
     """The first-turn body the browser sends with its default settings.
 
     Fields the browser fills from server defaults are left out: the server
-    resolves them to the same values for the cache key.
+    resolves them to the same values for the cache key. ``collection`` is an
+    msearch collection id, NO_SOURCES_COLLECTION, or empty for the WP's default.
     """
 
     model = model or provider.get("default_model") or ""
@@ -142,11 +144,25 @@ def request_body(
         "admin_password": admin_password or None,
         "top_k": msearch.get("max_results") if msearch.get("max_results") is not None else app_settings.get("top_k"),
         "retrieval_backend": "msearch",
-        "msearch_collection": wp_default_collection(wp),
+        "msearch_collection": collection or wp_default_collection(wp),
         "msearch_mode": "hybrid",
         "msearch_rescore": bool(retrieval.get("msearch_rescore")),
         "rerank_enabled": False,
+        # As buildRequestPayload: the collection selector carries the mode.
+        "use_sources": (collection or wp_default_collection(wp)) != NO_SOURCES_COLLECTION,
     }
+
+
+def check_collection(wps: list[dict[str, Any]], collection: str) -> None:
+    """A collection other than the default and "Bez zdrojů" belongs to one WP."""
+
+    if not collection or collection == NO_SOURCES_COLLECTION:
+        return
+    if len(wps) != 1:
+        raise ValueError("Kolekci lze vybrat jen pro jedno WP.")
+    known = [c.get("msearch_collection_id") for c in wps[0].get("collections") or []]
+    if collection not in known:
+        raise ValueError(f"WP {wps[0]['id']} nemá kolekci {collection!r}.")
 
 
 def interleave_by_model(jobs: list[Job]) -> list[Job]:
@@ -164,8 +180,9 @@ def build_jobs(fetch: Fetch, options: dict[str, Any], admin_password: str | None
     """Every request the options ask for, interleaved by model.
 
     ``options`` holds ``wp`` (ids or "all"), ``questions`` ("prepared" or a
-    list of questions), ``profile`` (see select_profiles), ``provider`` and
-    ``model`` (none means the provider's default model). ``fetch`` reads the
+    list of questions), ``profile`` (see select_profiles), ``provider``,
+    ``model`` (none means the provider's default model) and, optionally,
+    ``collection`` (see request_body; a specific one needs a single WP). ``fetch`` reads the
     app's /settings, /prompt-presets and /questions. Raises ValueError for an
     unknown WP or provider.
     """
@@ -180,6 +197,8 @@ def build_jobs(fetch: Fetch, options: dict[str, Any], admin_password: str | None
         if unknown:
             raise ValueError(f"Neznámé WP: {', '.join(unknown)}; dostupné: {', '.join(sorted(known))}")
         wps = [wp for wp in wps if wp["id"] in wanted_wps]
+    collection = options.get("collection") or ""
+    check_collection(wps, collection)
     provider = provider_config(app_settings, options["provider"])
     models = options["model"] or [provider.get("default_model") or ""]
     jobs: list[Job] = []
@@ -195,7 +214,7 @@ def build_jobs(fetch: Fetch, options: dict[str, Any], admin_password: str | None
         for profile in profiles:
             for model in models:
                 for question in questions:
-                    body = request_body(app_settings, wp, profile, provider, model, question, admin_password)
+                    body = request_body(app_settings, wp, profile, provider, model, question, admin_password, collection)
                     jobs.append(Job(wp["id"], profile["id"], body["model"], question, body))
     return interleave_by_model(jobs)
 

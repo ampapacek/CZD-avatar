@@ -2625,7 +2625,7 @@ def start_answer_cache_warm(
 
     global _warm_run
     cache = _admin_answer_cache(x_admin_password)
-    options = request.model_dump(include={"wp", "questions", "profile", "provider", "model"})
+    options = request.model_dump(include={"wp", "questions", "profile", "provider", "model", "collection"})
     try:
         # The shared password unlocks the models that are not public, as for
         # the script; an admin account unlocks them by itself (the workers run

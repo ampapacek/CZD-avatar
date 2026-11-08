@@ -30,6 +30,9 @@ CACHE_VERSION = 3
 # Request fields left out of the key. Everything else is in it: a field added
 # to ChatRequest is part of the key unless it is listed here, and
 # tests/test_answer_cache.py fails until it is classified.
+# As NO_SOURCES_COLLECTION in frontend/source-mode.js.
+NO_SOURCES_COLLECTION = "__no_sources__"
+
 KEY_EXCLUDED_FIELDS = frozenset(
     {
         # Credentials: the answer does not depend on whose key paid for it.
