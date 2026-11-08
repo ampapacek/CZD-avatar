@@ -56,7 +56,7 @@ export function formatBytes(bytes) {
 // The filter as the query of GET answer-cache; empty fields are left out.
 export function cacheFilterQuery(filter = {}) {
   const params = new URLSearchParams();
-  for (const name of ["wp_id", "llm_provider", "model", "pinned", "stale", "q"]) {
+  for (const name of ["wp_id", "llm_provider", "model", "prompt_preset_id", "collection", "pinned", "stale", "q"]) {
     const value = String(filter[name] ?? "").trim();
     if (value) {
       params.set(name, value);
@@ -72,6 +72,8 @@ export function cacheFilterBody(filter = {}) {
     wp_id: String(filter.wp_id ?? "").trim() || null,
     llm_provider: String(filter.llm_provider ?? "").trim() || null,
     model: String(filter.model ?? "").trim() || null,
+    prompt_preset_id: String(filter.prompt_preset_id ?? "").trim() || null,
+    collection: String(filter.collection ?? "").trim() || null,
     pinned: flag(filter.pinned),
     stale: flag(filter.stale),
     q: String(filter.q ?? "").trim() || null,
@@ -101,6 +103,35 @@ export function cacheFilterOptions(models = [], { provider = "", model = "" } = 
     providerModels.set(model, 0);
   }
   return { providers: [...providers], models: [...providerModels] };
+}
+
+// [value, label, entries] options from the listing's "profiles" or
+// "collections" counts. A chosen value with no entries left stays, with 0.
+export function cacheCountOptions(items = [], valueKey, { selected = "", labelOf = (value) => value } = {}) {
+  const options = items
+    .filter((item) => item?.[valueKey])
+    .map((item) => [item[valueKey], labelOf(item[valueKey], item), item.entries]);
+  if (selected && !options.some(([value]) => value === selected)) {
+    options.push([selected, labelOf(selected, {}), 0]);
+  }
+  return options;
+}
+
+// The list of cached answers: about ten rows with a scrollbar, every row, or
+// hidden. One button steps through them and names the next step.
+export const CACHE_LIST_MODES = ["limited", "all", "collapsed"];
+
+export function normalizeCacheListMode(mode) {
+  return CACHE_LIST_MODES.includes(mode) ? mode : "limited";
+}
+
+export function nextCacheListMode(mode) {
+  const index = CACHE_LIST_MODES.indexOf(normalizeCacheListMode(mode));
+  return CACHE_LIST_MODES[(index + 1) % CACHE_LIST_MODES.length];
+}
+
+export function cacheListModeButtonLabel(mode) {
+  return { limited: "Zobrazit vše", all: "Sbalit", collapsed: "Rozbalit" }[normalizeCacheListMode(mode)];
 }
 
 export function cacheStatsText(stats, matching, shown) {
@@ -166,6 +197,7 @@ export function cacheWarmBody(form = {}, { dryRun = false } = {}) {
     profile: [form.profile || "default"],
     provider: form.provider || null,
     model: (form.models || []).filter(Boolean),
+    collection: String(form.collection ?? "").trim(),
     force: Boolean(form.force),
     concurrency: Number.isFinite(concurrency) ? Math.min(Math.max(concurrency, 1), 20) : 4,
     dry_run: dryRun,

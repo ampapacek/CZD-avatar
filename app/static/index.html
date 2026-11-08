@@ -700,9 +700,9 @@
         </div>
         <div class="help-body">
           <section id="cacheHelpPanel" class="help-section help-panel" hidden>
-            <p>Cache (mezipaměť) uchovává odpovědi, aby se stejná první otázka nemusela posílat modelu znovu. Tady vidíš uložené odpovědi s otázkou, WP, profilem, modelem, časem vytvoření, počtem použití a velikostí a filtruješ je podle WP, poskytovatele, modelu, připnutí, stavu a textu otázky.</p>
+            <p>Cache (mezipaměť) uchovává odpovědi, aby se stejná první otázka nemusela posílat modelu znovu. Tady vidíš uložené odpovědi s otázkou, WP, profilem, kolekcí, modelem, časem vytvoření, počtem použití a velikostí a filtruješ je podle WP, poskytovatele, modelu, profilu, kolekce (i <code>Bez zdrojů</code>), připnutí, stavu a textu otázky. Seznam ukazuje zhruba deset řádků a zbytek se posouvá; tlačítko pod filtry přepíná mezi <code>Zobrazit vše</code>, <code>Sbalit</code> a <code>Rozbalit</code>.</p>
             <p><code>Náhled</code> ukáže odpověď, zdroje a hlavní nastavení. Připnutá odpověď nevyprší a nevyřadí se ani při plné cache. <code>Smazat</code> odstraní jednu odpověď, <code>Smazat vyfiltrované</code> všechny odpovídající filtru (i ty mimo zobrazený seznam). Odpověď označená jako <code>stará</code> vznikla při jiném nastavení serveru (např. vyhledávání nebo rozpočtu tokenů v <code>.env</code>), takže ji už žádný dotaz nenajde a lze ji smazat.</p>
-            <p>V části <code>Předgenerovat odpovědi</code> necháš server odpovědi vygenerovat a připnout předem, jako by se ptal návštěvník s výchozím nastavením. Před spuštěním se ukáže, kolik odpovědí vznikne a kolik už v cache je (ty se jen připnou, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>). <code>Concurrency</code> (1–20) určuje počet souběžných požadavků; lokální, pomalejší nebo přetížené servery při vyšší hodnotě a dlouhých promptech odpovědi nedokončují, pro ně volte nižší hodnoty (např. ≤ 3). Nedokončená odpověď se počítá jako chyba a neuloží se. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky.</p>
+            <p>V části <code>Předgenerovat odpovědi</code> necháš server odpovědi vygenerovat a připnout předem, jako by se ptal návštěvník s výchozím nastavením. <code>Kolekce</code> nechá výchozí kolekci WP, vybere jinou kolekci (jen při jednom WP) nebo <code>Bez zdrojů</code>. Před spuštěním se ukáže, kolik odpovědí vznikne a kolik už v cache je (ty se jen připnou, pokud není zaškrtnuté <code>Vygenerovat znovu i už uložené</code>). <code>Concurrency</code> (1–20) určuje počet souběžných požadavků; lokální, pomalejší nebo přetížené servery při vyšší hodnotě a dlouhých promptech odpovědi nedokončují, pro ně volte nižší hodnoty (např. ≤ 3). Nedokončená odpověď se počítá jako chyba a neuloží se. Běh pokračuje i po zavření okna, <code>Zrušit</code> zastaví čekající požadavky.</p>
           </section>
 
           <section class="help-section">
@@ -719,6 +719,14 @@
               <label class="field">
                 <span>Model</span>
                 <select id="cacheModelFilter"><option value="">Vše</option></select>
+              </label>
+              <label class="field">
+                <span>Profil</span>
+                <select id="cacheProfileFilter"><option value="">Vše</option></select>
+              </label>
+              <label class="field">
+                <span>Kolekce</span>
+                <select id="cacheCollectionFilter"><option value="">Vše</option></select>
               </label>
               <label class="field">
                 <span>Připnutí</span>
@@ -744,14 +752,16 @@
             <div class="form-actions">
               <button id="cacheReloadButton" class="secondary" type="button">Načíst znovu</button>
               <button id="cacheDeleteMatchingButton" class="secondary" type="button">Smazat vyfiltrované</button>
+              <button id="cacheListModeButton" class="secondary" type="button" aria-controls="cacheEntriesWrap">Zobrazit vše</button>
             </div>
             <p id="cacheStatus" class="status" role="status" aria-live="polite"></p>
-            <div>
+            <div id="cacheEntriesWrap" class="cache-entries-wrap" data-mode="limited">
               <table class="account-users cache-entries">
                 <colgroup>
                   <col class="cache-col-question" />
                   <col class="cache-col-wp" />
                   <col class="cache-col-profile" />
+                  <col class="cache-col-collection" />
                   <col class="cache-col-model" />
                   <col class="cache-col-created" />
                   <col class="cache-col-hits" />
@@ -764,6 +774,7 @@
                     <th scope="col">Otázka</th>
                     <th scope="col">WP</th>
                     <th scope="col">Profil</th>
+                    <th scope="col">Kolekce</th>
                     <th scope="col">Model</th>
                     <th scope="col">Vytvořeno</th>
                     <th scope="col" title="Kolikrát byla odpověď použitá z cache / naposledy">Použito</th>
@@ -786,6 +797,10 @@
               <label class="field">
                 <span>WP</span>
                 <select id="cacheWarmWp"></select>
+              </label>
+              <label class="field">
+                <span>Kolekce</span>
+                <select id="cacheWarmCollection"></select>
               </label>
               <label class="field">
                 <span>Otázky</span>

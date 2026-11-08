@@ -54,6 +54,7 @@ DEFAULTS: dict[str, Any] = {
     "profile": ["default"],
     "provider": None,
     "model": [],
+    "collection": "",
     "concurrency": 1,
 }
 
@@ -99,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", action="append", help="'default' (the WP's default profile), 'builtin', 'shared', 'all' or a profile id; repeatable.")
     parser.add_argument("--provider", help="LLM provider id (default: the app's default provider).")
     parser.add_argument("--model", action="append", help="Model, repeatable (default: the provider's default model).")
+    parser.add_argument("--collection", help="msearch collection id of the (single) WP, or '__no_sources__' for answers without sources (default: each WP's default collection).")
     parser.add_argument("--concurrency", type=int, help=f"Requests at a time, 1 to {cache_warming.MAX_CONCURRENCY} (default: 1).")
     parser.add_argument("--force", action="store_true", help="Generate again even when cached, replacing the answer.")
     parser.add_argument("--dry-run", action="store_true", help="Only list the requests.")

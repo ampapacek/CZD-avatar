@@ -4972,14 +4972,32 @@ body[data-theme="dark"] .source-highlight {
   margin: 0 6px 0 0;
 }
 
-.cache-col-wp { width: 11%; }
+.cache-col-wp { width: 10%; }
 .cache-col-profile { width: 10%; }
-.cache-col-model { width: 12%; }
+.cache-col-collection { width: 11%; }
+.cache-col-model { width: 11%; }
 .cache-col-created { width: 140px; }
 .cache-col-hits { width: 64px; }
 .cache-col-size { width: 68px; }
 .cache-col-pinned { width: 72px; }
 .cache-col-actions { width: 150px; }
+
+/* About ten rows, the rest behind a scrollbar; the header stays in view. */
+.cache-entries-wrap[data-mode="limited"] {
+  max-height: 25rem;
+  overflow-y: auto;
+}
+
+.cache-entries-wrap[data-mode="limited"] thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-3);
+}
+
+.cache-entries-wrap[data-mode="collapsed"] {
+  display: none;
+}
 
 .cache-entries tr.is-stale td {
   color: var(--muted);

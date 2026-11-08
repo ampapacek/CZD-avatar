@@ -101,6 +101,21 @@ class KeyEqualityTests(WarmTestCase):
                     self.assertTrue(sources["cache_hit"])
                     self.assertEqual(sources["cache_key"], browser["cache_key"])
 
+    def test_no_sources_request_hits_the_browser_entry(self) -> None:
+        wp = self.app_settings["wps"][0]
+        profile = wp["builtin_prompts"][0]
+        browser_request = {
+            **browser_body(self.app_settings, wp, profile, self.provider, QUESTION),
+            "msearch_collection": "__no_sources__",
+            "use_sources": False,
+        }
+        browser = self.done(self.ask(**browser_request))
+        self.assertFalse(browser["cache_hit"])
+        body = request_body(self.app_settings, wp, profile, self.provider, "", QUESTION, None, "__no_sources__")
+        sources = next(data for name, data in self.ask(**body) if name == "sources")
+        self.assertTrue(sources["cache_hit"])
+        self.assertEqual(sources["cache_key"], browser["cache_key"])
+
     def test_profiles_and_wps_do_not_share_entries(self) -> None:
         keys = set()
         for wp in self.app_settings["wps"]:
@@ -210,6 +225,17 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             build_jobs(fetch, {**options, "wp": ["WP9"]}, None)
 
+        chosen = build_jobs(fetch, {**options, "collection": "m0"}, None)
+        self.assertEqual({(job.body["msearch_collection"], job.body["use_sources"]) for job in chosen}, {("m0", True)})
+        both_wps = {**options, "wp": ["all"], "collection": "__no_sources__"}
+        self.assertEqual(
+            {(job.body["msearch_collection"], job.body["use_sources"]) for job in build_jobs(fetch, both_wps, None)},
+            {("__no_sources__", False)},
+        )
+        for collection, wps in (("m0", ["all"]), ("unknown", ["WP1"])):
+            with self.subTest(collection=collection), self.assertRaises(SystemExit):
+                build_jobs(fetch, {**options, "wp": wps, "collection": collection}, None)
+
 
 class OptionTests(unittest.TestCase):
     def test_command_line_wins_over_the_config(self) -> None:
@@ -226,5 +252,5 @@ class OptionTests(unittest.TestCase):
     def test_the_example_config_is_valid(self) -> None:
         example = Path(__file__).resolve().parents[1] / "scripts" / "warm_cache.example.json"
         options = load_options(argparse.Namespace(config=str(example), **{name: None for name in
-                               ("url", "wp", "questions", "profile", "provider", "model", "concurrency")}))
+                               ("url", "wp", "questions", "profile", "provider", "model", "collection", "concurrency")}))
         self.assertEqual(options["wp"], ["all"])

@@ -390,6 +390,9 @@ class AnswerCacheFilter(BaseModel):
     pinned: bool | None = None
     stale: bool | None = None
     q: str | None = None
+    prompt_preset_id: str | None = None
+    # An msearch collection id, or "__no_sources__" for answers without sources.
+    collection: str | None = None
 
 
 class AnswerCachePinRequest(BaseModel):
@@ -405,6 +408,9 @@ class AnswerCacheWarmRequest(BaseModel):
     profile: list[str] = Field(default_factory=lambda: ["default"], max_length=100)
     provider: str | None = None
     model: list[str] = Field(default_factory=list, max_length=100)
+    # An msearch collection id of the (single) WP, "__no_sources__" for
+    # "Bez zdrojů", or empty for each WP's default collection.
+    collection: str = Field(default="", max_length=200)
     force: bool = False
     concurrency: int = Field(default=4, ge=1, le=20)
     # Only count the requests.

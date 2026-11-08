@@ -10639,19 +10639,27 @@ const cacheFilterForm = document.querySelector("#cacheFilterForm");
 const cacheWpFilter = document.querySelector("#cacheWpFilter");
 const cacheProviderFilter = document.querySelector("#cacheProviderFilter");
 const cacheModelFilter = document.querySelector("#cacheModelFilter");
+const cacheProfileFilter = document.querySelector("#cacheProfileFilter");
+const cacheCollectionFilter = document.querySelector("#cacheCollectionFilter");
 const cachePinnedFilter = document.querySelector("#cachePinnedFilter");
 const cacheStaleFilter = document.querySelector("#cacheStaleFilter");
 const cacheQueryFilter = document.querySelector("#cacheQueryFilter");
 const cacheStatus = document.querySelector("#cacheStatus");
 const cacheEntriesBody = document.querySelector("#cacheEntriesBody");
+const cacheEntriesWrap = document.querySelector("#cacheEntriesWrap");
+const cacheListModeButton = document.querySelector("#cacheListModeButton");
+const CACHE_LIST_MODE_STORAGE_KEY = "cacheListMode";
 const cachePreview = document.querySelector("#cachePreview");
 const cachePreviewQuestion = document.querySelector("#cachePreviewQuestion");
 const cachePreviewSettings = document.querySelector("#cachePreviewSettings");
 const cachePreviewAnswer = document.querySelector("#cachePreviewAnswer");
 const cachePreviewSources = document.querySelector("#cachePreviewSources");
 let cacheLoadSequence = 0;
-// The provider/model counts of the last listing, for the filter options.
+// The provider/model, profile and collection counts of the last listing, for
+// the filter options.
 let cacheModels = [];
+let cacheProfiles = [];
+let cacheCollections = [];
 let cacheQueryTimer = null;
 
 // Looks the button up itself: refreshModelOptions can run before this section.
@@ -10664,6 +10672,8 @@ function cacheFilter() {
     wp_id: cacheWpFilter.value,
     llm_provider: cacheProviderFilter.value,
     model: cacheModelFilter.value,
+    prompt_preset_id: cacheProfileFilter.value,
+    collection: cacheCollectionFilter.value,
     pinned: cachePinnedFilter.value,
     stale: cacheStaleFilter.value,
     q: cacheQueryFilter.value,
@@ -10713,7 +10723,50 @@ function populateCacheModelFilters() {
   fill(cacheModelFilter, options.models, (model) => Avatar.shortenModelName(model) || model, (model) => model);
 }
 
+function populateCacheCountFilter(select, items, valueKey, labelOf) {
+  const selected = select.value;
+  select.replaceChildren(
+    new Option("Vše", ""),
+    ...Avatar.cacheCountOptions(items, valueKey, { selected, labelOf }).map(([value, label, count]) => {
+      const option = new Option(`${label} (${count})`, value, false, value === selected);
+      option.title = value;
+      return option;
+    }),
+  );
+}
+
+function populateCacheProfileCollectionFilters() {
+  populateCacheCountFilter(
+    cacheProfileFilter,
+    cacheProfiles,
+    "prompt_preset_id",
+    (id, item) => item.prompt_preset_name || id,
+  );
+  populateCacheCountFilter(cacheCollectionFilter, cacheCollections, "collection", (id) => collectionLabel(id));
+}
+
+function readCacheListMode() {
+  try {
+    return Avatar.normalizeCacheListMode(localStorage.getItem(CACHE_LIST_MODE_STORAGE_KEY));
+  } catch {
+    return Avatar.normalizeCacheListMode(null);
+  }
+}
+
+function applyCacheListMode(mode) {
+  const normalized = Avatar.normalizeCacheListMode(mode);
+  cacheEntriesWrap.dataset.mode = normalized;
+  cacheListModeButton.textContent = Avatar.cacheListModeButtonLabel(normalized);
+  cacheListModeButton.setAttribute("aria-expanded", String(normalized !== "collapsed"));
+  try {
+    localStorage.setItem(CACHE_LIST_MODE_STORAGE_KEY, normalized);
+  } catch {
+    // Only a convenience: the list still works with the default mode.
+  }
+}
+
 async function openCacheDialog() {
+  applyCacheListMode(readCacheListMode());
   populateCacheWpFilter();
   populateCacheWarmForm();
   cacheDialog.showModal();
@@ -10731,7 +10784,10 @@ async function loadCacheEntries() {
     }
     const entries = data.entries || [];
     cacheModels = data.models || [];
+    cacheProfiles = data.profiles || [];
+    cacheCollections = data.collections || [];
     populateCacheModelFilters();
+    populateCacheProfileCollectionFilters();
     cacheStats.textContent = Avatar.cacheStatsText(data.stats, data.matching, entries.length);
     cacheEntriesBody.replaceChildren(...entries.map((entry) => cacheEntryRow(entry)));
     setAccountStatus(cacheStatus, entries.length ? "" : "Žádné uložené odpovědi.");
@@ -10804,6 +10860,7 @@ function cacheEntryRow(entry) {
     question,
     cacheCell(wpLabel(entry.wp_id)),
     cacheCell(Avatar.cacheProfileLabel(entry), entry.prompt_preset_id || ""),
+    cacheCell(entry.collection ? collectionLabel(entry.collection) : "—", entry.collection || ""),
     cacheCell(Avatar.shortenModelName(entry.model) || "—", [entry.llm_provider, entry.model].filter(Boolean).join(" / ")),
     cacheCell(Avatar.formatCachedAt(entry.created_at)),
     cacheCell(String(entry.hit_count), lastHit),
@@ -10917,6 +10974,7 @@ function closeCachePreview() {
 
 const cacheWarm = document.querySelector("#cacheWarm");
 const cacheWarmWp = document.querySelector("#cacheWarmWp");
+const cacheWarmCollection = document.querySelector("#cacheWarmCollection");
 const cacheWarmQuestions = document.querySelector("#cacheWarmQuestions");
 const cacheWarmCustom = document.querySelector("#cacheWarmCustom");
 const cacheWarmProfile = document.querySelector("#cacheWarmProfile");
@@ -10943,7 +11001,25 @@ function populateCacheWarmForm() {
   cacheWarmProvider.replaceChildren(
     ...(appSettings.llm_providers || []).map((item) => new Option(item.label || item.id, item.id, false, item.id === provider)),
   );
+  populateCacheWarmCollections();
   populateCacheWarmModels();
+}
+
+// A specific collection only for a single WP; "Bez zdrojů" for any.
+function populateCacheWarmCollections() {
+  const selected = cacheWarmCollection.value;
+  const allWps = appSettings.wps || [];
+  const wps = cacheWarmWp.value === "all" ? allWps : allWps.filter((wp) => wp.id === cacheWarmWp.value);
+  const collections = wps.length === 1 ? wps[0].collections || [] : [];
+  const options = [
+    new Option(wps.length === 1 ? "Výchozí kolekce WP" : "Výchozí kolekce každého WP", ""),
+    ...collections
+      .filter((collection) => collection.msearch_collection_id)
+      .map((collection) => new Option(collection.label || collection.msearch_collection_id, collection.msearch_collection_id)),
+    new Option(Avatar.NO_SOURCES_LABEL, Avatar.NO_SOURCES_COLLECTION),
+  ];
+  cacheWarmCollection.replaceChildren(...options);
+  cacheWarmCollection.value = options.some((option) => option.value === selected) ? selected : "";
 }
 
 function populateCacheWarmModels() {
@@ -10964,6 +11040,7 @@ function populateCacheWarmModels() {
 function cacheWarmForm() {
   return {
     wp: cacheWarmWp.value,
+    collection: cacheWarmCollection.value,
     questions: cacheWarmQuestions.value,
     custom: cacheWarmCustom.value,
     profile: cacheWarmProfile.value,
@@ -11043,6 +11120,7 @@ function renderCacheWarmStatus(status) {
   }
 }
 
+cacheWarmWp.addEventListener("change", () => populateCacheWarmCollections());
 cacheWarmQuestions.addEventListener("change", () => {
   document.querySelector(".cache-warm-custom").hidden = cacheWarmQuestions.value !== "custom";
 });
@@ -11084,7 +11162,8 @@ cacheProviderFilter.addEventListener("change", () => {
   }
   loadCacheEntries();
 });
-for (const select of [cacheWpFilter, cacheModelFilter, cachePinnedFilter, cacheStaleFilter]) {
+cacheListModeButton.addEventListener("click", () => applyCacheListMode(Avatar.nextCacheListMode(cacheEntriesWrap.dataset.mode)));
+for (const select of [cacheWpFilter, cacheModelFilter, cacheProfileFilter, cacheCollectionFilter, cachePinnedFilter, cacheStaleFilter]) {
   select.addEventListener("change", () => loadCacheEntries());
 }
 cacheQueryFilter.addEventListener("input", () => {
