@@ -7,6 +7,7 @@ requests straight through and the endpoints report that accounts are off.
 from __future__ import annotations
 
 import math
+import re
 from contextvars import ContextVar
 from datetime import timedelta
 
@@ -16,9 +17,22 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.accounts import AccountError, AccountStore, LoginThrottle, RateWindow, TooManyPendingError, User
+from app.accounts import (
+    AccountError,
+    account_owner_id,
+    AccountStore,
+    HistoryLimitError,
+    HistoryLimits,
+    LoginThrottle,
+    RateWindow,
+    TooManyPendingError,
+    User,
+)
 from app.config import get_settings
 from app.models import (
+    HistoryEntryRequest,
+    HistoryImportRequest,
+    PrefsRequest,
     LoginRequest,
     PasswordChangeRequest,
     PasswordResetRequest,
@@ -196,7 +210,8 @@ def account_payload(user: User | None) -> dict[str, object]:
     }
     if user is not None:
         used = store.requests_today(user.id)
-        payload["user"] = {"email": user.email, "is_admin": user.is_admin}
+        # history_mode / author_name are None until the user chooses.
+        payload["user"] = {"email": user.email, "is_admin": user.is_admin, **store.prefs(user.id)}
         payload["requests_today"] = used
         # None means unlimited.
         payload["requests_remaining"] = None if user.is_admin or limit <= 0 else max(limit - used, 0)
@@ -415,3 +430,136 @@ def admin_set_registration_mode(body: RegistrationModeRequest) -> dict[str, obje
     _require_admin()
     get_store().set_registration_mode(body.mode)
     return {"registration_mode": body.mode}
+
+
+# History ------------------------------------------------------------------
+# The logged-in user's own history and conversations (see docs/accounts.md).
+# The browser keeps the working copy in memory and saves each changed entry
+# here, so these are per-entry calls rather than one big list.
+
+HISTORY_KIND_BY_PATH = {"history": "history", "conversations": "conversation"}
+# The browser's ids are Date.now() numbers; anything id-like is accepted.
+HISTORY_ENTRY_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def history_limits() -> HistoryLimits:
+    return HistoryLimits(
+        max_entries=settings.user_history_max_entries,
+        max_bytes=int(settings.user_history_max_mb * 1024 * 1024),
+    )
+
+
+def history_storage_off() -> bool:
+    """True when the logged-in user chose not to store history ("neukládat"):
+    their answers then do not go into the shared answer cache either."""
+
+    user = current_user.get()
+    return settings.auth_enabled and user is not None and get_store().history_mode(user.id) == "none"
+
+
+def _history_kind(kind: str) -> str:
+    if kind not in HISTORY_KIND_BY_PATH:
+        raise HTTPException(status_code=404, detail="Neznámý druh historie.")
+    return HISTORY_KIND_BY_PATH[kind]
+
+
+def _history_entry_id(value: object) -> str:
+    entry_id = str(value if value is not None else "")
+    if not HISTORY_ENTRY_ID_RE.match(entry_id):
+        raise HTTPException(status_code=400, detail="Neplatné id položky historie.")
+    return entry_id
+
+
+def _usage_payload(usage: dict[str, int]) -> dict[str, object]:
+    limits = history_limits()
+    return {**usage, "max_entries": limits.max_entries, "max_bytes": limits.max_bytes}
+
+
+@router.put("/me/prefs")
+def set_my_prefs(body: PrefsRequest) -> dict[str, object]:
+    user = _require_user()
+    store = get_store()
+    if body.history_mode is not None:
+        store.set_history_mode(user.id, body.history_mode)
+    if body.author_name is not None:
+        store.set_author_name(user.id, body.author_name)
+    return store.prefs(user.id)
+
+
+# Shared-item ownership ------------------------------------------------------
+# Without accounts a shared item belongs to the random id of the browser that
+# made it. With accounts, new items belong to the account ("user:<id>"), and
+# the browser ids a user sends are linked to their account on first use, so
+# what they shared before logging in (or from another browser) stays theirs.
+
+
+def requester_owner_ids(owner_id: str | None) -> frozenset[str]:
+    """The owner ids the requester may act as."""
+
+    requester = (owner_id or "").strip()
+    user = current_user.get()
+    if not settings.auth_enabled or user is None:
+        return frozenset({requester}) if requester else frozenset()
+    store = get_store()
+    if requester:
+        store.link_owner_id(user.id, requester)
+    return frozenset(store.owner_ids(user.id))
+
+
+def new_owner_id(owner_id: str | None) -> str:
+    """The owner id a newly shared item is stored with."""
+
+    user = current_user.get()
+    if settings.auth_enabled and user is not None:
+        # Links the browser id too, as a read would.
+        requester_owner_ids(owner_id)
+        return account_owner_id(user.id)
+    return (owner_id or "").strip()
+
+
+@router.get("/me/history")
+def list_my_history() -> dict[str, object]:
+    user = _require_user()
+    store = get_store()
+    entries = store.list_history(user.id)
+    return {
+        "history": entries["history"],
+        "conversations": entries["conversation"],
+        "usage": _usage_payload(store.history_usage(user.id)),
+    }
+
+
+@router.put("/me/history/{kind}/{entry_id}")
+def put_my_history_entry(kind: str, entry_id: str, body: HistoryEntryRequest) -> dict[str, object]:
+    user = _require_user()
+    kind = _history_kind(kind)
+    entry_id = _history_entry_id(entry_id)
+    if _history_entry_id(body.entry.get("id")) != entry_id:
+        raise HTTPException(status_code=400, detail="Id v adrese a v položce se liší.")
+    try:
+        usage = get_store().put_history(user.id, kind, entry_id, body.entry, history_limits())
+    except HistoryLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    return {"usage": _usage_payload(usage)}
+
+
+@router.delete("/me/history/{kind}/{entry_id}", status_code=204)
+def delete_my_history_entry(kind: str, entry_id: str) -> Response:
+    user = _require_user()
+    get_store().delete_history(user.id, _history_kind(kind), _history_entry_id(entry_id))
+    return Response(status_code=204)
+
+
+@router.post("/me/history/import")
+def import_my_history(body: HistoryImportRequest) -> dict[str, object]:
+    """Copy entries from the browser; ids already on the server are kept as they are."""
+
+    user = _require_user()
+    items = [
+        (kind, _history_entry_id(entry.get("id")), entry)
+        for kind, entries in (("history", body.history), ("conversation", body.conversations))
+        for entry in entries
+    ]
+    store = get_store()
+    result = store.import_history(user.id, items, history_limits())
+    return {**result, "usage": _usage_payload(store.history_usage(user.id))}

@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # calendar day; an answer served from the answer cache does not count.
     # Admins are not limited; 0 turns the limit off.
     user_daily_request_limit: int = Field(default=100, ge=0, alias="USER_DAILY_REQUEST_LIMIT")
+    # History kept on the server per account (when the user picks "na serveru").
+    # A save that would go over either limit is refused; nothing old is dropped.
+    user_history_max_entries: int = Field(default=2000, ge=1, alias="USER_HISTORY_MAX_ENTRIES")
+    user_history_max_mb: float = Field(default=50, gt=0, alias="USER_HISTORY_MAX_MB")
 
     # Finished first-turn answers of /chat/stream, replayed for an identical
     # request instead of calling the LLM again (see app/answer_cache.py).

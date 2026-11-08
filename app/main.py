@@ -41,7 +41,10 @@ from app.auth import (
     count_request,
     current_user,
     get_store as get_account_store,
+    history_storage_off,
     is_admin_user,
+    new_owner_id,
+    requester_owner_ids,
     router as auth_router,
 )
 from app.admin_password_guard import AdminPasswordGuard
@@ -660,9 +663,10 @@ def get_public_settings(request: Request, owner_id: str | None = None) -> dict[s
             duration_ms=None,
         )
     _refresh_provider_state()
+    owners = requester_owner_ids(owner_id)
     return {
         "placeholders": [
-            _for_requester(record, owner_id)
+            _for_requester(record, owners)
             for record in effective_global_placeholders(settings.placeholders_path)
         ],
         "top_k": settings.top_k,
@@ -930,13 +934,18 @@ def _find_prompt_preset(preset_id: str) -> dict[str, object] | None:
     return next((preset for preset in _shared_presets() if preset["id"] == preset_id), None)
 
 
-def _owned_by(record: dict[str, object], owner_id: str | None) -> bool:
+# `owners` is what requester_owner_ids() returns: the browser's own id, or with
+# accounts the account's id plus the browser ids linked to it. Compute it once
+# per request; with accounts it may link the browser id (a database write).
+Owners = frozenset[str]
+
+
+def _owned_by(record: dict[str, object], owners: Owners) -> bool:
     owner = str(record.get("owner_id") or "").strip()
-    requester = (owner_id or "").strip()
-    return bool(owner and requester) and _secure_eq(owner, requester)
+    return bool(owner) and any(_secure_eq(owner, candidate) for candidate in owners)
 
 
-def _for_requester(record: dict[str, object], owner_id: str | None) -> dict[str, object]:
+def _for_requester(record: dict[str, object], owners: Owners) -> dict[str, object]:
     """A stored record as sent to a browser.
 
     The owner id is what proves ownership on writes, so it never leaves the
@@ -944,7 +953,7 @@ def _for_requester(record: dict[str, object], owner_id: str | None) -> dict[str,
     """
 
     public = {key: value for key, value in record.items() if key != "owner_id"}
-    public["mine"] = _owned_by(record, owner_id)
+    public["mine"] = _owned_by(record, owners)
     return public
 
 
@@ -986,7 +995,7 @@ def _can_modify_prompt_preset(
     owner_id: str | None,
     password: str | None,
 ) -> bool:
-    return _owned_by(preset, owner_id) or _admin_authorized(password)
+    return _owned_by(preset, requester_owner_ids(owner_id)) or _admin_authorized(password)
 
 
 def _shared_password_ok(password: str | None) -> bool:
@@ -1027,8 +1036,9 @@ def _builtin_prompt_exists(prompt_id: str) -> bool:
 
 @app.get("/prompt-presets", response_model=list[PromptPreset])
 def get_prompt_presets(owner_id: str | None = None) -> list[PromptPreset]:
+    owners = requester_owner_ids(owner_id)
     return [
-        PromptPreset(**_for_requester(preset, owner_id))
+        PromptPreset(**_for_requester(preset, owners))
         for preset in _shared_presets()
     ]
 
@@ -1066,7 +1076,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
                 else None
             ),
             preset_id=request.id,
-            owner_id=request.owner_id,
+            owner_id=new_owner_id(request.owner_id),
         )
     except OSError as exc:
         logger.exception("Could not save prompt preset to %s", settings.prompt_presets_path)
@@ -1074,7 +1084,7 @@ def post_prompt_preset(request: PromptPresetSaveRequest) -> PromptPreset:
             status_code=500,
             detail="Sdílený prompt se nepodařilo uložit na server.",
         ) from exc
-    return PromptPreset(**_for_requester(preset, request.owner_id))
+    return PromptPreset(**_for_requester(preset, requester_owner_ids(request.owner_id)))
 
 
 @app.put(
@@ -1284,16 +1294,17 @@ def _find_shared_history_item(item_id: str) -> dict[str, object] | None:
 def _can_modify_shared_history_item(
     item: dict[str, object], owner_id: str | None, password: str | None
 ) -> bool:
-    return _owned_by(item, owner_id) or _admin_authorized(password)
+    return _owned_by(item, requester_owner_ids(owner_id)) or _admin_authorized(password)
 
 
 @app.get("/shared-history", response_model=list[SharedHistoryItem])
 def get_shared_history(owner_id: str | None = None) -> list[SharedHistoryItem]:
     # Link-only items stay out of the list, except for the browser that owns them.
+    owners = requester_owner_ids(owner_id)
     return [
-        SharedHistoryItem(**_for_requester(item, owner_id))
+        SharedHistoryItem(**_for_requester(item, owners))
         for item in load_shared_history(settings.shared_history_path)
-        if item["visibility"] == "listed" or _owned_by(item, owner_id)
+        if item["visibility"] == "listed" or _owned_by(item, owners)
     ]
 
 
@@ -1302,7 +1313,7 @@ def get_shared_history_item(item_id: str, owner_id: str | None = None) -> Shared
     item = _find_shared_history_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
-    return SharedHistoryItem(**_for_requester(item, owner_id))
+    return SharedHistoryItem(**_for_requester(item, requester_owner_ids(owner_id)))
 
 
 @app.patch("/shared-history/{item_id}", response_model=SharedHistoryItem)
@@ -1326,7 +1337,7 @@ def patch_shared_history_item(item_id: str, request: SharedHistoryUpdateRequest)
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Sdílená položka nebyla nalezena.")
-    return SharedHistoryItem(**_for_requester(updated, request.owner_id))
+    return SharedHistoryItem(**_for_requester(updated, requester_owner_ids(request.owner_id)))
 
 
 @app.post("/shared-history", response_model=SharedHistoryItem)
@@ -1334,7 +1345,7 @@ def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
     _check_saved_item(settings.shared_history_path, _stored_fields(request), **SHARED_HISTORY_LIMITS)
     item = save_shared_history_item(
         settings.shared_history_path,
-        owner_id=request.owner_id,
+        owner_id=new_owner_id(request.owner_id),
         author_name=request.author_name,
         note=request.note,
         question=request.question,
@@ -1352,7 +1363,7 @@ def post_shared_history(request: SharedHistorySaveRequest) -> SharedHistoryItem:
         token_budget=request.token_budget,
         visibility=request.visibility,
     )
-    return SharedHistoryItem(**_for_requester(item, request.owner_id))
+    return SharedHistoryItem(**_for_requester(item, requester_owner_ids(request.owner_id)))
 
 
 @app.delete("/shared-history/{item_id}", status_code=204)
@@ -1388,13 +1399,14 @@ def _find_placeholder(name: str) -> dict[str, object] | None:
 def _can_modify_placeholder(placeholder: dict[str, object], owner_id: str | None, password: str | None) -> bool:
     if str(placeholder.get("name") or "") in DEFAULT_PLACEHOLDERS:
         return _admin_authorized(password)
-    return _owned_by(placeholder, owner_id) or _admin_authorized(password)
+    return _owned_by(placeholder, requester_owner_ids(owner_id)) or _admin_authorized(password)
 
 
 @app.get("/placeholders", response_model=list[Placeholder])
 def get_placeholders(owner_id: str | None = None) -> list[Placeholder]:
+    owners = requester_owner_ids(owner_id)
     return [
-        Placeholder(**_for_requester(item, owner_id))
+        Placeholder(**_for_requester(item, owners))
         for item in load_placeholders(settings.placeholders_path)
     ]
 
@@ -1422,9 +1434,9 @@ def post_placeholder(request: PlaceholderSaveRequest) -> Placeholder:
         help=request.help,
         default=request.default,
         options=[option.model_dump() for option in request.options],
-        owner_id=request.owner_id,
+        owner_id=new_owner_id(request.owner_id),
     )
-    return Placeholder(**_for_requester(record, request.owner_id))
+    return Placeholder(**_for_requester(record, requester_owner_ids(request.owner_id)))
 
 
 @app.delete("/placeholders/{name}", status_code=204)
@@ -2022,6 +2034,9 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
     except HTTPException as exc:
         resolve_error = exc
     cache = _get_answer_cache() if resolved_llm is not None and answer_is_cacheable(request) else None
+    # "Neukládat": a cached answer may still be replayed, but nothing is stored.
+    # Warming always stores: that is its whole point, whatever the admin chose.
+    store_in_cache = http_request is _WARM_HTTP_REQUEST or not history_storage_off()
     cache_input: dict[str, object] | None = None
     cache_key: str | None = None
     cached: dict[str, object] | None = None
@@ -2405,7 +2420,7 @@ def _chat_events(request: ChatRequest, http_request: Request) -> tuple[Iterator[
             # Only a finished answer: an aborted or failed stream never gets here.
             # Stored before "done", so the entry exists once a client sees it
             # (scripts/warm_cache.py pins it then).
-            if cache_key is not None and answer.strip() and answer_complete:
+            if cache_key is not None and store_in_cache and answer.strip() and answer_complete:
                 _store_answer(cache, cache_key, cache_input, response, request)
             yield _sse_event("done", response)
             event_fields = {

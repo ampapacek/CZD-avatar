@@ -8,6 +8,7 @@ and no connection is ever shared between threads.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -25,6 +26,17 @@ from pwdlib import PasswordHash
 
 STATUSES = ("active", "pending", "disabled")
 REGISTRATION_MODES = ("open", "approval", "closed")
+# Where a user's history goes: their rows below, only their browser, or nowhere.
+HISTORY_MODES = ("server", "browser", "none")
+HISTORY_KINDS = ("history", "conversation")
+AUTHOR_NAME_MAX_LENGTH = 80
+# Owner id of shared items (history, prompts, placeholders) made by an account.
+# Browser ids start with "owner-"; one starting with this prefix is never linked.
+ACCOUNT_OWNER_PREFIX = "user:"
+
+
+def account_owner_id(user_id: int) -> str:
+    return f"{ACCOUNT_OWNER_PREFIX}{user_id}"
 PASSWORD_MIN_LENGTH = 8
 # Argon2 hashes any length, but a megabyte "password" is only a way to burn CPU.
 PASSWORD_MAX_LENGTH = 256
@@ -86,6 +98,34 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- NULL = not chosen yet: the browser then picks (browser history stays in the
+-- browser until the user moves it, see docs/accounts.md#history).
+CREATE TABLE IF NOT EXISTS user_prefs (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    history_mode TEXT CHECK (history_mode IS NULL OR history_mode IN ('server', 'browser', 'none')),
+    author_name TEXT
+);
+-- Browser owner ids (the random id each browser made up before accounts) that
+-- belong to an account: the first account that sends one gets it, no other can.
+CREATE TABLE IF NOT EXISTS owner_links (
+    owner_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    linked_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS owner_links_user_id ON owner_links(user_id);
+-- One row per history entry or per conversation (rewritten after each turn),
+-- so two tabs or devices never overwrite each other's entries. `payload` is
+-- the browser's entry as JSON; `size` its length in bytes, for the limit.
+CREATE TABLE IF NOT EXISTS history_entries (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('history', 'conversation')),
+    entry_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind, entry_id)
+);
 """
 
 
@@ -95,6 +135,24 @@ class AccountError(ValueError):
 
 class TooManyPendingError(AccountError):
     """Registration refused: too many accounts already wait for approval."""
+
+
+class HistoryLimitError(AccountError):
+    """A history save refused because the user's server history is full."""
+
+
+@dataclass(frozen=True)
+class HistoryLimits:
+    max_entries: int
+    max_bytes: int
+
+
+def history_limit_message(limits: HistoryLimits) -> str:
+    megabytes = limits.max_bytes / (1024 * 1024)
+    return (
+        f"Historie na serveru je plná (nejvýše {limits.max_entries} položek a {megabytes:g} MB). "
+        "Nic starého se nesmazalo; smaž v Historii položky, které už nepotřebuješ."
+    )
 
 
 @dataclass(frozen=True)
@@ -403,6 +461,168 @@ class AccountStore:
                 "INSERT INTO app_settings (key, value) VALUES ('registration_mode', ?) "
                 "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 (mode,),
+            )
+
+
+    # History -----------------------------------------------------------------
+
+    def prefs(self, user_id: int) -> dict[str, str | None]:
+        """The user's choices; None for one not made yet."""
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT history_mode, author_name FROM user_prefs WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return {
+            "history_mode": row["history_mode"] if row else None,
+            "author_name": row["author_name"] if row else None,
+        }
+
+    def history_mode(self, user_id: int) -> str:
+        """The mode in effect on the server side; "server" until the user chooses."""
+
+        return self.prefs(user_id)["history_mode"] or "server"
+
+    def set_history_mode(self, user_id: int, mode: str) -> None:
+        if mode not in HISTORY_MODES:
+            raise AccountError(f"Unknown history mode: {mode}")
+        self._set_pref(user_id, "history_mode", mode)
+
+    def set_author_name(self, user_id: int, name: str) -> str:
+        clean = " ".join((name or "").split())[:AUTHOR_NAME_MAX_LENGTH]
+        self._set_pref(user_id, "author_name", clean or None)
+        return clean
+
+    def _set_pref(self, user_id: int, column: str, value: str | None) -> None:
+        # `column` is one of ours, never user input.
+        with self._connect() as conn:
+            conn.execute(
+                f"INSERT INTO user_prefs (user_id, {column}) VALUES (?, ?) "
+                f"ON CONFLICT (user_id) DO UPDATE SET {column} = excluded.{column}",
+                (user_id, value),
+            )
+
+    # Owner ids --------------------------------------------------------------
+
+    def link_owner_id(self, user_id: int, owner_id: str) -> None:
+        """Give a browser owner id to the user unless an account already has it."""
+
+        owner_id = (owner_id or "").strip()
+        if not owner_id or owner_id.startswith(ACCOUNT_OWNER_PREFIX):
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO owner_links (owner_id, user_id, linked_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (owner_id) DO NOTHING",
+                (owner_id, user_id, _iso(_now())),
+            )
+
+    def owner_ids(self, user_id: int) -> list[str]:
+        """Every owner id the user acts as: their account id and their linked browsers."""
+
+        with self._connect() as conn:
+            rows = conn.execute("SELECT owner_id FROM owner_links WHERE user_id = ?", (user_id,)).fetchall()
+        return [account_owner_id(user_id), *(row["owner_id"] for row in rows)]
+
+    def history_usage(self, user_id: int) -> dict[str, int]:
+        with self._connect() as conn:
+            return self._history_usage(conn, user_id)
+
+    @staticmethod
+    def _history_usage(conn: sqlite3.Connection, user_id: int, *, skip: tuple[str, str] | None = None) -> dict[str, int]:
+        kind, entry_id = skip or ("", "")
+        row = conn.execute(
+            "SELECT COUNT(*) AS entries, COALESCE(SUM(size), 0) AS bytes FROM history_entries "
+            "WHERE user_id = ? AND NOT (kind = ? AND entry_id = ?)",
+            (user_id, kind, entry_id),
+        ).fetchone()
+        return {"entries": row["entries"], "bytes": row["bytes"]}
+
+    def list_history(self, user_id: int) -> dict[str, list[dict[str, object]]]:
+        """Every entry of the user, by kind, in no particular order."""
+
+        result: dict[str, list[dict[str, object]]] = {kind: [] for kind in HISTORY_KINDS}
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT kind, payload FROM history_entries WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        for row in rows:
+            result[row["kind"]].append(json.loads(row["payload"]))
+        return result
+
+    def history_ids(self, user_id: int) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {kind: [] for kind in HISTORY_KINDS}
+        with self._connect() as conn:
+            for row in conn.execute("SELECT kind, entry_id FROM history_entries WHERE user_id = ?", (user_id,)):
+                result[row["kind"]].append(row["entry_id"])
+        return result
+
+    def put_history(self, user_id: int, kind: str, entry_id: str, entry: dict[str, object], limits: HistoryLimits) -> dict[str, int]:
+        """Create or replace one entry; HistoryLimitError when it would not fit.
+
+        The limit is checked and the row written in one IMMEDIATE transaction,
+        so parallel saves from two tabs cannot both take the last place.
+        """
+
+        payload = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        size = len(payload.encode("utf-8"))
+        now = _iso(_now())
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            usage = self._history_usage(conn, user_id, skip=(kind, entry_id))
+            if usage["entries"] + 1 > limits.max_entries or usage["bytes"] + size > limits.max_bytes:
+                raise HistoryLimitError(history_limit_message(limits))
+            conn.execute(
+                """
+                INSERT INTO history_entries (user_id, kind, entry_id, created_at, updated_at, size, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user_id, kind, entry_id)
+                DO UPDATE SET updated_at = excluded.updated_at, size = excluded.size, payload = excluded.payload
+                """,
+                (user_id, kind, entry_id, now, now, size, payload),
+            )
+            return {"entries": usage["entries"] + 1, "bytes": usage["bytes"] + size}
+
+    def import_history(
+        self, user_id: int, items: list[tuple[str, str, dict[str, object]]], limits: HistoryLimits
+    ) -> dict[str, int]:
+        """Add (kind, entry_id, entry) items the user does not have yet.
+
+        An id already on the server keeps the server's version. Items that no
+        longer fit under the limit are skipped and counted, never forced in.
+        """
+
+        imported = existing = over_limit = 0
+        now = _iso(_now())
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            usage = self._history_usage(conn, user_id)
+            for kind, entry_id, entry in items:
+                if conn.execute(
+                    "SELECT 1 FROM history_entries WHERE user_id = ? AND kind = ? AND entry_id = ?",
+                    (user_id, kind, entry_id),
+                ).fetchone():
+                    existing += 1
+                    continue
+                payload = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+                size = len(payload.encode("utf-8"))
+                if usage["entries"] + 1 > limits.max_entries or usage["bytes"] + size > limits.max_bytes:
+                    over_limit += 1
+                    continue
+                conn.execute(
+                    "INSERT INTO history_entries (user_id, kind, entry_id, created_at, updated_at, size, payload) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, kind, entry_id, now, now, size, payload),
+                )
+                usage = {"entries": usage["entries"] + 1, "bytes": usage["bytes"] + size}
+                imported += 1
+        return {"imported": imported, "existing": existing, "over_limit": over_limit}
+
+    def delete_history(self, user_id: int, kind: str, entry_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM history_entries WHERE user_id = ? AND kind = ? AND entry_id = ?",
+                (user_id, kind, entry_id),
             )
 
 

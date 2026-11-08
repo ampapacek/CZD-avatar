@@ -405,5 +405,18 @@ class QuotaTests(EndpointTestCase):
         self.assertEqual(regenerate.status_code, 429)
 
 
+    def test_no_store_mode_reads_but_never_writes_the_cache(self) -> None:
+        with patch.object(main.settings, "user_daily_request_limit", 0):
+            self.store.set_history_mode(self.user.id, "none")
+            self.assertNotIn('"cache_hit": true', self.client.post("/chat/stream", json={"question": "Kdo byl Jan Hus?"}).text)
+            self.assertNotIn('"cache_hit": true', self.client.post("/chat/stream", json={"question": "Kdo byl Jan Hus?"}).text)
+            self.assertEqual(len(self.generated), 2)
+            # An answer someone else stored is still replayed.
+            self.store.set_history_mode(self.user.id, "server")
+            self.client.post("/chat/stream", json={"question": "Kdo byl Jan Hus?"})
+            self.store.set_history_mode(self.user.id, "none")
+            self.assertIn('"cache_hit": true', self.client.post("/chat/stream", json={"question": "Kdo byl Jan Hus?"}).text)
+
+
 if __name__ == "__main__":
     unittest.main()

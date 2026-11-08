@@ -260,6 +260,22 @@ class RegistrationModeRequest(BaseModel):
     mode: Literal["open", "approval", "closed"]
 
 
+class PrefsRequest(BaseModel):
+    """Only the fields sent are changed."""
+
+    history_mode: Literal["server", "browser", "none"] | None = None
+    author_name: str | None = Field(default=None, max_length=200)
+
+
+class HistoryEntryRequest(BaseModel):
+    entry: dict[str, Any]
+
+
+class HistoryImportRequest(BaseModel):
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    conversations: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class QueryTransformRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     wp_id: str | None = None
