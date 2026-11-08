@@ -8610,10 +8610,16 @@ function sanitizeHistorySettings(settings) {
   return sanitized;
 }
 
+// The requested id carries a host prefix ("LLM3.") the upstream server never
+// echoes back, so the same model would otherwise be listed twice.
+function sameModelId(requestedModel, upstreamModel) {
+  return Avatar.shortenModelName(requestedModel) === Avatar.shortenModelName(upstreamModel);
+}
+
 function formatModelUsageLabel(requestedModel, upstreamModel) {
   const requested = modelDisplayName(requestedModel);
   const upstream = modelDisplayName(upstreamModel);
-  if (requested && upstream && requested !== upstream) {
+  if (requested && upstream && requested !== upstream && !sameModelId(requestedModel, upstreamModel)) {
     return `${requested} · ${upstream}`;
   }
   return requested || upstream || "";
@@ -8623,7 +8629,7 @@ function formatModelUsageLabel(requestedModel, upstreamModel) {
 function rawModelUsageLabel(requestedModel, upstreamModel) {
   const requested = String(requestedModel || "").trim();
   const upstream = String(upstreamModel || "").trim();
-  if (requested && upstream && requested !== upstream) {
+  if (requested && upstream && requested !== upstream && !sameModelId(requested, upstream)) {
     return `${requested} · ${upstream}`;
   }
   return requested || upstream || "";
@@ -9959,6 +9965,15 @@ function renderStoredReasoning(reasoning) {
     </details>`;
 }
 
+// Older entries have no collection id but did record use_sources=false.
+function historyCollectionLabel(settings) {
+  const id = settings?.msearch_collection;
+  if (id) {
+    return collectionLabel(id);
+  }
+  return settings?.use_sources === false ? Avatar.NO_SOURCES_LABEL : null;
+}
+
 function renderHistorySettings(entry) {
   const modelId = entry.model_used || entry.settings?.model;
   // Local entries say createdAt, shared ones created_at; both mark when the
@@ -9977,7 +9992,7 @@ function renderHistorySettings(entry) {
       <div class="settings-grid">
         ${renderSetting("WP", wpLabelFromSettings(entry.settings))}
         ${renderSetting("Prompt", promptPresetLabelFromSettings(entry.settings))}
-        ${entry.settings?.use_sources === false ? renderSetting("Zdroje", Avatar.NO_SOURCES_LABEL) : ""}
+        ${renderSetting("Kolekce", historyCollectionLabel(entry.settings))}
         ${renderPromptNoteSetting(entry.settings)}
         ${renderPlaceholderSettings(entry.settings)}
         ${renderSetting("Poskytovatel", entry.settings?.llm_provider)}
