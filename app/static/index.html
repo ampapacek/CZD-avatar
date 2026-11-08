@@ -551,13 +551,14 @@
 
           <details class="help-details">
             <summary>Konverzace</summary>
-            <p>Konverzace slouží pro navazující otázky: avatar si pamatuje předchozí otázky a odpovědi a při každé další otázce znovu vyhledá podklady. Když se konverzace prodlouží, starší část se automaticky shrne, aby se vešla do context window. Osobní konverzace zůstávají v tomto prohlížeči.</p>
+            <p>Konverzace slouží pro navazující otázky: avatar si pamatuje předchozí otázky a odpovědi a při každé další otázce znovu vyhledá podklady. Když se konverzace prodlouží, starší část se automaticky shrne, aby se vešla do context window. Osobní konverzace se ukládají stejně jako historie (viz Historie a sdílení odpovědí).</p>
             <p>Tlačítko <code>Pokračovat v konverzaci</code> u hotové odpovědi nebo u položky v historii (i sdílené) založí z otázky a odpovědi novou konverzaci se stejným nastavením, takže na ni můžeš rovnou navázat.</p>
             <p>Na telefonu zůstává pole pro otázku dole na obrazovce, zatímco čteš konverzaci, a nastavení konverzace (štítky nad polem) se otevře zespodu přes celou šířku.</p>
           </details>
           <details class="help-details">
             <summary>Historie a sdílení odpovědí</summary>
-            <p>Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči. Tlačítko „Sdílet“ vedle kopírovacích tlačítek (u odpovědi i v historii) nabídne sdílení všem, kdy se položka objeví v záložce Sdílené, nebo jen odkazem, kdy ji otevře jen ten, komu odkaz pošleš. U sdílené položky ukáže odkaz a umožní sdílení změnit nebo zrušit; víc položek najednou sdílíš přes Hromadné akce. API klíče, lokální profily a historie zůstávají v prohlížeči, dokud je nesdílíš.</p>
+            <p>Historie ukládá odpovědi, zdroje a nastavení v tomto prohlížeči, nebo s uživatelským účtem u účtu na serveru. Tlačítko „Sdílet“ vedle kopírovacích tlačítek (u odpovědi i v historii) nabídne sdílení všem, kdy se položka objeví v záložce Sdílené, nebo jen odkazem, kdy ji otevře jen ten, komu odkaz pošleš. U sdílené položky ukáže odkaz a umožní sdílení změnit nebo zrušit; víc položek najednou sdílíš přes Hromadné akce. API klíče a lokální profily zůstávají v prohlížeči; historie je vidět jen tobě, dokud ji nesdílíš.</p>
+            <p>S uživatelským účtem vybereš v Historii pod <code>Úložiště</code>, kam se historie a konverzace ukládají: <code>Na serveru</code> (u účtu, vidíš ji na každém zařízení; výchozí, pokud v prohlížeči ještě žádnou historii nemáš), <code>Jen v tomto prohlížeči</code> (jako bez účtu) nebo <code>Neukládat</code> (vydrží jen do zavření nebo obnovení stránky a odpovědi se neukládají ani do sdílené cache). Přepnutím se nic nepřesune ani nesmaže, jen se mění, kam se ukládají nové položky a kterou historii vidíš. Kdo už historii v prohlížeči má, zůstává po přihlášení u ní, dokud sám nezvolí jinak: nad seznamem v Historii se nabídne <code>Ukládat na server</code> (historie z prohlížeče se nahraje na server) nebo <code>Nechat v prohlížeči</code>. Při ukládání na server nabídne Historie i Úložiště nahrát položky, které jsou jen v prohlížeči; přidají se k těm na serveru a kopie v prohlížeči zůstane. Jméno pro sdílení (<code>Sdílím jako</code>) se s účtem pamatuje u účtu; dokud ho nezměníš, je to část e-mailu před zavináčem. Co jsi sdílel(a) z prohlížeče před přihlášením, zůstává tvoje i z jiných zařízení. Historie na serveru má horní limit; když se naplní, nová položka se neuloží a nic starého se nesmaže.</p>
             <p>Na telefonu se seznam a detail střídají: klepnutím na položku otevřeš její detail a tlačítkem <code>← Zpět na seznam</code> se vrátíš. Filtry kromě hledání jsou schované pod tlačítkem <code>Filtry</code>, které ukazuje, kolik položek z celkového počtu filtr zobrazuje.</p>
           </details>
           <details class="help-details">
@@ -616,18 +617,19 @@
             <div data-account-help="user">
               <p>Přihlašuješ se e-mailem a heslem. Nový účet může před prvním přihlášením vyžadovat schválení administrátorem; zapomenuté heslo ti nastaví administrátor.</p>
               <p>Každý účet má denní limit dotazů, který se obnoví o půlnoci. Počítá se každá odpověď, otázka v konverzaci, <code>Pouze vyhledat zdroje</code> i úprava dotazu před vyhledáváním, a to i s vlastním API klíčem. Odpověď s úpravou dotazu tak spotřebuje dva dotazy. Odpověď z cache (mezipaměti) se nepočítá. Kolik dotazů dnes zbývá, vidíš výše pod e-mailem.</p>
-              <p>Tady také změníš heslo nebo se odhlásíš. Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu.</p>
+              <p>Tady také změníš heslo nebo se odhlásíš. Historie a konverzace se ukládají u účtu na serveru; v Historii pod <code>Úložiště</code> to můžeš změnit na „jen v tomto prohlížeči“ nebo „neukládat“. Lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu.</p>
             </div>
             <div data-account-help="admin" hidden>
               <p>Jako administrátor nemáš denní limit dotazů a nepotřebuješ sdílené admin heslo (to se po opakovaných chybných pokusech na 10 minut zablokuje, přihlášeného admina se to netýká).</p>
               <p>V části <code>Správa uživatelů</code> nastavuješ režim registrace (kdo se může zaregistrovat a zda nové účty schvaluješ) a spravuješ jednotlivé účty. V tabulce vidíš stav, admin oprávnění a počet dotazů dnes i celkem.</p>
-              <p>Heslo si změníš a odhlásíš se tady. Historie, lokální profily a API klíče zůstávají v tomto prohlížeči, ne u účtu. Správa uložených odpovědí je pod tlačítkem <code>Cache</code> vpravo nahoře.</p>
+              <p>Heslo si změníš a odhlásíš se tady. Historie se ukládá podle tvé volby pod <code>Úložiště</code> v Historii (výchozí je na serveru); lokální profily a API klíče zůstávají v tomto prohlížeči. Správa uložených odpovědí je pod tlačítkem <code>Cache</code> vpravo nahoře.</p>
             </div>
           </section>
 
           <section class="help-section account-summary">
             <p>Přihlášen(a) jako <strong id="accountEmail"></strong><span id="accountAdminBadge" class="account-badge" hidden>admin</span></p>
             <p id="accountQuota" class="field-note"></p>
+            <p class="field-note account-history-line">Historie se ukládá: <strong id="accountHistoryMode"></strong> <button id="accountHistoryModeButton" class="history-author-edit" type="button">Změnit</button></p>
             <div class="form-actions">
               <button id="logoutButton" class="secondary" type="button">Odhlásit se</button>
             </div>
@@ -1330,6 +1332,13 @@
           </div>
         </div>
         <div class="history-toolbar">
+        <div id="historyBrowserNotice" class="history-browser-notice" role="status" hidden>
+          <p id="historyBrowserNoticeText"></p>
+          <div class="history-browser-notice-actions">
+            <button id="historyBrowserNoticePrimary" type="button" class="primary"></button>
+            <button id="historyBrowserNoticeSecondary" type="button" class="secondary"></button>
+          </div>
+        </div>
         <div id="historyFilters" class="history-filters">
           <select id="historyFilterWp" aria-label="Oblast"></select>
           <input id="historyFilterText" type="search" placeholder="Hledat v otázce, odpovědi, poznámce…" aria-label="Hledat v historii" />
@@ -1365,7 +1374,7 @@
       <div class="storage-shell">
         <div class="history-dialog-header">
           <div>
-            <h2>Úložiště prohlížeče</h2>
+            <h2 id="storageTitle">Úložiště prohlížeče</h2>
             <p id="storageSummary"></p>
           </div>
           <div class="history-dialog-actions">
@@ -1378,6 +1387,22 @@
           </div>
         </div>
         <div class="storage-body">
+          <section id="historyModeSection" class="history-mode-section" hidden>
+            <h3>Kam ukládat historii</h3>
+            <p class="storage-hint">Přepnutím nic nepřesuneš ani nesmažeš: volba určuje, kam se ukládají nové dotazy a konverzace a kterou historii vidíš.</p>
+            <div id="historyModeOptions" class="history-mode-options" role="radiogroup" aria-label="Kam ukládat historii">
+              <label class="history-mode-option"><input type="radio" name="historyMode" value="server" /><span><strong>Na serveru</strong><span data-mode-note="server"></span></span></label>
+              <label class="history-mode-option"><input type="radio" name="historyMode" value="browser" /><span><strong>Jen v tomto prohlížeči</strong><span data-mode-note="browser"></span></span></label>
+              <label class="history-mode-option"><input type="radio" name="historyMode" value="none" /><span><strong>Neukládat</strong><span data-mode-note="none"></span></span></label>
+            </div>
+            <p id="historyModeStatus" class="status" role="status" aria-live="polite"></p>
+            <p id="serverHistoryUsage" class="storage-hint"></p>
+            <div id="historyImportBox" class="storage-action" hidden>
+              <div class="storage-action-text"><strong>Historie v tomto prohlížeči</strong><span id="historyImportText"></span></div>
+              <button id="historyImportButton" type="button" class="secondary">Nahrát historii z prohlížeče na server</button>
+            </div>
+          </section>
+          <div id="storageBrowserSection" class="storage-browser-section">
           <div class="storage-meter" aria-hidden="true"><div id="storageMeterFill" class="storage-meter-fill"></div></div>
           <div id="storagePendingWarning" class="conversation-storage-status" role="alert" hidden>
             <span>Poslední změna se do úložiště nevešla a zatím není uložena. Po uvolnění místa se uloží sama. Do té doby ji drží jen tato stránka, proto ji můžete exportovat.</span>
@@ -1418,6 +1443,7 @@
           <div class="storage-manual-footer">
             <span id="storageManualCount"></span>
             <button id="storageManualDelete" class="secondary danger-lite" type="button" disabled>Smazat vybrané</button>
+          </div>
           </div>
         </div>
       </div>

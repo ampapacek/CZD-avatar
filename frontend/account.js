@@ -96,3 +96,8 @@ export function formatAccountDate(iso) {
     minute: "2-digit",
   });
 }
+
+// The sharing name before the user sets one: the part of the email before the @.
+export function defaultAuthorName(email) {
+  return String(email || "").split("@")[0].trim();
+}

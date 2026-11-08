@@ -238,6 +238,15 @@ const storageActions = document.querySelector("#storageActions");
 const storageManualList = document.querySelector("#storageManualList");
 const storageManualCount = document.querySelector("#storageManualCount");
 const storageManualDelete = document.querySelector("#storageManualDelete");
+const storageTitle = document.querySelector("#storageTitle");
+const storageBrowserSection = document.querySelector("#storageBrowserSection");
+const historyModeSection = document.querySelector("#historyModeSection");
+const historyModeOptions = document.querySelector("#historyModeOptions");
+const historyModeStatus = document.querySelector("#historyModeStatus");
+const serverHistoryUsage = document.querySelector("#serverHistoryUsage");
+const historyImportBox = document.querySelector("#historyImportBox");
+const historyImportText = document.querySelector("#historyImportText");
+const historyImportButton = document.querySelector("#historyImportButton");
 const newConversationButton = document.querySelector("#newConversationButton");
 const conversationSettingsPopover = document.querySelector("#conversationSettingsPopover");
 const conversationSettingsToggle = document.querySelector("#conversationSettingsToggle");
@@ -308,6 +317,12 @@ const nativeFetch = window.fetch.bind(window);
 // What /settings says about user accounts and the logged-in user; see the
 // "User accounts" section near the end.
 let currentAccount = { enabled: false };
+// Where history and conversations live: "browser" (localStorage, as without
+// accounts), "server" (the account's rows) or "none" (this page only). Until
+// /settings tells which, it is "pending" and entries wait in memory.
+let historyMode = "pending";
+let pageHistory = new Avatar.PageHistoryStore();
+let serverHistoryUsageData = null;
 
 function newAnalyticsId() {
   return globalThis.crypto?.randomUUID?.()
@@ -1166,6 +1181,7 @@ async function loadSettings() {
   logLlmModelRefresh("page-load", settings);
   appSettings = settings;
   applyAccount(settings.account);
+  const historyReady = activateHistoryMode(accountHistoryMode(settings.account), { initial: true });
   localPlaceholderDefs = loadLocalPlaceholderDefs();
   llmSettingsState = loadLlmSettings();
   const providers = getLlmProviders(settings);
@@ -1204,6 +1220,12 @@ async function loadSettings() {
   updateThresholdLabels();
   updateRescoreThresholdNote();
   applyTheme(localStorage.getItem("theme") || "light");
+  await historyReady;
+  renderAccountHistoryMode();
+  // A name typed in this browser before accounts becomes the account's name.
+  if (historyModeChoiceAvailable() && !currentAccount.user.author_name && getLocalAuthorName()) {
+    saveAccountAuthorName(getLocalAuthorName());
+  }
   // A `?shared=<id>` link may already have the dialog open on the Shared tab.
   if (activeHistoryTab === "mine") {
     renderHistory();
@@ -5645,6 +5667,11 @@ function compactStoredConversation(entry) {
 }
 
 function saveEntryListSafely(key, entries, compactEntry, label) {
+  if (!usesBrowserHistory()) {
+    // The server copy is written in the background; a refused save is reported then.
+    storageSaveSucceeded.set(key, true);
+    return pageHistory.save(historyKindForKey(key), entries, compactEntry);
+  }
   const result = Avatar.saveJsonEntryList(localStorage, key, entries, compactEntry);
   if (result.saved) {
     storageSaveSucceeded.set(key, true);
@@ -5725,6 +5752,20 @@ function storageUsageText(measured) {
 }
 
 function refreshStoragePressure({ autoOpen = false } = {}) {
+  if (!usesBrowserHistory()) {
+    // The browser budget does not apply to history on the server or in the page.
+    if (storagePressureNotice) {
+      storagePressureNotice.hidden = true;
+    }
+    if (historyStorageButton) {
+      historyStorageButton.textContent = "Úložiště";
+      historyStorageButton.title = "Kam se ukládá historie a konverzace";
+    }
+    if (storageDialog.open) {
+      renderStorageDialog();
+    }
+    return;
+  }
   const measured = measureStorage();
   const pending = storagePendingSaves.size > 0;
   if (storagePressureNotice) {
@@ -5735,6 +5776,7 @@ function refreshStoragePressure({ autoOpen = false } = {}) {
   }
   if (historyStorageButton) {
     historyStorageButton.textContent = `Úložiště ${Math.round((measured.used / Avatar.STORAGE_BUDGET_BYTES) * 100)} %`;
+    historyStorageButton.title = "Kolik místa v prohlížeči zabírá historie a konverzace, a jak ho uvolnit";
   }
   if (measured.pressure === "ok" && !pending) {
     storageAutoOpened = false;
@@ -5771,7 +5813,19 @@ function storagePlan(action, param) {
   return { key, before, next, label, freed: Avatar.bytesFreed(before, next), removed: before.length - next.length };
 }
 
-function renderStorageDialog(measured = measureStorage()) {
+function renderStorageDialog(measured = null) {
+  renderHistoryModeSection();
+  const browser = usesBrowserHistory();
+  if (storageBrowserSection) {
+    storageBrowserSection.hidden = !browser;
+  }
+  if (!browser) {
+    storageSummary.textContent = historyMode === "none"
+      ? "Historie se neukládá: vydrží jen do zavření nebo obnovení stránky."
+      : "Historie a konverzace se ukládají u tvého účtu na serveru.";
+    return;
+  }
+  measured ??= measureStorage();
   const { historyStats: h, conversationStats: c } = measured;
   const fraction = Math.min(1, measured.used / Avatar.STORAGE_BUDGET_BYTES);
   storageSummary.textContent = `Využito ${storageUsageText(measured)}. Odhad: prohlížeč dává stránce zhruba 5 MiB.`;
@@ -5945,6 +5999,373 @@ function openStorageDialog() {
     storageDialog.showModal();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Where history is kept. Without accounts it is always the browser. With an
+// account the user picks server (default), browser or none; switching never
+// moves or deletes anything, it only changes where new entries go and which
+// list is shown. See docs/accounts.md#history.
+// ---------------------------------------------------------------------------
+
+function usesBrowserHistory() {
+  return historyMode === "browser";
+}
+
+function historyKindForKey(key) {
+  return key === HISTORY_STORAGE_KEY ? "history" : "conversation";
+}
+
+function historyModeChoiceAvailable() {
+  return Boolean(currentAccount.enabled && currentAccount.user);
+}
+
+// The mode to use for this page. Until the user chooses, a browser that already
+// holds history keeps showing it, and the notice above "Moje historie" offers
+// the server; a browser with nothing in it starts on the server.
+function accountHistoryMode(account = currentAccount) {
+  if (!account?.enabled || !account.user) {
+    return "browser";
+  }
+  const holds = Avatar.browserHoldsHistory(
+    readBrowserEntries(HISTORY_STORAGE_KEY),
+    readBrowserEntries(CONVERSATION_STORAGE_KEY),
+  );
+  return Avatar.defaultHistoryMode(account.user.history_mode, holds);
+}
+
+let historyPageHiding = false;
+
+async function historyRequest(method, url, body) {
+  const response = await fetch(url, {
+    method,
+    // While the tab closes, only a keepalive request still goes out (small ones only).
+    keepalive: historyPageHiding,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === 401) {
+    goToLogin();
+  }
+  const data = response.status === 204 ? {} : await safeJson(response);
+  if (!response.ok) {
+    const error = requestError(data.detail, "Historii na serveru se nepodařilo uložit.");
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function reportServerHistoryError(error, { kind, deleted }) {
+  const message = error.status === 413
+    ? error.message
+    : `${deleted ? "Smazání" : "Uložení"} historie na serveru se nepovedlo: ${error.message}`;
+  console.warn(`[rag-avatar] Server history ${deleted ? "delete" : "save"} failed`, error);
+  setHistoryModeStatus(message, "error");
+  if (kind === "conversation") {
+    conversationStorageFailure = message;
+    refreshConversationStorageStatus();
+  } else if (statusEl) {
+    statusEl.hidden = false;
+    statusEl.className = "status error";
+    statusEl.textContent = message;
+  }
+}
+
+function newServerHistoryStore() {
+  return new Avatar.PageHistoryStore({
+    request: historyRequest,
+    onError: reportServerHistoryError,
+    onSaved: ({ kind }) => {
+      if (kind === "conversation") {
+        clearStorageSaveFailure(CONVERSATION_STORAGE_KEY);
+      }
+    },
+    onUsage: (usage) => {
+      serverHistoryUsageData = usage;
+      if (storageDialog.open) {
+        renderHistoryModeSection();
+      }
+    },
+  });
+}
+
+// `initial`: the first switch from "pending" once /settings is known. Entries
+// made before that (rare: only while the page was still loading) are kept.
+async function activateHistoryMode(mode, { initial = false } = {}) {
+  const earlier = pageHistory;
+  historyMode = mode;
+  serverHistoryUsageData = null;
+  if (mode === "server") {
+    pageHistory = newServerHistoryStore();
+    if (initial) {
+      pageHistory.items = { history: [...earlier.items.history], conversation: [...earlier.items.conversation] };
+    }
+    try {
+      await pageHistory.load();
+    } catch (error) {
+      reportServerHistoryError(
+        { status: error.status, message: `načtení se nepovedlo (${error.message})` },
+        { kind: "history", deleted: false },
+      );
+    }
+  } else if (mode === "none") {
+    pageHistory = initial ? earlier : new Avatar.PageHistoryStore();
+  } else {
+    pageHistory = new Avatar.PageHistoryStore();
+    if (initial) {
+      for (const key of [HISTORY_STORAGE_KEY, CONVERSATION_STORAGE_KEY]) {
+        const made = earlier.get(historyKindForKey(key));
+        if (made.length) {
+          const kept = Avatar.entriesMissingOnServer(readBrowserEntries(key), made);
+          const compact = key === HISTORY_STORAGE_KEY ? compactStoredHistoryEntry : compactStoredConversation;
+          saveEntryListSafely(key, [...made, ...kept], compact, "history entries");
+        }
+      }
+    }
+  }
+  refreshStoragePressure();
+}
+
+function setHistoryModeStatus(message, variant = "") {
+  if (historyModeStatus) {
+    setAccountStatus(historyModeStatus, message, variant);
+  }
+}
+
+function renderAccountHistoryMode() {
+  const line = document.querySelector("#accountHistoryMode");
+  if (line) {
+    line.textContent = Avatar.HISTORY_MODE_SHORT[historyMode] || Avatar.HISTORY_MODE_SHORT[accountHistoryMode()];
+  }
+}
+
+// Browser entries the server copy lacks, for the "Nahrát" button.
+function browserEntriesMissingOnServer() {
+  return {
+    history: Avatar.entriesMissingOnServer(readBrowserEntries(HISTORY_STORAGE_KEY), pageHistory.get("history")),
+    conversations: Avatar.entriesMissingOnServer(
+      readBrowserEntries(CONVERSATION_STORAGE_KEY),
+      pageHistory.get("conversation"),
+    ),
+  };
+}
+
+function renderHistoryModeSection() {
+  const available = historyModeChoiceAvailable();
+  if (storageTitle) {
+    storageTitle.textContent = available ? "Úložiště historie" : "Úložiště prohlížeče";
+  }
+  if (!historyModeSection) {
+    return;
+  }
+  historyModeSection.hidden = !available;
+  if (!available) {
+    return;
+  }
+  for (const input of historyModeOptions.querySelectorAll("input[name=historyMode]")) {
+    input.checked = input.value === historyMode;
+  }
+  for (const note of historyModeOptions.querySelectorAll("[data-mode-note]")) {
+    note.textContent = Avatar.HISTORY_MODE_NOTES[note.dataset.modeNote] || "";
+  }
+  serverHistoryUsage.hidden = historyMode !== "server";
+  serverHistoryUsage.textContent = Avatar.historyUsageText(serverHistoryUsageData);
+  const missing = historyMode === "server" && pageHistory.loaded ? browserEntriesMissingOnServer() : null;
+  if (missing) {
+    missing.conversations = Avatar.conversationsWithMessages(missing.conversations);
+  }
+  const count = missing ? missing.history.length + missing.conversations.length : 0;
+  historyImportBox.hidden = count === 0;
+  historyImportText.textContent = count
+    ? `Dotazů: ${missing.history.length}, konverzací: ${missing.conversations.length}, které na serveru nejsou. Nahrají se k historii na serveru a kopie v prohlížeči zůstane.`
+    : "";
+}
+
+function historyBusy() {
+  return Boolean(activeQueryController || activeConversationController);
+}
+
+// Saves the user's choice and shows the chosen store. `importBrowser` first
+// copies this browser's history to the server (the notice's "Ukládat na server").
+// Returns the status message, or throws.
+async function saveHistoryModeChoice(mode, { importBrowser = false } = {}) {
+  if (historyBusy() && mode !== historyMode) {
+    throw new Error("Počkej, až se dokončí rozpracovaná odpověď, a pak volbu změň.");
+  }
+  await accountRequest("me/prefs", { method: "PUT", body: { history_mode: mode } });
+  currentAccount.user.history_mode = mode;
+  let imported = null;
+  if (importBrowser) {
+    imported = await accountRequest("me/history/import", {
+      method: "POST",
+      body: {
+        history: readBrowserEntries(HISTORY_STORAGE_KEY),
+        conversations: Avatar.conversationsWithMessages(readBrowserEntries(CONVERSATION_STORAGE_KEY)),
+      },
+    });
+  }
+  if (mode !== historyMode) {
+    // Changes still on their way to the server go out before the switch.
+    await pageHistory.flush();
+    await activateHistoryMode(mode);
+    selectedHistoryId = null;
+    selectedShareIds.clear();
+    selectedConversationId = null;
+    conversationSourcesView = null;
+    conversationSelectedAssistantIndex = null;
+    renderConversationWorkspace();
+    if (conversationSettingsActive) {
+      applyConversationSettings(ensureSelectedConversation());
+    }
+  }
+  renderHistory();
+  renderAccountHistoryMode();
+  renderHistoryBrowserNotice();
+  const message = `Historie se teď ukládá ${Avatar.HISTORY_MODE_SHORT[mode]}.`;
+  return imported ? `${message} ${Avatar.historyImportText(imported)}` : message;
+}
+
+async function changeHistoryMode(mode) {
+  if (mode === historyMode) {
+    return;
+  }
+  historyModeOptions.querySelectorAll("input").forEach((input) => {
+    input.disabled = true;
+  });
+  try {
+    setHistoryModeStatus(await saveHistoryModeChoice(mode), "success");
+  } catch (error) {
+    setHistoryModeStatus(error.message, "error");
+  } finally {
+    historyModeOptions.querySelectorAll("input").forEach((input) => {
+      input.disabled = false;
+    });
+    renderStorageDialog();
+  }
+}
+
+// --- The notice above "Moje historie" about history in this browser -------
+
+const HISTORY_UPLOAD_DISMISSED_KEY = "czdemos4ai-history-upload-dismissed";
+const historyBrowserNotice = document.querySelector("#historyBrowserNotice");
+const historyBrowserNoticeText = document.querySelector("#historyBrowserNoticeText");
+const historyBrowserNoticePrimary = document.querySelector("#historyBrowserNoticePrimary");
+const historyBrowserNoticeSecondary = document.querySelector("#historyBrowserNoticeSecondary");
+let historyBrowserNoticeKind = null;
+
+function historyUploadDismissed() {
+  try {
+    return localStorage.getItem(HISTORY_UPLOAD_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Reads the browser lists, so it runs when the dialog opens or the mode changes,
+// not on every render of the list.
+function renderHistoryBrowserNotice() {
+  if (!historyBrowserNotice) {
+    return;
+  }
+  let notice = null;
+  if (historyModeChoiceAvailable() && activeHistoryTab === "mine") {
+    notice = Avatar.browserHistoryNotice({
+      chosenMode: currentAccount.user.history_mode,
+      mode: historyMode,
+      browser: historyMode === "browser"
+        ? { history: readBrowserEntries(HISTORY_STORAGE_KEY), conversations: readBrowserEntries(CONVERSATION_STORAGE_KEY) }
+        : null,
+      missing: historyMode === "server" && pageHistory.loaded ? browserEntriesMissingOnServer() : null,
+      uploadDismissed: historyUploadDismissed(),
+    });
+  }
+  historyBrowserNoticeKind = notice?.kind || null;
+  historyBrowserNotice.hidden = !notice;
+  if (notice) {
+    historyBrowserNoticeText.textContent = notice.text;
+    historyBrowserNoticePrimary.textContent = notice.primary;
+    historyBrowserNoticeSecondary.textContent = notice.secondary;
+  }
+}
+
+async function runHistoryBrowserNoticeAction(primary) {
+  const kind = historyBrowserNoticeKind;
+  if (kind === "upload" && !primary) {
+    try {
+      localStorage.setItem(HISTORY_UPLOAD_DISMISSED_KEY, "1");
+    } catch {
+      // Not remembered; the notice comes back next time.
+    }
+    historyBrowserNotice.hidden = true;
+    return;
+  }
+  historyBrowserNoticePrimary.disabled = true;
+  historyBrowserNoticeSecondary.disabled = true;
+  try {
+    let message;
+    if (kind === "choose") {
+      message = await saveHistoryModeChoice(primary ? "server" : "browser", { importBrowser: primary });
+    } else {
+      message = await importBrowserHistory();
+    }
+    setHistoryShareStatus(message, "success");
+  } catch (error) {
+    setHistoryShareStatus(error.message, "error");
+  } finally {
+    historyBrowserNoticePrimary.disabled = false;
+    historyBrowserNoticeSecondary.disabled = false;
+    renderHistoryBrowserNotice();
+  }
+}
+
+historyBrowserNoticePrimary?.addEventListener("click", () => runHistoryBrowserNoticeAction(true));
+historyBrowserNoticeSecondary?.addEventListener("click", () => runHistoryBrowserNoticeAction(false));
+
+// Copies browser entries the server lacks; returns the status message.
+async function importBrowserHistory() {
+  const missing = browserEntriesMissingOnServer();
+  missing.conversations = Avatar.conversationsWithMessages(missing.conversations);
+  await pageHistory.flush();
+  const result = await accountRequest("me/history/import", { method: "POST", body: missing });
+  await pageHistory.load();
+  serverHistoryUsageData = result.usage || serverHistoryUsageData;
+  renderHistory();
+  renderConversationWorkspace();
+  renderHistoryBrowserNotice();
+  return Avatar.historyImportText(result);
+}
+
+async function importBrowserHistoryFromDialog() {
+  historyImportButton.disabled = true;
+  try {
+    setHistoryModeStatus(await importBrowserHistory(), "success");
+  } catch (error) {
+    setHistoryModeStatus(error.message, "error");
+  } finally {
+    historyImportButton.disabled = false;
+    renderStorageDialog();
+  }
+}
+
+historyModeOptions?.addEventListener("change", (event) => {
+  const input = event.target.closest("input[name=historyMode]");
+  if (input?.checked) {
+    changeHistoryMode(input.value);
+  }
+});
+historyImportButton?.addEventListener("click", () => importBrowserHistoryFromDialog());
+document.querySelector("#accountHistoryModeButton")?.addEventListener("click", () => {
+  accountDialog.close();
+  setHistoryModeStatus("");
+  openStorageDialog();
+});
+window.addEventListener("pagehide", () => {
+  historyPageHiding = true;
+  pageHistory.flush();
+});
+window.addEventListener("pageshow", () => {
+  historyPageHiding = false;
+});
 
 storagePressureOpen?.addEventListener("click", openStorageDialog);
 historyStorageButton?.addEventListener("click", openStorageDialog);
@@ -6917,8 +7338,15 @@ function autoGrowTextarea(textarea, maxHeight = 220) {
 }
 
 function getConversationEntries() {
+  if (!usesBrowserHistory()) {
+    return pageHistory.get("conversation");
+  }
+  return readBrowserEntries(CONVERSATION_STORAGE_KEY);
+}
+
+function readBrowserEntries(key) {
   try {
-    return JSON.parse(localStorage.getItem(CONVERSATION_STORAGE_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(key) || "[]");
   } catch {
     return [];
   }
@@ -8558,11 +8986,10 @@ function shortenText(text, limit = 80) {
 }
 
 function getHistoryEntries() {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
-  } catch {
-    return [];
+  if (!usesBrowserHistory()) {
+    return pageHistory.get("history");
   }
+  return readBrowserEntries(HISTORY_STORAGE_KEY);
 }
 
 function saveHistoryEntry(entry) {
@@ -8936,7 +9363,7 @@ function updateHistoryBatchBar(filtered = null) {
 
 // --- Feature 3: shared history -------------------------------------------------
 
-function getAuthorName() {
+function getLocalAuthorName() {
   try {
     return (localStorage.getItem(AUTHOR_NAME_STORAGE_KEY) || "").trim();
   } catch {
@@ -8944,8 +9371,27 @@ function getAuthorName() {
   }
 }
 
+// With an account the name is kept with the account; until it is set, the
+// name typed in this browser before, or the part of the email before the @.
+function getAuthorName() {
+  if (historyModeChoiceAvailable()) {
+    return currentAccount.user.author_name || getLocalAuthorName() || Avatar.defaultAuthorName(currentAccount.user.email);
+  }
+  return getLocalAuthorName();
+}
+
+function saveAccountAuthorName(name) {
+  currentAccount.user.author_name = name || null;
+  accountRequest("me/prefs", { method: "PUT", body: { author_name: name } }).catch((error) => {
+    setHistoryShareStatus(`Jméno pro sdílení se nepodařilo uložit k účtu: ${error.message}`, "error");
+  });
+}
+
 function setAuthorName(name) {
   const clean = String(name || "").trim();
+  if (historyModeChoiceAvailable()) {
+    saveAccountAuthorName(clean);
+  }
   try {
     if (clean) {
       localStorage.setItem(AUTHOR_NAME_STORAGE_KEY, clean);
@@ -9078,6 +9524,7 @@ function setHistoryTab(tab, { loadShared = true } = {}) {
   }
   updateHistoryBatchBar();
   setHistoryShareStatus("");
+  renderHistoryBrowserNotice();
   if (mine) {
     renderHistory();
   } else if (loadShared) {
@@ -10400,6 +10847,7 @@ function applyAccount(account) {
   }
   renderCacheButton();
   renderAccountQuota();
+  renderAccountHistoryMode();
 }
 
 function renderAccountQuota() {

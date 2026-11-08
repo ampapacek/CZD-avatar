@@ -18,3 +18,4 @@ export * from "./citation-return.js";
 export * from "./account.js";
 export * from "./source-mode.js";
 export * from "./answer-cache.js";
+export * from "./history-store.js";

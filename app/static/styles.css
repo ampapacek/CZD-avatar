@@ -5080,3 +5080,93 @@ body[data-theme="dark"] .source-highlight {
   overflow-y: auto;
   font-size: 0.85rem;
 }
+
+/* Where history is kept (accounts on): the choice at the top of the Úložiště dialog. */
+.history-mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-mode-options {
+  display: grid;
+  gap: 6px;
+}
+
+.history-mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.history-mode-option:has(input:checked) {
+  border-color: var(--accent);
+}
+
+.history-mode-option input {
+  width: auto;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.history-mode-option > span {
+  display: grid;
+  gap: 2px;
+}
+
+.history-mode-option small,
+.history-mode-option [data-mode-note] {
+  color: var(--muted);
+}
+
+.history-mode-section .status:empty {
+  display: none;
+}
+
+.storage-browser-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.storage-browser-section > * {
+  flex: none;
+}
+
+.account-history-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* History that is only in this browser (accounts on): above "Moje historie". */
+.history-browser-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.history-browser-notice p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+
+.history-browser-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

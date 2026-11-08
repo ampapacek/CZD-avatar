@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accountWithRemaining,
+  defaultAuthorName,
   formatAccountDate,
   isValidEmail,
   passwordProblem,
@@ -76,5 +77,12 @@ describe("formatAccountDate", () => {
     expect(formatAccountDate("2026-11-11T23:30:00+00:00")).toMatch(/12\. ?11\. ?2026/);
     expect(formatAccountDate(null)).toBe("–");
     expect(formatAccountDate("nonsense")).toBe("–");
+  });
+});
+
+describe("defaultAuthorName", () => {
+  it("takes the part before the @", () => {
+    expect(defaultAuthorName("ales.papacek@seznam.cz")).toBe("ales.papacek");
+    expect(defaultAuthorName("")).toBe("");
   });
 });
