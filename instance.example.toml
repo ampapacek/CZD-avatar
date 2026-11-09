@@ -30,7 +30,7 @@ collection_prefix = "wp1"
 default_prompt = "wp1-vychozi"
 default_collection = "wp1-dokumenty"
 # Optional: only these LLM provider ids (from LLM_PROVIDERS) may receive this
-# WP's collection content; other providers can still answer without sources.
+# WP's collection content; the UI offers only these providers in this WP.
 # Omit for any provider.
 # allowed_providers = ["provider_id"]
 # Optional: allow the local Qdrant backend for this WP. Default: false.

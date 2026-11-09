@@ -1143,6 +1143,7 @@ function selectWp(wpId, { promptId, collectionId } = {}) {
   }
   activeWpId = resolveWpId(wpId);
   wpSelect.value = activeWpId;
+  syncProviderOptionsToWp();
   const wp = getWpConfig(activeWpId);
   // Switching WP keeps "Bez zdrojů" on; otherwise the WP's default collection.
   const keepNoSources = !collectionId && !currentUsesSources();
@@ -1187,6 +1188,8 @@ async function loadSettings() {
   const providers = getLlmProviders(settings);
   const selectedProvider =
     normalizeProviderId(llmSettingsState.selected_provider || settings.llm_provider || providers[0]?.id || "");
+  // Remember the starting choice so leaving a provider-restricted WP restores it.
+  llmSettingsState.selected_provider = selectedProvider;
   populateProviderOptions(providers, selectedProvider);
   populateCustomProviderFields();
   renderProviderApiKeyFields();
@@ -1198,6 +1201,7 @@ async function loadSettings() {
   }
   refreshModelOptions(settings);
   activeWpId = resolveWpId(settings.default_wp);
+  syncProviderOptionsToWp(selectedProvider);
   populateWpSelect();
   populateMsearchCollections(wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   // Start the active WP's prepared-question request as soon as the WP is known.
@@ -2182,6 +2186,7 @@ themeToggle.addEventListener("click", () => {
 });
 llmProvider.addEventListener("change", () => {
   const providerId = normalizeProviderId(llmProvider.value);
+  llmSettingsState.selected_provider = providerId;
   loadProviderValues(providerId, { preferStored: true });
   refreshModelOptions(appSettings);
   updateContextWindowForSelectedModel();
@@ -2516,7 +2521,9 @@ function persistLlmSettings() {
     };
   }
   llmSettingsState = {
-    selected_provider: providerId,
+    // On a provider-restricted WP the select may hold an auto-picked provider;
+    // keep the user's saved choice (an explicit change updates it first).
+    selected_provider: activeWpAllowedProviders() ? llmSettingsState.selected_provider || providerId : providerId,
     provider_settings: providerSettings,
     admin_password: llmUnlockPassword.value,
   };
@@ -2853,7 +2860,8 @@ function applyLlmSettingsUpdate(data, preferredProvider = llmProvider.value) {
     ? normalizeProviderId(preferredProvider)
     : normalizeProviderId(appSettings.llm_provider || providers[0]?.id || "");
   populateProviderOptions(providers, selectedProvider);
-  loadProviderValues(selectedProvider, { preferStored: true });
+  // The active WP may hide the preferred provider; load what the select shows.
+  loadProviderValues(llmProvider.value, { preferStored: true });
 }
 
 async function streamChat(payload) {
@@ -3306,9 +3314,20 @@ async function safeJson(response) {
   }
 }
 
+// The active WP's provider restriction (allowed_providers) hides every other
+// provider, including the custom one, from the select.
+function activeWpAllowedProviders() {
+  const allowed = getWpConfig(activeWpId)?.allowed_providers;
+  return Array.isArray(allowed) ? allowed : null;
+}
+
 function populateProviderOptions(providers, currentProvider) {
+  const allowed = activeWpAllowedProviders();
   const uniqueProviders = Array.isArray(providers)
-    ? providers.filter(Boolean).filter((provider, index, items) => items.findIndex((item) => item.id === provider.id) === index)
+    ? providers
+      .filter(Boolean)
+      .filter((provider, index, items) => items.findIndex((item) => item.id === provider.id) === index)
+      .filter((provider) => !allowed || allowed.includes(provider.id))
     : [];
   llmProvider.innerHTML = uniqueProviders
     .map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label || provider.id)}</option>`)
@@ -3317,6 +3336,19 @@ function populateProviderOptions(providers, currentProvider) {
   llmProvider.value = uniqueProviders.some((provider) => provider.id === resolvedCurrentProvider)
     ? resolvedCurrentProvider
     : uniqueProviders[0]?.id || "";
+}
+
+// Rebuild the provider options after a WP change. The preferred provider (by
+// default the user's saved choice) comes back when it is allowed again;
+// otherwise the first allowed provider is used.
+function syncProviderOptionsToWp(preferredProvider = llmSettingsState.selected_provider || llmProvider.value) {
+  const before = llmProvider.value;
+  populateProviderOptions(getLlmProviders(appSettings), preferredProvider);
+  if (llmProvider.value !== before) {
+    loadProviderValues(llmProvider.value, { preferStored: true });
+    refreshModelOptions(appSettings);
+    updateContextWindowForSelectedModel();
+  }
 }
 
 function selectedProviderConfig(settings = appSettings) {
@@ -7656,6 +7688,7 @@ function applySettingsToGlobals(settings) {
   }
   activeWpId = resolveWpId(s.wp_id);
   wpSelect.value = activeWpId;
+  syncProviderOptionsToWp(providerValue || undefined);
   loadPredefinedQuestions(activeWpId);
   populateMsearchCollections(s.msearch_collection || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   const savedPromptId = promptPresetIdFromSettings(s);
@@ -7708,6 +7741,7 @@ function applyConvWp(wpId) {
   const keepNoSources = !currentUsesSources();
   activeWpId = resolveWpId(wpId);
   wpSelect.value = activeWpId;
+  syncProviderOptionsToWp();
   loadPredefinedQuestions(activeWpId);
   populateMsearchCollections(
     keepNoSources ? Avatar.NO_SOURCES_COLLECTION : wpDefaultCollectionMsearchId(getWpConfig(activeWpId)),
@@ -7824,7 +7858,7 @@ function handleConversationControlEvent(event) {
   const optionKeys = [];
   if (binding.key === "wp") {
     applyConvWp(event.target.value);
-    optionKeys.push("prompt", "collection");
+    optionKeys.push("prompt", "collection", "provider", "model", "reasoning");
   } else if (binding.key === "prompt") {
     applyPromptPresetById(event.target.value);
   } else if (binding.key === "collection") {
@@ -10649,6 +10683,7 @@ function applyHistoryEntryToForm(entry) {
   }
   activeWpId = resolveWpId(entry.settings?.wp_id);
   wpSelect.value = activeWpId;
+  syncProviderOptionsToWp(providerValue || undefined);
   populateMsearchCollections(entry.settings?.msearch_collection || wpDefaultCollectionMsearchId(getWpConfig(activeWpId)));
   const savedPromptId = promptPresetIdFromSettings(entry.settings || {});
   if (promptPresetExists(savedPromptId)) {
