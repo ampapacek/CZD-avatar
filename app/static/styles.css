@@ -2954,9 +2954,10 @@ button:hover {
   overflow-x: auto;
 }
 
+/* Cells wrap to fit the width; the wrapper scrolls only when there are more
+   columns than fit at their minimum width. */
 .markdown-content table {
   width: 100%;
-  min-width: max-content;
   border-collapse: collapse;
   border: 1px solid var(--line);
   background: var(--surface-3);
@@ -2964,6 +2965,8 @@ button:hover {
 
 .markdown-content th,
 .markdown-content td {
+  min-width: 7rem;
+  overflow-wrap: break-word;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--line);
   text-align: left;
