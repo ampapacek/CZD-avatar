@@ -2,7 +2,7 @@
   "_comment": [
     "One entry per model: context window, reasoning, and whatever else we learn",
     "later. 'provider_defaults' applies to every model of a provider that has no",
-    "entry of its own; the provider key must match the label shown in the UI.",
+    "entry of its own; the provider key is the provider id from LLM_PROVIDERS.",
     "",
     "context_window — usable input+output tokens. Omitted means fall back to the",
     "provider default, then to CONTEXT_WINDOW_TOKENS.",
@@ -184,14 +184,14 @@
     }
   },
   "provider_defaults": {
-    "AI Ufal": {
+    "aiufal": {
       "context_window": 16000
     },
-    "e-infra": {
+    "einfra": {
       "context_window": 60000,
       "max_context_window": 262144
     },
-    "OpenRouter": {
+    "openrouter": {
       "context_window": 60000
     }
   }
