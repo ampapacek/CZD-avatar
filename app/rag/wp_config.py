@@ -83,16 +83,30 @@ class WPConfig:
 
 
 @dataclass(frozen=True)
+class LinkRewrite:
+    """Point source links that start with ``from_prefix`` at ``to_prefix``.
+
+    Used when the stored document URLs need a login and a public (read-only)
+    link to the same files exists. See ``app.rag.links``.
+    """
+
+    from_prefix: str
+    to_prefix: str
+
+
+@dataclass(frozen=True)
 class InstanceConfig:
     wps: list[WPConfig]
     # Whether the shared presets from PROMPT_PRESETS_PATH are offered.
     shared_presets: bool = True
+    link_rewrites: list[LinkRewrite] = field(default_factory=list)
     source: str = ""
 
 
 # --- loading and validation -------------------------------------------------
 
-_TOP_KEYS = {"shared_presets", "wps"}
+_TOP_KEYS = {"shared_presets", "link_rewrites", "wps"}
+_LINK_REWRITE_KEYS = {"from", "to"}
 _WP_KEYS = {
     "id",
     "label",
@@ -143,7 +157,19 @@ def parse_instance_config(data: dict[str, Any], source: str = "") -> InstanceCon
     _check_unique([wp.id for wp in wps], "WP id")
     _check_unique([wp.collection_prefix for wp in wps if wp.collection_prefix], "collection_prefix")
     _check_unique([prompt.id for wp in wps for prompt in wp.builtin_prompts], "prompt id")
-    return InstanceConfig(wps=wps, shared_presets=shared_presets, source=source)
+    link_rewrites = [
+        _parse_link_rewrite(item, f"link_rewrites[{i}]")
+        for i, item in enumerate(_table_list(data, "link_rewrites", "top level"))
+    ]
+    _check_unique([rewrite.from_prefix for rewrite in link_rewrites], "link_rewrites from")
+    return InstanceConfig(wps=wps, shared_presets=shared_presets, link_rewrites=link_rewrites, source=source)
+
+
+def _parse_link_rewrite(raw: Any, where: str) -> LinkRewrite:
+    if not isinstance(raw, dict):
+        raise InstanceConfigError(f"{where} must be a table.")
+    _check_keys(raw, _LINK_REWRITE_KEYS, where)
+    return LinkRewrite(from_prefix=_required_str(raw, "from", where), to_prefix=_required_str(raw, "to", where))
 
 
 def _parse_wp(raw: Any, index: int) -> WPConfig:
@@ -352,6 +378,12 @@ def resolve_wp_id(wp_id: str | None) -> str:
 
     candidate = (wp_id or "").strip()
     return candidate if is_valid_wp_id(candidate) else default_wp_id()
+
+
+def link_rewrites() -> list[LinkRewrite]:
+    """The active instance's link rewrites; none when no instance is loaded."""
+
+    return list(_instance.link_rewrites) if _instance is not None else []
 
 
 def shared_presets_enabled() -> bool:

@@ -15,6 +15,7 @@ from app.rag.answer_cleanup import strip_model_source_list
 from app.rag.catalog import save_chunk_catalog
 from app.rag.chunking import chunk_documents
 from app.rag.documents import load_documents
+from app.rag.links import rewrite_chunk_links
 from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
 from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
@@ -343,6 +344,10 @@ class RAGPipeline:
             )
         else:
             raise RuntimeError(f"Unknown retrieval backend: {resolved_backend}")
+
+        # Point source links at their public form before anything shows or
+        # stores them (sources, history, the answer cache).
+        rewrite_chunk_links(chunks)
 
         # Snapshot the pre-rerank top_k before apply_rerank mutates the records
         # in place (it rewrites score/citation_id during blending).

@@ -17,6 +17,15 @@
 # profiles stay available. Default: true.
 shared_presets = true
 
+# Optional: rewrite source links before they are shown, for example when the
+# document URLs need a login and a public read-only link to the same folder
+# exists. A link starting with "from" gets "to" instead; the rest of its path
+# is re-encoded (so it also works as a query value) and "#page=N" is kept.
+# The first matching rule wins. Links already saved in history are unchanged.
+# [[link_rewrites]]
+# from = "https://storage.example.org/lib/<library-id>/file/<folder>/"
+# to = "https://storage.example.org/d/<share-token>/files/?p=/"
+
 [[wps]]
 # Stable id. Saved presets, history and the answer cache refer to it, so
 # renaming it detaches them. The first WP is the default.
