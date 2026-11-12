@@ -18,7 +18,13 @@ from app.rag.documents import load_documents
 from app.rag.links import rewrite_chunk_links
 from app.rag.embeddings import SentenceTransformerEmbeddings
 from app.rag.llm import OpenAICompatibleLLM
-from app.rag.llm_providers import available_llm_providers, provider_api_key, provider_preset, resolve_llm_provider
+from app.rag.llm_providers import (
+    available_llm_providers,
+    provider_api_key,
+    provider_concurrency_limits,
+    provider_preset,
+    resolve_llm_provider,
+)
 from app.rag.msearch import MSearchRetriever
 from app.rag.reranker import CrossEncoderReranker, RerankEtaEstimator
 from app.rag.retrieval import HybridRetriever
@@ -141,6 +147,7 @@ class RAGPipeline:
                 model=str(provider_config.get("default_model") or ""),
                 base_url=str(provider_config.get("base_url") or ""),
                 timeout=self.settings.llm_timeout_seconds,
+                concurrency_limits=provider_concurrency_limits(),
             )
         return self._llm
 

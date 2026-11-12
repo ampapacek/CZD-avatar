@@ -22,7 +22,7 @@ from app.rag.model_metadata import (
 logger = logging.getLogger(__name__)
 
 _PROVIDER_ENV_PATTERN = re.compile(
-    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|MODEL_INFO_URL|DISCOVER_MODELS|DISCOVER_CATALOG|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS)$"
+    r"^LLM_PROVIDER_([A-Z0-9_]+)_(NAME|BASE_URL|API_KEY|DEFAULT_MODEL|PUBLIC_MODELS|MODELS|MODELS_URL|MODEL_INFO_URL|DISCOVER_MODELS|DISCOVER_CATALOG|SUPPORTS_STREAMING|API_KEY_LABEL|MODELS_CACHE_TTL_SECONDS|MAX_CONCURRENCY)$"
 )
 _EXCLUDED_MODEL_PATTERNS = (
     "rag-*",
@@ -752,6 +752,28 @@ def load_provider_configs(
         )
 
     return providers
+
+
+def provider_concurrency_limits(env: dict[str, str] | None = None) -> dict[str, int]:
+    """``MAX_CONCURRENCY`` per provider base URL, for providers that set one.
+
+    Read straight from the environment, without model discovery: the limit is
+    about the endpoint, not its models. Unset, zero or invalid means no cap.
+    """
+
+    resolved_env = env or load_env_values()
+    limits: dict[str, int] = {}
+    for provider_id in _discover_provider_ids(resolved_env):
+        base_url = _env_value(resolved_env, provider_id, "BASE_URL").rstrip("/")
+        raw = _env_value(resolved_env, provider_id, "MAX_CONCURRENCY")
+        try:
+            limit = int(raw) if raw else 0
+        except ValueError:
+            logger.warning("Ignoring invalid %s=%r", _env_key(provider_id, "MAX_CONCURRENCY"), raw)
+            continue
+        if base_url and limit > 0:
+            limits[base_url] = limit
+    return limits
 
 
 def available_llm_providers(

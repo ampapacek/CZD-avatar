@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import socket
+import threading
 import time
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
@@ -14,6 +16,48 @@ from urllib.parse import urlparse
 import httpx
 
 from app.analytics import bind_context, current_context, emit, endpoint_host, error_code, estimated_tokens, ms
+
+
+logger = logging.getLogger(__name__)
+
+BUSY_MESSAGE = "Jazykový model je právě vytížený."
+RETRY_LATER = "Zkuste to prosím za chvíli znovu."
+
+
+class LLMBusyError(RuntimeError):
+    """No free request slot for a provider with a concurrency cap."""
+
+
+class _ConcurrencyLimiter:
+    """Caps requests in flight per (base URL, API key) within this process.
+
+    Some providers (e-infra's LiteLLM gateway) refuse a request beyond N open
+    ones per key with an immediate 429 instead of queueing it. Waiting here for
+    a slot turns that into a short delay. The count is per key because that is
+    how such a gateway counts, so a user's own key gets its own slots.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._slots: dict[tuple[str, str, int], threading.BoundedSemaphore] = {}
+
+    @contextmanager
+    def slot(self, base_url: str, api_key: str | None, limit: int | None, wait: float) -> Iterator[None]:
+        if not limit:
+            yield
+            return
+        key = (base_url, api_key or "", limit)
+        with self._lock:
+            semaphore = self._slots.setdefault(key, threading.BoundedSemaphore(limit))
+        if not semaphore.acquire(timeout=wait):
+            raise LLMBusyError(f"{BUSY_MESSAGE} {RETRY_LATER}")
+        try:
+            yield
+        finally:
+            semaphore.release()
+
+
+_limiter = _ConcurrencyLimiter()
 
 
 @dataclass(slots=True)
@@ -116,11 +160,20 @@ def llm_timeout(seconds: float) -> Iterator[None]:
 class OpenAICompatibleLLM(LLMClient):
     """OpenAI-compatible chat completions client."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        timeout: float = 120.0,
+        concurrency_limits: dict[str, int] | None = None,
+    ) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # Base URL -> max requests in flight per API key (`MAX_CONCURRENCY`).
+        self.concurrency_limits = {url.rstrip("/"): n for url, n in (concurrency_limits or {}).items()}
 
     def _timeout(self) -> float:
         return _timeout_override.get() or self.timeout
@@ -160,12 +213,15 @@ class OpenAICompatibleLLM(LLMClient):
         started = time.perf_counter()
         response = None
         try:
-            response = httpx.post(
-                f"{resolved_base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self._timeout(),
-            )
+            limit = self.concurrency_limits.get(resolved_base_url)
+            # Waiting for a slot gets the same budget as the request itself.
+            with _limiter.slot(resolved_base_url, resolved_api_key, limit, self._timeout()):
+                response = httpx.post(
+                    f"{resolved_base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=self._timeout(),
+                )
             response.raise_for_status()
             data = response.json()
             message = data["choices"][0]["message"]
@@ -207,6 +263,7 @@ class OpenAICompatibleLLM(LLMClient):
             timeout=self._timeout(),
             analytics_context=current_context(),
             reasoning=reasoning,
+            concurrency_limit=self.concurrency_limits.get(resolved_base_url),
         )
 
 
@@ -284,8 +341,10 @@ class _OpenAICompatibleStream:
         timeout: float,
         analytics_context=None,
         reasoning: dict[str, object] | None = None,
+        concurrency_limit: int | None = None,
     ) -> None:
         self.api_key = api_key
+        self.concurrency_limit = concurrency_limit
         self.model = model
         self.base_url = base_url
         self.messages = messages
@@ -319,7 +378,10 @@ class _OpenAICompatibleStream:
             headers["Authorization"] = f"Bearer {self.api_key}"
         response = None
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            # The slot is held for the whole stream: the provider counts the
+            # request as open until its last token.
+            with _limiter.slot(self.base_url, self.api_key, self.concurrency_limit, self.timeout), \
+                    httpx.Client(timeout=self.timeout) as client:
                 with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",

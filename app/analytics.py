@@ -180,6 +180,8 @@ def error_code(exc: BaseException, http_status: int | None = None) -> str:
         return "token_budget"
     if "context length" in message or "context_window" in message:
         return "context_length"
+    if name == "llmbusyerror":
+        return "llm_busy"
     if status == 429 or "rate limit" in message:
         return "upstream_rate_limit"
     if "timeout" in name or "timed out" in message:

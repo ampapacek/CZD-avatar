@@ -82,6 +82,7 @@ Important `.env` variables:
 - `LLM_PROVIDER_<ID>_DISCOVER_MODELS`
 - `LLM_PROVIDER_<ID>_SUPPORTS_STREAMING`
 - `LLM_PROVIDER_<ID>_API_KEY_LABEL`
+- `LLM_PROVIDER_<ID>_MAX_CONCURRENCY` (optional cap on requests in flight per API key; a request over it waits for a free slot up to the LLM timeout instead of being sent and refused with a 429. Counted per uvicorn worker process)
 - `MODEL_METADATA_PATH` (context windows and reasoning support per model; see `data/models.json`)
 - `QDRANT_URL` for a remote/server Qdrant; leave empty for local disk mode
 - `QDRANT_PATH`
