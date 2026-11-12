@@ -571,7 +571,10 @@ def _format_http_error(response: httpx.Response, message: str) -> str:
     retry_after = response.headers.get("retry-after")
     details = f"LLM request failed ({response.status_code}): {message}"
     if response.status_code == 429:
-        if retry_after:
-            return f"{details}. Retry after {retry_after} seconds."
-        return f"{details}. The upstream model is rate-limiting requests."
+        # The provider's own text goes to the log, not the user: it is English
+        # gateway detail (limit types, a hash of our API key) nobody can act on.
+        # Retry-After is not passed on either: e-infra sends 18000 s for a
+        # parallel-request limit that frees up in seconds.
+        logger.warning("%s (retry-after: %s)", details, retry_after)
+        return f"{BUSY_MESSAGE} {RETRY_LATER} (HTTP 429)"
     return details

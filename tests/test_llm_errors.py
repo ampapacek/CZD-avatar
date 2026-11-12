@@ -40,14 +40,29 @@ class StreamingErrorTests(unittest.TestCase):
         # 5xx reported as httpx's "without having called read()", which is not a
         # thing any provider ever said.
         message = self._stream_failure(
-            429,
-            json.dumps({"error": {"message": "Rate limit exceeded"}}).encode(),
-            {"content-type": "application/json", "retry-after": "13"},
+            400,
+            json.dumps({"error": {"message": "No such model"}}).encode(),
+            {"content-type": "application/json"},
         )
-        self.assertIn("Rate limit exceeded", message)
-        self.assertIn("429", message)
-        self.assertIn("Retry after 13 seconds", message)
+        self.assertIn("No such model", message)
+        self.assertIn("400", message)
         self.assertNotIn("read()", message)
+
+    def test_a_rate_limit_is_told_in_plain_words_and_logged_in_full(self) -> None:
+        # The gateway's own 429 text (limit types, a hash of the key) is no use
+        # to the user; it goes to the log, and the user gets a plain sentence.
+        with self.assertLogs("app.rag.llm", level="WARNING") as logs:
+            message = self._stream_failure(
+                429,
+                json.dumps({"error": {"message": "Rate limit exceeded"}}).encode(),
+                {"content-type": "application/json", "retry-after": "13"},
+            )
+        self.assertIn("vytížený", message)
+        self.assertNotIn("13", message)
+        self.assertIn("429", message)
+        self.assertNotIn("Rate limit exceeded", message)
+        self.assertIn("Rate limit exceeded", "\n".join(logs.output))
+        self.assertNotIn("read()", "\n".join(logs.output))
 
     def test_a_non_json_error_body_is_reported_as_text(self) -> None:
         message = self._stream_failure(
